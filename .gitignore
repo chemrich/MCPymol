@@ -3,3 +3,5 @@ __pycache__/
 .pytest_cache/
 main.py
 .DS_Store
+*.mc
+.claude/
