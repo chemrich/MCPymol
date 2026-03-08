@@ -57,7 +57,7 @@ def fetch_structure(pdb_code: str, obj_name: Optional[str] = None) -> str:
     """
     name = obj_name if obj_name else pdb_code
 
-    send_request("delete", args=["all"])
+    send_request("do", args=["reinitialize"])
     res = send_request("fetch", args=[pdb_code, name])
     if res.get("status") == "error":
         return f"Error fetching {pdb_code}: {res.get('error')}"
@@ -82,7 +82,7 @@ def load_structure(file_path: str, obj_name: str) -> str:
     """
     Loads a structure from a local file path and applies the multimer heuristic.
     """
-    send_request("delete", args=["all"])
+    send_request("do", args=["reinitialize"])
     res = send_request("load", args=[file_path, obj_name])
     if res.get("status") == "error":
         return f"Error loading {file_path}: {res.get('error')}"
