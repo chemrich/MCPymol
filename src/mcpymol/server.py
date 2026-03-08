@@ -218,8 +218,8 @@ def ligand_view(obj_name: str, ligand_resn: str) -> str:
     send_request("set", args=["dash_gap", "0.3", "hbonds"])
     send_request("set", args=["dash_width", "3", "hbonds"])
 
-    # Label pocket residues at CA
-    send_request("do", args=[f'label {pocket_sel} and name CA, "%s%s" % (resn, resi)'])
+    # Label pocket residues at CA (one label per residue)
+    send_request("do", args=[f'label ({pocket_sel}) and name CA, "%s%s" % (resn, resi)'])
     send_request("set", args=["label_color", "white"])
     send_request("set", args=["label_size", "14"])
 
