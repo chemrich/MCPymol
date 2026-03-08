@@ -287,13 +287,19 @@ def interface_view(obj_name: str, chain_a: str, chain_b: str) -> str:
     send_request("set", args=["transparency", "0.1", iface_a])
     send_request("set", args=["transparency", "0.1", iface_b])
 
-    # Interface residues as sticks
-    send_request("show", args=["sticks", iface_a])
-    send_request("show", args=["sticks", iface_b])
+    # Interface residues as sticks — sidechain + CA only (no backbone N, C, O)
+    iface_sticks = f"({iface_a} or {iface_b}) and not name N+C+O"
+    send_request("show", args=["sticks", iface_sticks])
     send_request("do", args=[f"util.cbaw {iface_a}"])
     send_request("do", args=[f"util.cbaw {iface_b}"])
     send_request("color", args=["tv_blue", f"({iface_a}) and elem C"])
     send_request("color", args=["tv_red", f"({iface_b}) and elem C"])
+
+    # Labels at CA — one per interface residue
+    iface_ca = f"({iface_a} or {iface_b}) and name CA"
+    send_request("label", args=[iface_ca, '"%s%s" % (resn, resi)'])
+    send_request("set", args=["label_color", "white"])
+    send_request("set", args=["label_size", "14"])
 
     # H-bonds across the interface
     send_request("do", args=["delete iface_hbonds"])
@@ -334,6 +340,7 @@ def putty_view(obj_name: str) -> str:
 
     The cartoon tube radius scales linearly with crystallographic B-factor:
     thin/blue = rigid/ordered regions, thick/red = flexible/disordered regions.
+    A 70%-transparent surface is shown, also colored by B-factor.
     Organic ligands are shown as sticks with yellow carbons. Black background.
 
     Args:
@@ -346,6 +353,11 @@ def putty_view(obj_name: str) -> str:
     send_request("set", args=["cartoon_putty_scale_min", "0.3", obj_name])
     send_request("set", args=["cartoon_putty_scale_max", "3.0", obj_name])
     send_request("set", args=["cartoon_putty_transform", "0", obj_name])
+
+    # Transparent surface colored by B-factor
+    send_request("show", args=["surface", f"({obj_name}) and polymer.protein"])
+    send_request("spectrum", args=["b", "blue_white_red", f"({obj_name}) and polymer.protein"])
+    send_request("set", args=["transparency", "0.7", obj_name])
 
     # Organic ligands as sticks with yellow carbons
     send_request("show", args=["sticks", f"({obj_name}) and organic"])
@@ -425,7 +437,8 @@ def electrostatic_view(obj_name: str) -> str:
     send_request("do", args=[f"alter ({obj_name}) and resn HIS, b=0.3"])
     send_request("do", args=[f"alter ({obj_name}) and resn ASP, b=-0.9"])
     send_request("do", args=[f"alter ({obj_name}) and resn GLU, b=-0.8"])
-    send_request("spectrum", args=["b", "red_white_blue", f"({obj_name}) and polymer.protein", "minimum=-1", "maximum=1"])
+    send_request("rebuild")
+    send_request("do", args=[f"spectrum b, red_white_blue, ({obj_name}) and polymer.protein, minimum=-1, maximum=1"])
 
     # White cartoon visible beneath surface
     send_request("set", args=["cartoon_color", "white", obj_name])
