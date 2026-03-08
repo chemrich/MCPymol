@@ -714,10 +714,12 @@ def pharmacophore_view(obj_name: str, resn: str) -> str:
     send_request("color", args=["grey50", pocket_sel])
     send_request("set", args=["transparency", "0.6", obj_name])
 
-    # Pocket sidechain sticks (element coloring)
+    # Pocket sidechain sticks (element coloring, grey surface kept separate)
     send_request("show", args=["sticks", f"({pocket_sel}) and not name N+C+O"])
     send_request("do", args=[f"util.cbaw ({pocket_sel})"])
     send_request("set", args=["stick_radius", "0.15", pocket_sel])
+    # Override surface color to grey after util.cbaw recolored atoms by element
+    send_request("set", args=["surface_color", "grey50", pocket_sel])
 
     # Labels at CA
     send_request("label", args=[f"({pocket_sel}) and name CA", '"%s%s" % (resn, resi)'])

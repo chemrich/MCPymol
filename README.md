@@ -171,7 +171,16 @@ Show the electrostatic surface of 1LYZ
 ### `poisson_boltzmann_view` — True Electrostatic Potential
 **Demo:** Hen egg-white lysozyme (1LYZ)
 
-Computes a full Poisson-Boltzmann electrostatic potential using APBS and PDB2PQR, mapped onto the molecular surface at ±20 kT/e. Requires `apbs` and `pdb2pqr` to be installed.
+Computes a full Poisson-Boltzmann electrostatic potential using [APBS](https://github.com/Electrostatics/apbs) and [PDB2PQR](https://github.com/Electrostatics/pdb2pqr), mapped onto the molecular surface at ±20 kT/e. Produces physically accurate charge distributions accounting for solvent screening and ionic strength.
+
+> **Prerequisites:** both tools must be installed and on your `PATH` before using this view.
+> ```bash
+> # APBS (macOS via Homebrew)
+> brew install brewsci/bio/apbs
+>
+> # PDB2PQR (via pip)
+> pip install pdb2pqr
+> ```
 
 ```
 Run a Poisson-Boltzmann electrostatics calculation on 1LYZ
