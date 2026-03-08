@@ -8,6 +8,8 @@
 
 This code was developed from scratch using a combination of Antigravity, Gemini Pro 3.1 (until I ran out of credits) and then Claude Code (Sonnet 4.6 thinking). Claude gave itself credit. Gemini did not. Read into that what you will. All the development was done on macos, with testing using the open source pymol available through homebrew. Hoping to test it with Gemini CLI soon. No plans to test on other models.
 
+**the name** My best friend in high school once shared an apartment with MC Chris, who voiced MC Pee Pants in Aqua Teen Hunger force. I'm not saying that this was the inspiration for the name of this project, but I'm also not denying it.
+
 ## 🧬 What it Does
 
 MCPymol acts as a bridge between an AI assistant and a running PyMOL desktop instance. It provides:
