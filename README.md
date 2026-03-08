@@ -4,6 +4,10 @@
 
 **MCPymol** is a Model Context Protocol (MCP) server that provides a conversational interface for viewing and analyzing protein structures using PyMOL. It exposes PyMOL's powerful molecular visualization capabilities to AI assistants (like Claude), allowing you to seamlessly load structures, manipulate views, and explore proteins using natural language.
 
+**A few words...** Let's face it. Pymol is great, but it's terrible to use. The syntax is extremely obscure, and while it's got python in the name, it's not exacly python. This is for people who just want to look at structures and have fun with proteins in a simple, conversational way. 
+
+This code was developed from scratch using a combination of Antigravity, Gemini Pro 3.1 (until I ran out of credits) and then Claude Code (Sonnet 4.6 thinking). Claude gave itself credit. Gemini did not. Read into that what you will. All the development was done on macos, with testing using the open source pymol available through homebrew. Hoping to test it with Gemini CLI soon. No plans to test on other models.
+
 ## 🧬 What it Does
 
 MCPymol acts as a bridge between an AI assistant and a running PyMOL desktop instance. It provides:
