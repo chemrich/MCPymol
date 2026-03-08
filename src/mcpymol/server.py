@@ -30,6 +30,7 @@ def _apply_ghost_heart(name: str):
             send_request("color", args=[green, f"{name} and chain {chain} and polymer.protein"])
     send_request("set", args=["transparency", "0.6", name])
     send_request("do", args=["bg_color black"])
+    send_request("set", args=["opaque_background", "1"])
 
     # Organic cofactors/ligands: sticks, colored by atom with lightblue carbons
     send_request("show", args=["sticks", f"({name}) and organic"])
@@ -602,6 +603,226 @@ def crosslink_view(obj_name: str) -> str:
     send_request("do", args=["bg_color black"])
     send_request("orient", args=[obj_name])
     return f"Crosslink view applied to {obj_name}. Yellow=disulfide bonds (CYS), orange=metal coordination."
+
+
+@mcp.tool()
+def pocket_view(obj_name: str, resn: str) -> str:
+    """
+    Visualizes the binding pocket cavity around a ligand as a colored surface.
+
+    The pocket (all residues within 5 Å of the ligand) is shown as a
+    semi-transparent surface colored by chemical character: orange=hydrophobic,
+    white=polar, skyblue=positive, salmon=negative. Pocket residue sidechains
+    are shown as sticks. The ligand is shown as yellow sticks. H-bonds between
+    the ligand and pocket are drawn as cyan dashes. The protein backbone is
+    shown as a thin grey cartoon for context.
+
+    Args:
+        obj_name: PyMOL object name (e.g. "1abc")
+        resn: Ligand residue name (e.g. "ATP", "LIG", "ANP")
+    """
+    lig = f"({obj_name}) and resn {resn}"
+    pocket_sel = f"({obj_name}) and polymer.protein and byres ({lig} around 5)"
+
+    # Thin grey cartoon for whole protein
+    send_request("hide", args=["everything", obj_name])
+    send_request("show", args=["cartoon", f"({obj_name}) and polymer.protein"])
+    send_request("do", args=[f"cartoon automatic, {obj_name}"])
+    send_request("color", args=["grey60", f"({obj_name}) and polymer.protein"])
+    send_request("set", args=["cartoon_tube_radius", "0.2", obj_name])
+
+    # Pocket cavity surface colored by chemical character
+    send_request("show", args=["surface", pocket_sel])
+    _hydrophobic = "ALA+VAL+LEU+ILE+MET+PHE+TRP+PRO"
+    _polar       = "GLY+SER+THR+TYR+CYS+ASN+GLN"
+    _positive    = "LYS+ARG+HIS"
+    _negative    = "ASP+GLU"
+    send_request("color", args=["orange", f"({pocket_sel}) and resn {_hydrophobic}"])
+    send_request("color", args=["white",   f"({pocket_sel}) and resn {_polar}"])
+    send_request("color", args=["skyblue", f"({pocket_sel}) and resn {_positive}"])
+    send_request("color", args=["salmon",  f"({pocket_sel}) and resn {_negative}"])
+    send_request("set", args=["transparency", "0.25", obj_name])
+
+    # Pocket residue sidechains as sticks (element coloring)
+    send_request("show", args=["sticks", f"({pocket_sel}) and not name N+C+O"])
+    send_request("do", args=[f"util.cbaw ({pocket_sel})"])
+    # Re-apply surface colors after util.cbaw recolored atoms
+    send_request("color", args=["orange", f"({pocket_sel}) and resn {_hydrophobic}"])
+    send_request("color", args=["white",   f"({pocket_sel}) and resn {_polar}"])
+    send_request("color", args=["skyblue", f"({pocket_sel}) and resn {_positive}"])
+    send_request("color", args=["salmon",  f"({pocket_sel}) and resn {_negative}"])
+
+    # Labels at CA
+    send_request("label", args=[f"({pocket_sel}) and name CA", '"%s%s" % (resn, resi)'])
+    send_request("set", args=["label_color", "white"])
+    send_request("set", args=["label_size", "12"])
+
+    # Ligand as yellow sticks
+    send_request("show", args=["sticks", lig])
+    send_request("do", args=[f"util.cbaw {lig}"])
+    send_request("color", args=["yellow", f"{lig} and elem C"])
+
+    # H-bonds between ligand and pocket
+    send_request("do", args=[f"delete {obj_name}_pocket_hbonds"])
+    send_request("do", args=[
+        f"distance {obj_name}_pocket_hbonds, ({lig}) and (elem N or elem O), "
+        f"({pocket_sel}) and (elem N or elem O), 3.5"
+    ])
+    send_request("color", args=["cyan", f"{obj_name}_pocket_hbonds"])
+    send_request("hide", args=["labels", f"{obj_name}_pocket_hbonds"])
+    send_request("set", args=["dash_width", "2.5", f"{obj_name}_pocket_hbonds"])
+
+    send_request("do", args=["bg_color black"])
+    send_request("zoom", args=[lig, "6"])
+    return (
+        f"Pocket view applied: {resn} binding site in {obj_name}. "
+        f"Orange=hydrophobic, white=polar, skyblue=positive, salmon=negative. "
+        f"Cyan dashes=H-bonds."
+    )
+
+
+@mcp.tool()
+def pharmacophore_view(obj_name: str, resn: str) -> str:
+    """
+    Colors a ligand by pharmacophore feature type.
+
+    The ligand is shown as sticks color-coded by pharmacophore property:
+    violet=ring/aromatic carbon, yellow=aliphatic carbon,
+    skyblue=nitrogen (H-bond donor/acceptor), salmon=oxygen (H-bond acceptor),
+    gold=sulfur, palegreen=halogen (F/Cl/Br/I). H-bonds to protein are shown
+    as cyan dashes. Interacting residue sidechains are shown as element-colored
+    sticks with CA labels. The pocket is shown as a semi-transparent grey
+    surface for cavity context. The protein backbone is shown as a thin grey
+    cartoon.
+
+    Args:
+        obj_name: PyMOL object name (e.g. "1abc")
+        resn: Ligand residue name (e.g. "ATP", "LIG", "ANP")
+    """
+    lig = f"({obj_name}) and resn {resn}"
+    pocket_sel = f"({obj_name}) and polymer.protein and byres ({lig} around 5)"
+
+    # Thin grey cartoon
+    send_request("hide", args=["everything", obj_name])
+    send_request("show", args=["cartoon", f"({obj_name}) and polymer.protein"])
+    send_request("do", args=[f"cartoon automatic, {obj_name}"])
+    send_request("color", args=["grey60", f"({obj_name}) and polymer.protein"])
+    send_request("set", args=["cartoon_tube_radius", "0.2", obj_name])
+
+    # Pocket semi-transparent surface for cavity context
+    send_request("show", args=["surface", pocket_sel])
+    send_request("color", args=["grey50", pocket_sel])
+    send_request("set", args=["transparency", "0.6", obj_name])
+
+    # Pocket sidechain sticks (element coloring)
+    send_request("show", args=["sticks", f"({pocket_sel}) and not name N+C+O"])
+    send_request("do", args=[f"util.cbaw ({pocket_sel})"])
+    send_request("set", args=["stick_radius", "0.15", pocket_sel])
+
+    # Labels at CA
+    send_request("label", args=[f"({pocket_sel}) and name CA", '"%s%s" % (resn, resi)'])
+    send_request("set", args=["label_color", "white"])
+    send_request("set", args=["label_size", "12"])
+
+    # Ligand sticks
+    send_request("show", args=["sticks", lig])
+    send_request("set", args=["stick_radius", "0.2", lig])
+
+    # Color by pharmacophore feature type
+    # inring catches all ring carbons (PyMOL's 'aromatic' misses some due to bond-order perception)
+    send_request("color", args=["violet",    f"{lig} and elem C and inring"])        # ring/aromatic
+    send_request("color", args=["yellow",    f"{lig} and elem C and not inring"])    # aliphatic
+    send_request("color", args=["skyblue",   f"{lig} and elem N"])                   # H-bond donor/acceptor
+    send_request("color", args=["salmon",    f"{lig} and elem O"])                   # H-bond acceptor
+    send_request("color", args=["gold",      f"{lig} and elem S"])                   # sulfur
+    send_request("color", args=["palegreen", f"{lig} and (elem F or elem Cl or elem Br or elem I)"])  # halogen
+
+    # H-bonds to protein
+    send_request("do", args=[f"delete {obj_name}_pharm_hbonds"])
+    send_request("do", args=[
+        f"distance {obj_name}_pharm_hbonds, ({lig}) and (elem N or elem O or elem F), "
+        f"({pocket_sel}) and (elem N or elem O), 3.5"
+    ])
+    send_request("color", args=["cyan", f"{obj_name}_pharm_hbonds"])
+    send_request("hide", args=["labels", f"{obj_name}_pharm_hbonds"])
+    send_request("set", args=["dash_width", "2.5", f"{obj_name}_pharm_hbonds"])
+
+    send_request("do", args=["bg_color black"])
+    send_request("zoom", args=[lig, "6"])
+    return (
+        f"Pharmacophore view applied to {resn} in {obj_name}. "
+        f"Violet=ring/aromatic, yellow=aliphatic, skyblue=N (donor/acceptor), "
+        f"salmon=O (acceptor), gold=S, palegreen=halogen. Cyan dashes=H-bonds."
+    )
+
+
+@mcp.tool()
+def mutation_view(obj_name: str, mutations: str) -> str:
+    """
+    Highlights mutated residues on the protein structure.
+
+    Given a comma-separated list of mutations in standard notation (e.g.
+    "A123G,V45L,T200S"), the mutated residues are shown as magenta sticks
+    and labeled. Nearby residues (within 4 Å) are shown as thin grey sticks
+    for packing context. The protein backbone is shown as a grey cartoon.
+    Organic ligands are shown as yellow sticks.
+
+    Mutation format: <wildtype_aa><resi><mutant_aa>, e.g. "A123G" (Ala→Gly
+    at position 123). Chain can optionally be prefixed: "A:A123G".
+
+    Args:
+        obj_name: PyMOL object name (e.g. "1abc")
+        mutations: Comma-separated mutation list (e.g. "A123G,V45L,T200S")
+    """
+    import re
+
+    mut_list = [m.strip() for m in mutations.split(",")]
+    resi_list = []
+    parsed = []
+    for m in mut_list:
+        match = re.search(r'(\d+)', m)
+        if match:
+            resi_list.append(match.group(1))
+            parsed.append(m)
+
+    if not resi_list:
+        return f"No valid mutations parsed from: {mutations}. Expected format: A123G,V45L"
+
+    resi_sel = "+".join(resi_list)
+    mut_residues = f"({obj_name}) and polymer.protein and resi {resi_sel}"
+
+    # Grey cartoon for whole protein
+    send_request("hide", args=["everything", obj_name])
+    send_request("show", args=["cartoon", f"({obj_name}) and polymer.protein"])
+    send_request("do", args=[f"cartoon automatic, {obj_name}"])
+    send_request("color", args=["grey70", f"({obj_name}) and polymer.protein"])
+
+    # Mutated residues: magenta sticks (sidechain only)
+    send_request("show", args=["sticks", f"({mut_residues}) and not name N+C+O"])
+    send_request("color", args=["magenta", mut_residues])
+
+    # Labels at CA
+    send_request("label", args=[f"({mut_residues}) and name CA", '"%s%s" % (resn, resi)'])
+    send_request("set", args=["label_color", "white"])
+    send_request("set", args=["label_size", "14"])
+
+    # Context: nearby residues as thin element-colored sticks
+    context_sel = (
+        f"({obj_name}) and polymer.protein and byres ({mut_residues} around 4) "
+        f"and not resi {resi_sel}"
+    )
+    send_request("show", args=["sticks", f"({context_sel}) and not name N+C+O"])
+    send_request("do", args=[f"util.cbaw ({context_sel})"])
+    send_request("set", args=["stick_radius", "0.1", context_sel])
+
+    # Organic ligands as yellow sticks
+    send_request("show", args=["sticks", f"({obj_name}) and organic"])
+    send_request("do", args=[f"util.cbaw ({obj_name}) and organic"])
+    send_request("color", args=["yellow", f"({obj_name}) and organic and elem C"])
+
+    send_request("do", args=["bg_color black"])
+    send_request("zoom", args=[mut_residues, "8"])
+    return f"Mutation view applied to {obj_name}. Magenta = {', '.join(parsed)}."
 
 
 @mcp.tool()

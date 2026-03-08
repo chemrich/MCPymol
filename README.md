@@ -96,3 +96,137 @@ To run the automated tests:
 ```bash
 PYTHONPATH=src uv run pytest tests/
 ```
+
+## 🎨 Visualization Views
+
+MCPymol includes a set of high-level visualization tools that go beyond raw PyMOL commands. Each view is designed for a specific analytical task and can be invoked with a single natural language request.
+
+---
+
+### `ligand_view` — Binding Site
+**Demo:** cAMP-dependent protein kinase (1ATP) with ATP
+
+Shows the binding pocket around a ligand: pocket residues as element-colored sticks with labeled CA atoms, ligand as yellow sticks, H-bonds as yellow dashes, and the protein as a semi-transparent cartoon.
+
+```
+Show me the ATP binding site in 1ATP
+```
+
+![Ligand view of ATP in cAMP-dependent kinase (1ATP)](assets/ligand_view.png)
+
+---
+
+### `interface_view` — Protein–Protein Interface
+**Demo:** Barnase–barstar complex (1BRS), chains A and D
+
+Colors chain A marine blue and chain B salmon. Interface residues (within 4Å of the partner) are shown as solid surface patches with sidechain sticks and CA labels. Cross-chain H-bonds drawn as yellow dashes.
+
+```
+Show the interface between chain A and chain D in 1BRS
+```
+
+![Interface view of barnase–barstar complex (1BRS)](assets/interface_view.png)
+
+---
+
+### `putty_view` — B-Factor Flexibility
+**Demo:** Ubiquitin (1UBQ)
+
+Tube radius and color scale with B-factor: blue = rigid/ordered, red = flexible/disordered. A 70%-transparent surface provides shape context.
+
+```
+Show the B-factor flexibility of 1UBQ as a putty view
+```
+
+![Putty view of ubiquitin (1UBQ)](assets/putty_view.png)
+
+---
+
+### `hydrophobic_surface_view` — Surface Chemistry
+**Demo:** *Candida antarctica* Lipase B (CalB, 1TCA)
+
+Colors the molecular surface by amino acid chemical character: orange = hydrophobic, white = polar, skyblue = positive, salmon = negative. Useful for identifying hydrophobic patches, membrane-interacting belts, and charge complementarity. CalB is widely used by synthetic chemists for enantioselective transesterifications.
+
+```
+Show the hydrophobic surface of 1TCA
+```
+
+![Hydrophobic surface view of Candida antarctica Lipase B, CalB (1TCA)](assets/hydrophobic_surface_view.png)
+
+---
+
+### `electrostatic_view` — Approximate Electrostatics
+**Demo:** Hen egg-white lysozyme (1LYZ)
+
+Colors the molecular surface by residue-level electrostatic character using pKa-weighted partial charges: red = negative, white = neutral, blue = positive. Fast approximation — no external tools required.
+
+```
+Show the electrostatic surface of 1LYZ
+```
+
+![Electrostatic view of lysozyme (1LYZ)](assets/electrostatic_view.png)
+
+---
+
+### `poisson_boltzmann_view` — True Electrostatic Potential
+**Demo:** Hen egg-white lysozyme (1LYZ)
+
+Computes a full Poisson-Boltzmann electrostatic potential using APBS and PDB2PQR, mapped onto the molecular surface at ±20 kT/e. Requires `apbs` and `pdb2pqr` to be installed.
+
+```
+Run a Poisson-Boltzmann electrostatics calculation on 1LYZ
+```
+
+![Poisson-Boltzmann electrostatic surface of lysozyme (1LYZ)](assets/poisson_boltzmann_view.png)
+
+---
+
+### `crosslink_view` — Disulfide Bonds & Metal Coordination
+**Demo:** Cellulase (1CEL)
+
+Highlights structural crosslinks: CYS sidechains and disulfide bonds in yellow, metal coordination bonds in orange. The rest of the protein is shown as a thin grey cartoon.
+
+```
+Show the disulfide bonds in 1CEL
+```
+
+![Crosslink view of cellulase (1CEL)](assets/crosslink_view.png)
+
+---
+
+### `pocket_view` — Binding Pocket Surface
+**Demo:** HIV-1 protease with inhibitor MK1 (1HSG)
+
+Shows the binding cavity as a surface colored by chemical character: orange = hydrophobic, white = polar, skyblue = positive, salmon = negative. Pocket sidechain sticks are shown with CA labels. Ligand rendered as yellow sticks. H-bonds between ligand and pocket drawn as cyan dashes.
+
+```
+Show the binding pocket around MK1 in 1HSG
+```
+
+![Pocket view of MK1 binding site in HIV-1 protease (1HSG)](assets/pocket_view.png)
+
+---
+
+### `pharmacophore_view` — Ligand Pharmacophore Features
+**Demo:** HIV-1 protease with inhibitor MK1 (1HSG)
+
+Colors the ligand by pharmacophore feature type: violet = ring/aromatic carbon, yellow = aliphatic carbon, skyblue = nitrogen (H-bond donor/acceptor), salmon = oxygen (H-bond acceptor), gold = sulfur, palegreen = halogen. Interacting residue sidechains shown as element-colored sticks with CA labels. H-bonds to protein shown as cyan dashes.
+
+```
+Show the pharmacophore features of MK1 in 1HSG
+```
+
+![Pharmacophore view of MK1 in HIV-1 protease (1HSG)](assets/pharmacophore_view.png)
+
+---
+
+### `mutation_view` — Mutation Hotspots
+**Demo:** Human hemoglobin (4HHB) with sickle cell and related mutations E6V, K16E, V67F
+
+Renders the protein as a grey cartoon. Mutated residue sidechains are shown as magenta sticks with white CA labels. Nearby residues (within 4Å) are shown as thin element-colored sticks for packing context. Accepts standard mutation notation (e.g. `A123G`).
+
+```
+Highlight mutations E6V, K16E, and V67F in hemoglobin (4HHB)
+```
+
+![Mutation view of hemoglobin (4HHB) showing E6V, K16E, V67F](assets/mutation_view.png)
