@@ -410,33 +410,49 @@ def hydrophobic_surface_view(obj_name: str) -> str:
 
 
 @mcp.tool()
-def electrostatic_view(obj_name: str) -> str:
+def electrostatic_view(obj_name: str, mode: str = "atomic") -> str:
     """
     Colors the molecular surface by approximate residue-based electrostatics.
 
-    Charges are assigned by residue pKa: ARG (+1.0), LYS (+0.9), HIS (+0.3),
-    ASP (-0.9), GLU (-0.8), all others (0.0). Surface is colored red→white→blue
-    via a B-factor spectrum. A white cartoon is shown beneath a semi-transparent
-    surface. Organic ligands shown as sticks with yellow carbons.
+    Surface is colored red→white→blue via a B-factor spectrum. A white cartoon
+    is shown beneath a semi-transparent surface. Organic ligands shown as sticks
+    with yellow carbons.
 
     For a more accurate Poisson-Boltzmann electrostatic surface, use
     poisson_boltzmann_view (requires APBS and PDB2PQR to be installed).
 
     Args:
         obj_name: PyMOL object name (e.g. "1abc")
+        mode: Charge assignment strategy.
+            "atomic" (default) — charges assigned only to terminal charged atoms
+            (e.g. ARG NH1/NH2/NE, LYS NZ, ASP OD1/OD2, GLU OE1/OE2, HIS ND1/NE2).
+            Produces localized color at charge centers with natural falloff to white.
+            "residue" — charges assigned uniformly to all atoms in each charged residue.
+            Produces saturated patches; useful for quickly locating charged regions.
     """
     send_request("hide", args=["everything", obj_name])
     send_request("show", args=["cartoon", f"({obj_name}) and polymer.protein"])
     send_request("show", args=["surface", f"({obj_name}) and polymer.protein"])
     send_request("do", args=[f"cartoon automatic, {obj_name}"])
 
-    # Assign charge values to B-factor by residue pKa
+    # Zero out all B-factors first
     send_request("do", args=[f"alter ({obj_name}) and polymer.protein, b=0.0"])
-    send_request("do", args=[f"alter ({obj_name}) and resn ARG, b=1.0"])
-    send_request("do", args=[f"alter ({obj_name}) and resn LYS, b=0.9"])
-    send_request("do", args=[f"alter ({obj_name}) and resn HIS, b=0.3"])
-    send_request("do", args=[f"alter ({obj_name}) and resn ASP, b=-0.9"])
-    send_request("do", args=[f"alter ({obj_name}) and resn GLU, b=-0.8"])
+
+    if mode == "atomic":
+        # Assign charges only to the terminal charged atoms (actual charge centers)
+        send_request("do", args=[f"alter ({obj_name}) and resn ARG and name NH1+NH2+NE, b=1.0"])
+        send_request("do", args=[f"alter ({obj_name}) and resn LYS and name NZ, b=1.0"])
+        send_request("do", args=[f"alter ({obj_name}) and resn HIS and name ND1+NE2, b=0.3"])
+        send_request("do", args=[f"alter ({obj_name}) and resn ASP and name OD1+OD2, b=-1.0"])
+        send_request("do", args=[f"alter ({obj_name}) and resn GLU and name OE1+OE2, b=-1.0"])
+    else:
+        # Assign charges uniformly to all atoms in each charged residue
+        send_request("do", args=[f"alter ({obj_name}) and resn ARG, b=1.0"])
+        send_request("do", args=[f"alter ({obj_name}) and resn LYS, b=0.9"])
+        send_request("do", args=[f"alter ({obj_name}) and resn HIS, b=0.3"])
+        send_request("do", args=[f"alter ({obj_name}) and resn ASP, b=-0.9"])
+        send_request("do", args=[f"alter ({obj_name}) and resn GLU, b=-0.8"])
+
     send_request("rebuild")
     send_request("do", args=[f"spectrum b, red_white_blue, ({obj_name}) and polymer.protein, minimum=-1, maximum=1"])
 
@@ -451,7 +467,7 @@ def electrostatic_view(obj_name: str) -> str:
 
     send_request("do", args=["bg_color black"])
     send_request("orient", args=[obj_name])
-    return f"Electrostatic view applied to {obj_name}. Red=negative, white=neutral, blue=positive (pKa-based approximation)."
+    return f"Electrostatic view applied to {obj_name} (mode={mode}). Red=negative, white=neutral, blue=positive (pKa-based approximation)."
 
 
 @mcp.tool()
