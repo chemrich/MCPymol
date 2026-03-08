@@ -219,7 +219,7 @@ def ligand_view(obj_name: str, ligand_resn: str) -> str:
     send_request("set", args=["dash_width", "3", "hbonds"])
 
     # Label pocket residues at CA (one label per residue)
-    send_request("do", args=[f'label ({pocket_sel}) and name CA, "%s%s" % (resn, resi)'])
+    send_request("label", args=[f"({pocket_sel}) and name CA", '"%s%s" % (resn, resi)'])
     send_request("set", args=["label_color", "white"])
     send_request("set", args=["label_size", "14"])
 
@@ -325,6 +325,254 @@ def as_tool(representation: str, selection: Optional[str] = "all") -> str:
     res = send_request("as", args=call_args)
     if res.get("status") == "error": return res.get("error")
     return f"Executed as successfully."
+
+
+@mcp.tool()
+def putty_view(obj_name: str) -> str:
+    """
+    Visualizes protein flexibility using a putty (tube-width) representation.
+
+    The cartoon tube radius scales linearly with crystallographic B-factor:
+    thin/blue = rigid/ordered regions, thick/red = flexible/disordered regions.
+    Organic ligands are shown as sticks with yellow carbons. Black background.
+
+    Args:
+        obj_name: PyMOL object name (e.g. "1abc")
+    """
+    send_request("hide", args=["everything", obj_name])
+    send_request("show", args=["cartoon", f"({obj_name}) and polymer.protein"])
+    send_request("do", args=[f"cartoon putty, {obj_name}"])
+    send_request("spectrum", args=["b", "blue_white_red", f"({obj_name}) and polymer.protein"])
+    send_request("set", args=["cartoon_putty_scale_min", "0.3", obj_name])
+    send_request("set", args=["cartoon_putty_scale_max", "3.0", obj_name])
+    send_request("set", args=["cartoon_putty_transform", "0", obj_name])
+
+    # Organic ligands as sticks with yellow carbons
+    send_request("show", args=["sticks", f"({obj_name}) and organic"])
+    send_request("do", args=[f"util.cbaw ({obj_name}) and organic"])
+    send_request("color", args=["yellow", f"({obj_name}) and organic and elem C"])
+
+    send_request("do", args=["bg_color black"])
+    send_request("orient", args=[obj_name])
+    return f"Putty view applied to {obj_name}. Tube width and color scale with B-factor (blue=rigid, red=flexible)."
+
+
+@mcp.tool()
+def hydrophobic_surface_view(obj_name: str) -> str:
+    """
+    Colors the molecular surface by amino acid hydrophobicity.
+
+    Orange = hydrophobic (ILE, VAL, LEU, PHE, MET, ALA, TRP, PRO),
+    white = polar (SER, THR, CYS, TYR, ASN, GLN, GLY),
+    sky blue = positively charged (ARG, LYS, HIS),
+    salmon = negatively charged (ASP, GLU).
+    A white cartoon is shown beneath a semi-transparent surface.
+    Organic ligands shown as sticks with yellow carbons.
+
+    Args:
+        obj_name: PyMOL object name (e.g. "1abc")
+    """
+    send_request("hide", args=["everything", obj_name])
+    send_request("show", args=["cartoon", f"({obj_name}) and polymer.protein"])
+    send_request("show", args=["surface", f"({obj_name}) and polymer.protein"])
+    send_request("do", args=[f"cartoon automatic, {obj_name}"])
+
+    # Color surface by residue hydrophobicity
+    send_request("color", args=["orange",  f"({obj_name}) and (resn ILE+VAL+LEU+PHE+MET+ALA+TRP+PRO)"])
+    send_request("color", args=["white",   f"({obj_name}) and (resn SER+THR+CYS+TYR+ASN+GLN+GLY)"])
+    send_request("color", args=["skyblue", f"({obj_name}) and (resn ARG+LYS+HIS)"])
+    send_request("color", args=["salmon",  f"({obj_name}) and (resn ASP+GLU)"])
+
+    # White cartoon visible beneath surface
+    send_request("set", args=["cartoon_color", "white", obj_name])
+    send_request("set", args=["transparency", "0.15", obj_name])
+
+    # Organic ligands as sticks with yellow carbons
+    send_request("show", args=["sticks", f"({obj_name}) and organic"])
+    send_request("do", args=[f"util.cbaw ({obj_name}) and organic"])
+    send_request("color", args=["yellow", f"({obj_name}) and organic and elem C"])
+
+    send_request("do", args=["bg_color black"])
+    send_request("orient", args=[obj_name])
+    return f"Hydrophobic surface view applied to {obj_name}. Orange=hydrophobic, white=polar, skyblue=positive, salmon=negative."
+
+
+@mcp.tool()
+def electrostatic_view(obj_name: str) -> str:
+    """
+    Colors the molecular surface by approximate residue-based electrostatics.
+
+    Charges are assigned by residue pKa: ARG (+1.0), LYS (+0.9), HIS (+0.3),
+    ASP (-0.9), GLU (-0.8), all others (0.0). Surface is colored red→white→blue
+    via a B-factor spectrum. A white cartoon is shown beneath a semi-transparent
+    surface. Organic ligands shown as sticks with yellow carbons.
+
+    For a more accurate Poisson-Boltzmann electrostatic surface, use
+    poisson_boltzmann_view (requires APBS and PDB2PQR to be installed).
+
+    Args:
+        obj_name: PyMOL object name (e.g. "1abc")
+    """
+    send_request("hide", args=["everything", obj_name])
+    send_request("show", args=["cartoon", f"({obj_name}) and polymer.protein"])
+    send_request("show", args=["surface", f"({obj_name}) and polymer.protein"])
+    send_request("do", args=[f"cartoon automatic, {obj_name}"])
+
+    # Assign charge values to B-factor by residue pKa
+    send_request("do", args=[f"alter ({obj_name}) and polymer.protein, b=0.0"])
+    send_request("do", args=[f"alter ({obj_name}) and resn ARG, b=1.0"])
+    send_request("do", args=[f"alter ({obj_name}) and resn LYS, b=0.9"])
+    send_request("do", args=[f"alter ({obj_name}) and resn HIS, b=0.3"])
+    send_request("do", args=[f"alter ({obj_name}) and resn ASP, b=-0.9"])
+    send_request("do", args=[f"alter ({obj_name}) and resn GLU, b=-0.8"])
+    send_request("spectrum", args=["b", "red_white_blue", f"({obj_name}) and polymer.protein", "minimum=-1", "maximum=1"])
+
+    # White cartoon visible beneath surface
+    send_request("set", args=["cartoon_color", "white", obj_name])
+    send_request("set", args=["transparency", "0.15", obj_name])
+
+    # Organic ligands as sticks with yellow carbons
+    send_request("show", args=["sticks", f"({obj_name}) and organic"])
+    send_request("do", args=[f"util.cbaw ({obj_name}) and organic"])
+    send_request("color", args=["yellow", f"({obj_name}) and organic and elem C"])
+
+    send_request("do", args=["bg_color black"])
+    send_request("orient", args=[obj_name])
+    return f"Electrostatic view applied to {obj_name}. Red=negative, white=neutral, blue=positive (pKa-based approximation)."
+
+
+@mcp.tool()
+def poisson_boltzmann_view(obj_name: str) -> str:
+    """
+    Colors the molecular surface by true Poisson-Boltzmann electrostatic potential.
+
+    Runs PDB2PQR (AMBER force field, pH 7.0) then APBS to compute the full
+    electrostatic potential map. Surface is colored red→white→blue over the
+    range ±20 kT/e. A white cartoon is shown beneath a semi-transparent surface.
+    Organic ligands shown as sticks with yellow carbons.
+
+    Requires APBS and PDB2PQR to be installed on the system:
+        brew install brewsci/bio/apbs
+        pip install pdb2pqr
+
+    Args:
+        obj_name: PyMOL object name (e.g. "1abc")
+    """
+    import subprocess
+    import tempfile
+    import os
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        pdb_path = os.path.join(tmpdir, f"{obj_name}.pdb")
+        pqr_path = os.path.join(tmpdir, f"{obj_name}.pqr")
+        apbs_in  = os.path.join(tmpdir, f"{obj_name}.in")
+        dx_path  = pqr_path + ".dx"
+
+        # Save protein from PyMOL
+        send_request("do", args=[f"save {pdb_path}, ({obj_name}) and polymer.protein"])
+
+        # PDB2PQR: assign charges/radii
+        result = subprocess.run(
+            ["pdb2pqr", "--ff=AMBER", f"--apbs-input={apbs_in}", "--with-ph=7.0",
+             pdb_path, pqr_path],
+            capture_output=True, text=True
+        )
+        if result.returncode != 0:
+            return f"PDB2PQR failed: {result.stderr[-500:]}"
+
+        # APBS: compute electrostatic potential
+        result = subprocess.run(
+            ["apbs", apbs_in],
+            capture_output=True, text=True, cwd=tmpdir
+        )
+        if result.returncode != 0:
+            return f"APBS failed: {result.stderr[-500:]}"
+
+        if not os.path.exists(dx_path):
+            return f"APBS did not produce a .dx map. Check APBS output."
+
+        # Load map and apply to surface
+        send_request("do", args=[f"load {dx_path}, {obj_name}_esp_map"])
+        send_request("do", args=[f"ramp_new {obj_name}_esp_ramp, {obj_name}_esp_map, [-20, 0, 20], [red, white, blue]"])
+
+        send_request("hide", args=["everything", obj_name])
+        send_request("show", args=["cartoon", f"({obj_name}) and polymer.protein"])
+        send_request("show", args=["surface", f"({obj_name}) and polymer.protein"])
+        send_request("do", args=[f"cartoon automatic, {obj_name}"])
+        send_request("set", args=["cartoon_color", "white", obj_name])
+        send_request("set", args=["surface_color", f"{obj_name}_esp_ramp", obj_name])
+        send_request("set", args=["transparency", "0.15", obj_name])
+
+        # Organic ligands as sticks with yellow carbons
+        send_request("show", args=["sticks", f"({obj_name}) and organic"])
+        send_request("do", args=[f"util.cbaw ({obj_name}) and organic"])
+        send_request("color", args=["yellow", f"({obj_name}) and organic and elem C"])
+
+        send_request("do", args=["bg_color black"])
+        send_request("orient", args=[obj_name])
+
+    return f"Poisson-Boltzmann electrostatic surface applied to {obj_name}. Red=negative, white=neutral, blue=positive (±20 kT/e)."
+
+
+@mcp.tool()
+def crosslink_view(obj_name: str) -> str:
+    """
+    Highlights structural cross-links: disulfide bonds, metals, and their coordination.
+
+    Protein backbone shown as a thin grey cartoon. Cysteine side chains (CA→CB→SG)
+    shown as yellow sticks, labeled by residue. Disulfide bonds drawn as yellow
+    dashes. Metal ions shown as orange spheres. Metal coordination bonds drawn
+    as dashed lines to nearby protein atoms. Black background.
+
+    Args:
+        obj_name: PyMOL object name (e.g. "1abc")
+    """
+    send_request("hide", args=["everything", obj_name])
+    send_request("show", args=["cartoon", f"({obj_name}) and polymer.protein"])
+    send_request("do", args=[f"cartoon automatic, {obj_name}"])
+    send_request("color", args=["grey70", f"({obj_name}) and polymer.protein"])
+    send_request("set", args=["cartoon_tube_radius", "0.2", obj_name])
+
+    # Cysteine side chains: CA→CB→SG as yellow sticks
+    cys_sc = f"({obj_name}) and resn CYS and (name CA+CB+SG)"
+    send_request("show", args=["sticks", cys_sc])
+    send_request("color", args=["yellow", cys_sc])
+
+    # Label each CYS at CA
+    send_request("label", args=[f"({obj_name}) and resn CYS and name CA", '"%s%s" % (resn, resi)'])
+    send_request("set", args=["label_color", "white"])
+    send_request("set", args=["label_size", "14"])
+
+    # Disulfide bonds: SG–SG distances ≤ 2.5 Å
+    send_request("do", args=[f"delete {obj_name}_disulfides"])
+    send_request("do", args=[
+        f"distance {obj_name}_disulfides, ({obj_name}) and resn CYS and name SG, "
+        f"({obj_name}) and resn CYS and name SG, 2.5"
+    ])
+    send_request("color", args=["yellow", f"{obj_name}_disulfides"])
+    send_request("hide", args=["labels", f"{obj_name}_disulfides"])
+    send_request("set", args=["dash_width", "4", f"{obj_name}_disulfides"])
+    send_request("set", args=["dash_gap", "0.1", f"{obj_name}_disulfides"])
+
+    # Metal ions as orange spheres
+    send_request("show", args=["spheres", f"({obj_name}) and metals"])
+    send_request("color", args=["orange", f"({obj_name}) and metals"])
+    send_request("set", args=["sphere_scale", "0.5", f"({obj_name}) and metals"])
+
+    # Metal coordination bonds
+    send_request("do", args=[f"delete {obj_name}_metalcoord"])
+    send_request("do", args=[
+        f"distance {obj_name}_metalcoord, ({obj_name}) and metals, "
+        f"({obj_name}) and polymer.protein and (name N+O+S), 2.8"
+    ])
+    send_request("color", args=["orange", f"{obj_name}_metalcoord"])
+    send_request("hide", args=["labels", f"{obj_name}_metalcoord"])
+    send_request("set", args=["dash_width", "3", f"{obj_name}_metalcoord"])
+    send_request("set", args=["dash_gap", "0.2", f"{obj_name}_metalcoord"])
+
+    send_request("do", args=["bg_color black"])
+    send_request("orient", args=[obj_name])
+    return f"Crosslink view applied to {obj_name}. Yellow=disulfide bonds (CYS), orange=metal coordination."
 
 
 @mcp.tool()
