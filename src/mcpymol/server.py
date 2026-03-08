@@ -175,6 +175,144 @@ def execute_pymol_command(command: str) -> str:
     return f"Executed command: {command}"
 
 
+@mcp.tool()
+def ligand_view(obj_name: str, ligand_resn: str) -> str:
+    """
+    Shows a binding-site view focused on a ligand.
+
+    Protein rendered as a semi-transparent cartoon. Pocket residues (within 5Å
+    of the ligand) shown as sticks with element coloring and lightblue carbons.
+    Ligand shown as thick sticks with yellow carbons. H-bonds drawn as yellow
+    dashes. Pocket residues labeled. View zooms to the ligand.
+
+    Args:
+        obj_name: PyMOL object name (e.g. "1abc")
+        ligand_resn: 3-letter residue name of the ligand (e.g. "ATP", "HEM", "LIG")
+    """
+    lig_sel = f"({obj_name}) and resn {ligand_resn}"
+    pocket_sel = f"byres (({obj_name}) and polymer.protein and ({lig_sel} around 5))"
+
+    send_request("hide", args=["everything", obj_name])
+    send_request("do", args=["delete hbonds"])
+
+    # Protein as semi-transparent cartoon
+    send_request("show", args=["cartoon", f"({obj_name}) and polymer.protein"])
+    send_request("color", args=["lightblue", f"({obj_name}) and polymer.protein"])
+    send_request("set", args=["cartoon_transparency", "0.5", f"({obj_name}) and polymer.protein"])
+
+    # Pocket residues as sticks, element-colored with lightblue carbons
+    send_request("show", args=["sticks", pocket_sel])
+    send_request("do", args=[f"util.cbaw {pocket_sel}"])
+    send_request("color", args=["lightblue", f"({pocket_sel}) and elem C"])
+
+    # Ligand as thick sticks with yellow carbons
+    send_request("show", args=["sticks", lig_sel])
+    send_request("set", args=["stick_radius", "0.25", lig_sel])
+    send_request("do", args=[f"util.cbaw {lig_sel}"])
+    send_request("color", args=["yellow", f"({lig_sel}) and elem C"])
+
+    # H-bonds between ligand and pocket (mode=2: polar contacts by geometry)
+    send_request("do", args=[f"distance hbonds, ({lig_sel}), ({pocket_sel}), 3.5, 2"])
+    send_request("color", args=["yellow", "hbonds"])
+    send_request("hide", args=["labels", "hbonds"])
+    send_request("set", args=["dash_gap", "0.3", "hbonds"])
+    send_request("set", args=["dash_width", "3", "hbonds"])
+
+    # Label pocket residues at CA
+    send_request("do", args=[f'label {pocket_sel} and name CA, "%s%s" % (resn, resi)'])
+    send_request("set", args=["label_color", "white"])
+    send_request("set", args=["label_size", "14"])
+
+    send_request("do", args=["bg_color black"])
+    send_request("zoom", args=[lig_sel, "8"])
+    send_request("do", args=[f"origin {lig_sel}"])
+
+    return f"Showing ligand view for {ligand_resn} in {obj_name}. H-bonds stored as 'hbonds' object."
+
+
+@mcp.tool()
+def bfactor_view(obj_name: str) -> str:
+    """
+    Colors the structure by crystallographic B-factor (temperature factor).
+
+    Blue = rigid/ordered (low B), white = intermediate, red = flexible/disordered
+    (high B). Useful for identifying dynamic loops, disordered termini, and
+    rigid structural cores. Shown as cartoon on black background.
+
+    Args:
+        obj_name: PyMOL object name (e.g. "1abc")
+    """
+    send_request("hide", args=["everything", obj_name])
+    send_request("show", args=["cartoon", obj_name])
+    send_request("do", args=[f"spectrum b, blue_white_red, {obj_name}"])
+    send_request("do", args=["bg_color black"])
+    send_request("center", args=[obj_name])
+    send_request("do", args=[f"origin {obj_name}"])
+
+    return f"Showing B-factor view for {obj_name}: blue=rigid, red=flexible."
+
+
+@mcp.tool()
+def interface_view(obj_name: str, chain_a: str, chain_b: str) -> str:
+    """
+    Highlights the protein-protein binding interface between two chains.
+
+    Chain A shown in marine blue, chain B in salmon. Interface residues (within
+    4Å of the partner chain) shown as a solid surface patch with sticks.
+    H-bonds across the interface drawn as yellow dashes.
+
+    Args:
+        obj_name: PyMOL object name (e.g. "1abc")
+        chain_a: First chain ID (e.g. "A")
+        chain_b: Second chain ID (e.g. "B")
+    """
+    sel_a = f"({obj_name}) and chain {chain_a} and polymer.protein"
+    sel_b = f"({obj_name}) and chain {chain_b} and polymer.protein"
+    iface_a = f"byres ({sel_a} and ({sel_b} around 4))"
+    iface_b = f"byres ({sel_b} and ({sel_a} around 4))"
+
+    send_request("hide", args=["everything", obj_name])
+
+    # Both chains as semi-transparent cartoon
+    send_request("show", args=["cartoon", f"({obj_name}) and polymer.protein"])
+    send_request("color", args=["marine", sel_a])
+    send_request("color", args=["salmon", sel_b])
+    send_request("set", args=["cartoon_transparency", "0.3", f"({obj_name}) and polymer.protein"])
+
+    # Interface surface patches
+    send_request("show", args=["surface", iface_a])
+    send_request("show", args=["surface", iface_b])
+    send_request("color", args=["tv_blue", iface_a])
+    send_request("color", args=["tv_red", iface_b])
+    send_request("set", args=["transparency", "0.1", iface_a])
+    send_request("set", args=["transparency", "0.1", iface_b])
+
+    # Interface residues as sticks
+    send_request("show", args=["sticks", iface_a])
+    send_request("show", args=["sticks", iface_b])
+    send_request("do", args=[f"util.cbaw {iface_a}"])
+    send_request("do", args=[f"util.cbaw {iface_b}"])
+    send_request("color", args=["tv_blue", f"({iface_a}) and elem C"])
+    send_request("color", args=["tv_red", f"({iface_b}) and elem C"])
+
+    # H-bonds across the interface
+    send_request("do", args=["delete iface_hbonds"])
+    send_request("do", args=[f"distance iface_hbonds, ({sel_a}), ({sel_b}), 3.5, 2"])
+    send_request("color", args=["yellow", "iface_hbonds"])
+    send_request("hide", args=["labels", "iface_hbonds"])
+    send_request("set", args=["dash_gap", "0.3", "iface_hbonds"])
+    send_request("set", args=["dash_width", "3", "iface_hbonds"])
+
+    send_request("do", args=["bg_color black"])
+    send_request("center", args=[obj_name])
+    send_request("do", args=[f"origin {obj_name}"])
+
+    return (
+        f"Showing interface between chain {chain_a} (marine/blue) and chain {chain_b} "
+        f"(salmon/red) in {obj_name}. Cross-chain H-bonds stored as 'iface_hbonds'."
+    )
+
+
 @mcp.tool(name="as")
 def as_tool(representation: str, selection: Optional[str] = "all") -> str:
     """
