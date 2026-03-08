@@ -11,6 +11,26 @@ HOST = '127.0.0.1'
 # Port can be overridden via environment variable, e.g.: MCPYMOL_PORT=9867 uv run mcpymol
 PORT = int(os.environ.get("MCPYMOL_PORT", 9876))
 
+# Ordered green shades used by the ghost heart style
+_GHOST_HEART_GREENS = ["forest", "limegreen", "chartreuse", "palegreen", "lime", "tv_green"]
+
+def _apply_ghost_heart(name: str):
+    """Applies the ghost heart visualization style to an object.
+
+    Ghost heart = cartoon + semi-transparent surface, chains colored in
+    shades of green, black background.
+    """
+    send_request("show", args=["cartoon", name])
+    send_request("show", args=["surface", name])
+    chains_res = send_request("get_chains", args=[name])
+    if chains_res.get("status") == "success":
+        chains = chains_res.get("result", [])
+        for i, chain in enumerate(chains):
+            green = _GHOST_HEART_GREENS[i % len(_GHOST_HEART_GREENS)]
+            send_request("color", args=[green, f"{name} and chain {chain}"])
+    send_request("set", args=["transparency", "0.6", name])
+    send_request("do", args=["bg_color black"])
+
 def send_request(action: str, args: list = None, kwargs: dict = None) -> dict:
     """Send a JSON request to the PyMOL plugin socket server."""
     payload = {
@@ -50,9 +70,11 @@ def fetch_structure(pdb_code: str, obj_name: Optional[str] = None) -> str:
             keep_sel = f"({name} and chain {first}) or bychain ({name} and chain {first} around 5)"
             send_request("remove", args=[f"({name}) and not ({keep_sel})"])
             send_request("hide", args=["everything", f"({name}) and solvent"])
-            return f"Successfully fetched {pdb_code} as '{name}' and applied multimer and solvent heuristics."
-    
-    return f"Successfully fetched {pdb_code} as '{name}', but no chains were found to apply heuristic."
+            _apply_ghost_heart(name)
+            return f"Successfully fetched {pdb_code} as '{name}' and applied multimer, solvent, and ghost heart heuristics."
+
+    _apply_ghost_heart(name)
+    return f"Successfully fetched {pdb_code} as '{name}' with ghost heart style, but no chains were found to apply heuristic."
 
 @mcp.tool()
 def load_structure(file_path: str, obj_name: str) -> str:
@@ -72,9 +94,11 @@ def load_structure(file_path: str, obj_name: str) -> str:
             keep_sel = f"({obj_name} and chain {first}) or bychain ({obj_name} and chain {first} around 5)"
             send_request("remove", args=[f"({obj_name}) and not ({keep_sel})"])
             send_request("hide", args=["everything", f"({obj_name}) and solvent"])
-            return f"Successfully loaded {file_path} as '{obj_name}' and applied multimer and solvent heuristics."
-    
-    return f"Loaded {file_path} successfully."
+            _apply_ghost_heart(obj_name)
+            return f"Successfully loaded {file_path} as '{obj_name}' and applied multimer, solvent, and ghost heart heuristics."
+
+    _apply_ghost_heart(obj_name)
+    return f"Loaded {file_path} as '{obj_name}' with ghost heart style."
 
 @mcp.tool()
 def show(representation: str, selection: str = "all") -> str:
