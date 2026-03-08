@@ -45,6 +45,23 @@ Because PyMOL requires its own isolated Python environment to run its GUI and re
    ```
    *You should see a message in the PyMOL console indicating the plugin is listening on `127.0.0.1:9876`.*
 
+**💡 Pro Tip: Auto-Start the Plugin**
+The standard way to run initialization scripts in PyMOL is through its `pymolrc` resource file. To automatically run this plugin every time you launch PyMOL, add the following to `~/.pymolrc.py`:
+```python
+import os, pymol
+pymol.cmd.do("run /absolute/path/to/MCPymol/src/mcpymol/plugin.py")
+```
+
+**🔌 Changing the Port**
+The default port is `9876`. If you need to run multiple MCP servers simultaneously, override it with the `MCPYMOL_PORT` environment variable before launching PyMOL **and** the bridge:
+```bash
+# PyMOL (macOS example)
+MCPYMOL_PORT=9867 open -a PyMOL
+
+# MCP bridge
+MCPYMOL_PORT=9867 uv run mcpymol
+```
+
 ### 2. Start the MCP Server Bridge
 From your terminal, in the root of the cloned `MCPymol` directory, start the server:
 ```bash

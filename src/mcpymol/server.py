@@ -1,4 +1,5 @@
 import json
+import os
 import socket
 from typing import Optional
 from mcp.server.fastmcp import FastMCP
@@ -7,7 +8,8 @@ from mcp.server.fastmcp import FastMCP
 mcp = FastMCP("MCPymol")
 
 HOST = '127.0.0.1'
-PORT = 9876
+# Port can be overridden via environment variable, e.g.: MCPYMOL_PORT=9867 uv run mcpymol
+PORT = int(os.environ.get("MCPYMOL_PORT", 9876))
 
 def send_request(action: str, args: list = None, kwargs: dict = None) -> dict:
     """Send a JSON request to the PyMOL plugin socket server."""

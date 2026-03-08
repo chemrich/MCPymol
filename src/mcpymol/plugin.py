@@ -2,11 +2,18 @@
 PyMOL Native Socket Plugin Bridge for MCPymol
 Run this script inside PyMOL:
     run /path/to/MCPymol/src/mcpymol/plugin.py
+
+The listening port defaults to 9876 and can be overridden with the
+MCPYMOL_PORT environment variable before starting PyMOL.
 """
+import os
 import socket
 import json
 import threading
 import traceback
+
+# Port is read at import time so it's consistent across the whole session.
+MCP_PORT = int(os.environ.get("MCPYMOL_PORT", 9876))
 
 try:
     from pymol import cmd
@@ -15,9 +22,9 @@ except ImportError:
     cmd = None
 
 class PyMOLSocketServer:
-    def __init__(self, host='127.0.0.1', port=9876):
+    def __init__(self, host='127.0.0.1', port=None):
         self.host = host
-        self.port = port
+        self.port = port if port is not None else MCP_PORT
         self.running = False
         self.thread = None
         self.server_socket = None
