@@ -30,6 +30,7 @@ def _apply_ghost_heart(name: str):
             send_request("color", args=[green, f"{name} and chain {chain} and polymer.protein"])
     send_request("set", args=["transparency", "0.6", name])
     send_request("do", args=["bg_color black"])
+    send_request("center", args=[name])
 
 def send_request(action: str, args: list = None, kwargs: dict = None) -> dict:
     """Send a JSON request to the PyMOL plugin socket server."""

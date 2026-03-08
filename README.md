@@ -1,5 +1,7 @@
 # MCPymol: An MCP Server for PyMOL
 
+![Nucleosome core particle (1AOI) visualized with MCPymol's ghost heart style](assets/nucleosome.png)
+
 **MCPymol** is a Model Context Protocol (MCP) server that provides a conversational interface for viewing and analyzing protein structures using PyMOL. It exposes PyMOL's powerful molecular visualization capabilities to AI assistants (like Claude), allowing you to seamlessly load structures, manipulate views, and explore proteins using natural language.
 
 ## 🧬 What it Does
