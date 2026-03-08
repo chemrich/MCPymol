@@ -30,7 +30,25 @@ def _apply_ghost_heart(name: str):
             send_request("color", args=[green, f"{name} and chain {chain} and polymer.protein"])
     send_request("set", args=["transparency", "0.6", name])
     send_request("do", args=["bg_color black"])
+
+    # Organic cofactors/ligands: sticks, colored by atom with lightblue carbons
+    send_request("show", args=["sticks", f"({name}) and organic"])
+    send_request("do", args=[f"util.cbaw ({name}) and organic"])
+    send_request("color", args=["lightblue", f"({name}) and organic and elem C"])
+
+    # Inorganic ions and metals: spheres, colored by chemical element
+    send_request("show", args=["spheres", f"({name}) and inorganic"])
+    send_request("color", args=["atomic", f"({name}) and inorganic"])
+    send_request("set", args=["sphere_scale", "0.4", f"({name}) and inorganic"])
+
+    # DNA: brightorange backbone, deepteal ladders
+    dna_sel = f"({name}) and resn DA+DC+DG+DT"
+    send_request("set", args=["cartoon_nucleic_acid_color", "brightorange", dna_sel])
+    send_request("set", args=["cartoon_ladder_color", "deepteal", dna_sel])
+
+    # Center view and set rotation pivot to structure center
     send_request("center", args=[name])
+    send_request("do", args=[f"origin {name}"])
 
 def send_request(action: str, args: list = None, kwargs: dict = None) -> dict:
     """Send a JSON request to the PyMOL plugin socket server."""
@@ -59,6 +77,7 @@ def fetch_structure(pdb_code: str, obj_name: Optional[str] = None) -> str:
     name = obj_name if obj_name else pdb_code
 
     send_request("do", args=["reinitialize"])
+    send_request("set", args=["mouse_wheel_scale", "0.2"])
     send_request("delete", args=[name])
     res = send_request("fetch", args=[pdb_code, name])
     if res.get("status") == "error":
@@ -85,6 +104,7 @@ def load_structure(file_path: str, obj_name: str) -> str:
     Loads a structure from a local file path and applies the multimer heuristic.
     """
     send_request("do", args=["reinitialize"])
+    send_request("set", args=["mouse_wheel_scale", "0.2"])
     send_request("delete", args=[obj_name])
     res = send_request("load", args=[file_path, obj_name])
     if res.get("status") == "error":
