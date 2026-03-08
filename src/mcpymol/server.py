@@ -47,7 +47,8 @@ def fetch_structure(pdb_code: str, obj_name: Optional[str] = None) -> str:
             first = chains[0]
             keep_sel = f"({name} and chain {first}) or bychain ({name} and chain {first} around 5)"
             send_request("remove", args=[f"({name}) and not ({keep_sel})"])
-            return f"Successfully fetched {pdb_code} as '{name}' and applied multimer chain heuristic (kept chain {first} and nearby chains)."
+            send_request("hide", args=["everything", f"({name}) and solvent"])
+            return f"Successfully fetched {pdb_code} as '{name}' and applied multimer and solvent heuristics."
     
     return f"Successfully fetched {pdb_code} as '{name}', but no chains were found to apply heuristic."
 
@@ -68,7 +69,8 @@ def load_structure(file_path: str, obj_name: str) -> str:
             first = chains[0]
             keep_sel = f"({obj_name} and chain {first}) or bychain ({obj_name} and chain {first} around 5)"
             send_request("remove", args=[f"({obj_name}) and not ({keep_sel})"])
-            return f"Successfully loaded {file_path} as '{obj_name}' and applied multimer chain heuristic."
+            send_request("hide", args=["everything", f"({obj_name}) and solvent"])
+            return f"Successfully loaded {file_path} as '{obj_name}' and applied multimer and solvent heuristics."
     
     return f"Loaded {file_path} successfully."
 
@@ -120,6 +122,1063 @@ def execute_pymol_command(command: str) -> str:
     res = send_request("do", args=[command])
     if res.get("status") == "error": return res.get("error")
     return f"Executed command: {command}"
+
+
+@mcp.tool(name="as")
+def as_tool(representation: str, selection: Optional[str] = "all") -> str:
+    """
+    Shows one representation while hiding all others for the specified selection
+    """
+    call_args = []
+    if representation is not None: call_args.append(representation)
+    if selection is not None: call_args.append(selection)
+    
+    res = send_request("as", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed as successfully."
+
+
+@mcp.tool()
+def set(setting: str, value: str, selection: Optional[str] = None) -> str:
+    """
+    Sets a PyMOL setting to a specified value
+    """
+    call_args = []
+    if setting is not None: call_args.append(setting)
+    if value is not None: call_args.append(value)
+    if selection is not None: call_args.append(selection)
+    
+    res = send_request("set", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed set successfully."
+
+
+@mcp.tool()
+def cartoon(item_type: str, selection: Optional[str] = "all") -> str:
+    """
+    Sets the cartoon type for the specified selection
+    """
+    call_args = []
+    if item_type is not None: call_args.append(item_type)
+    if selection is not None: call_args.append(selection)
+    
+    res = send_request("cartoon", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed cartoon successfully."
+
+
+@mcp.tool()
+def spectrum(expression: str, palette: Optional[str] = "rainbow", selection: Optional[str] = "all") -> str:
+    """
+    Colors selection in a spectrum
+    """
+    call_args = []
+    if expression is not None: call_args.append(expression)
+    if palette is not None: call_args.append(palette)
+    if selection is not None: call_args.append(selection)
+    
+    res = send_request("spectrum", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed spectrum successfully."
+
+
+@mcp.tool()
+def label(selection: str, expression: Optional[str] = "name") -> str:
+    """
+    Adds labels to atoms in the selection
+    """
+    call_args = []
+    if selection is not None: call_args.append(selection)
+    if expression is not None: call_args.append(expression)
+    
+    res = send_request("label", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed label successfully."
+
+
+@mcp.tool()
+def angle(name: Optional[str] = None, selection1: Optional[str] = "(pk1)", selection2: Optional[str] = "(pk2)", selection3: Optional[str] = "(pk3)") -> str:
+    """
+    Measures the angle between three selections
+    """
+    call_args = []
+    if name is not None: call_args.append(name)
+    if selection1 is not None: call_args.append(selection1)
+    if selection2 is not None: call_args.append(selection2)
+    if selection3 is not None: call_args.append(selection3)
+    
+    res = send_request("angle", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed angle successfully."
+
+
+@mcp.tool()
+def dihedral(name: Optional[str] = None, selection1: Optional[str] = "(pk1)", selection2: Optional[str] = "(pk2)", selection3: Optional[str] = "(pk3)", selection4: Optional[str] = "(pk4)") -> str:
+    """
+    Measures the dihedral angle between four selections
+    """
+    call_args = []
+    if name is not None: call_args.append(name)
+    if selection1 is not None: call_args.append(selection1)
+    if selection2 is not None: call_args.append(selection2)
+    if selection3 is not None: call_args.append(selection3)
+    if selection4 is not None: call_args.append(selection4)
+    
+    res = send_request("dihedral", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed dihedral successfully."
+
+
+@mcp.tool()
+def center(selection: Optional[str] = "all") -> str:
+    """
+    Centers the view on a selection
+    """
+    call_args = []
+    if selection is not None: call_args.append(selection)
+    
+    res = send_request("center", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed center successfully."
+
+
+@mcp.tool()
+def orient(selection: Optional[str] = "all") -> str:
+    """
+    Orients the view to align with principal axes of the selection
+    """
+    call_args = []
+    if selection is not None: call_args.append(selection)
+    
+    res = send_request("orient", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed orient successfully."
+
+
+@mcp.tool()
+def zoom(selection: Optional[str] = "all", buffer: Optional[str] = "5") -> str:
+    """
+    Zooms the view on a selection
+    """
+    call_args = []
+    if selection is not None: call_args.append(selection)
+    if buffer is not None: call_args.append(buffer)
+    
+    res = send_request("zoom", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed zoom successfully."
+
+
+@mcp.tool()
+def reset(obj: Optional[str] = None) -> str:
+    """
+    Resets the view, optionally resetting an object's matrix
+    """
+    call_args = []
+    if obj is not None: call_args.append(obj)
+    
+    res = send_request("reset", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed reset successfully."
+
+
+@mcp.tool()
+def turn(axis: str, angle: Optional[str] = "90") -> str:
+    """
+    Rotates the camera around an axis
+    """
+    call_args = []
+    if axis is not None: call_args.append(axis)
+    if angle is not None: call_args.append(angle)
+    
+    res = send_request("turn", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed turn successfully."
+
+
+@mcp.tool()
+def move(axis: str, distance: Optional[str] = "1") -> str:
+    """
+    Moves the camera along an axis
+    """
+    call_args = []
+    if axis is not None: call_args.append(axis)
+    if distance is not None: call_args.append(distance)
+    
+    res = send_request("move", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed move successfully."
+
+
+@mcp.tool()
+def clip(mode: str, distance: Optional[str] = "1") -> str:
+    """
+    Adjusts the clipping planes
+    """
+    call_args = []
+    if mode is not None: call_args.append(mode)
+    if distance is not None: call_args.append(distance)
+    
+    res = send_request("clip", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed clip successfully."
+
+
+@mcp.tool()
+def save(filename: str, selection: Optional[str] = "all", state: Optional[str] = "-1") -> str:
+    """
+    Saves data to a file
+    """
+    call_args = []
+    if filename is not None: call_args.append(filename)
+    if selection is not None: call_args.append(selection)
+    if state is not None: call_args.append(state)
+    
+    res = send_request("save", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed save successfully."
+
+
+@mcp.tool()
+def png(filename: str, options: Optional[str] = None) -> str:
+    """
+    Saves a PNG image
+    """
+    call_args = []
+    if filename is not None: call_args.append(filename)
+    if options is not None: call_args.append(options)
+    
+    res = send_request("png", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed png successfully."
+
+
+@mcp.tool()
+def deselect() -> str:
+    """
+    Clears the current selection
+    """
+    call_args = []
+
+    
+    res = send_request("deselect", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed deselect successfully."
+
+
+@mcp.tool()
+def create(name: str, selection: Optional[str] = "all", source_state: Optional[str] = "1") -> str:
+    """
+    Creates a new object from a selection
+    """
+    call_args = []
+    if name is not None: call_args.append(name)
+    if selection is not None: call_args.append(selection)
+    if source_state is not None: call_args.append(source_state)
+    
+    res = send_request("create", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed create successfully."
+
+
+@mcp.tool()
+def extract(name: str, selection: Optional[str] = "all") -> str:
+    """
+    Extracts a selection to a new object
+    """
+    call_args = []
+    if name is not None: call_args.append(name)
+    if selection is not None: call_args.append(selection)
+    
+    res = send_request("extract", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed extract successfully."
+
+
+@mcp.tool()
+def delete(name: str) -> str:
+    """
+    Deletes objects or selections
+    """
+    call_args = []
+    if name is not None: call_args.append(name)
+    
+    res = send_request("delete", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed delete successfully."
+
+
+@mcp.tool()
+def align(mobile: str, target: Optional[str] = "all", options: Optional[str] = None) -> str:
+    """
+    Aligns one selection to another
+    """
+    call_args = []
+    if mobile is not None: call_args.append(mobile)
+    if target is not None: call_args.append(target)
+    if options is not None: call_args.append(options)
+    
+    res = send_request("align", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed align successfully."
+
+
+@mcp.tool()
+def super(mobile: str, target: Optional[str] = "all", options: Optional[str] = None) -> str:
+    """
+    Superimposes one selection onto another
+    """
+    call_args = []
+    if mobile is not None: call_args.append(mobile)
+    if target is not None: call_args.append(target)
+    if options is not None: call_args.append(options)
+    
+    res = send_request("super", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed super successfully."
+
+
+@mcp.tool()
+def intra_fit(selection: str) -> str:
+    """
+    Fits all states within an object
+    """
+    call_args = []
+    if selection is not None: call_args.append(selection)
+    
+    res = send_request("intra_fit", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed intra_fit successfully."
+
+
+@mcp.tool()
+def intra_rms(selection: str) -> str:
+    """
+    Calculates RMSD between states within an object
+    """
+    call_args = []
+    if selection is not None: call_args.append(selection)
+    
+    res = send_request("intra_rms", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed intra_rms successfully."
+
+
+@mcp.tool()
+def alter(selection: str, expression: str) -> str:
+    """
+    Alters atomic properties in a selection
+    """
+    call_args = []
+    if selection is not None: call_args.append(selection)
+    if expression is not None: call_args.append(expression)
+    
+    res = send_request("alter", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed alter successfully."
+
+
+@mcp.tool()
+def alter_state(state: str, selection: str, expression: str) -> str:
+    """
+    Alters atomic coordinates in a state
+    """
+    call_args = []
+    if state is not None: call_args.append(state)
+    if selection is not None: call_args.append(selection)
+    if expression is not None: call_args.append(expression)
+    
+    res = send_request("alter_state", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed alter_state successfully."
+
+
+@mcp.tool()
+def h_add(selection: Optional[str] = "all") -> str:
+    """
+    Adds hydrogens to a selection
+    """
+    call_args = []
+    if selection is not None: call_args.append(selection)
+    
+    res = send_request("h_add", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed h_add successfully."
+
+
+@mcp.tool()
+def h_fill(selection: Optional[str] = "all") -> str:
+    """
+    Adds hydrogens and adjusts valences
+    """
+    call_args = []
+    if selection is not None: call_args.append(selection)
+    
+    res = send_request("h_fill", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed h_fill successfully."
+
+
+@mcp.tool()
+def bond(atom1: str, atom2: str, order: Optional[str] = "1") -> str:
+    """
+    Creates a bond between two atoms
+    """
+    call_args = []
+    if atom1 is not None: call_args.append(atom1)
+    if atom2 is not None: call_args.append(atom2)
+    if order is not None: call_args.append(order)
+    
+    res = send_request("bond", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed bond successfully."
+
+
+@mcp.tool()
+def unbond(atom1: str, atom2: str) -> str:
+    """
+    Removes a bond between two atoms
+    """
+    call_args = []
+    if atom1 is not None: call_args.append(atom1)
+    if atom2 is not None: call_args.append(atom2)
+    
+    res = send_request("unbond", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed unbond successfully."
+
+
+@mcp.tool()
+def rebuild(selection: Optional[str] = "all") -> str:
+    """
+    Regenerates all displayed geometry
+    """
+    call_args = []
+    if selection is not None: call_args.append(selection)
+    
+    res = send_request("rebuild", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed rebuild successfully."
+
+
+@mcp.tool()
+def refresh() -> str:
+    """
+    Refreshes the display
+    """
+    call_args = []
+
+    
+    res = send_request("refresh", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed refresh successfully."
+
+
+@mcp.tool()
+def util_cbc(selection: Optional[str] = "all") -> str:
+    """
+    Colors by chain (Color By Chain)
+    """
+    call_args = []
+    if selection is not None: call_args.append(selection)
+    
+    res = send_request("util.cbc", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed util.cbc successfully."
+
+
+@mcp.tool()
+def util_cbaw(selection: Optional[str] = "all") -> str:
+    """
+    Colors by atom, white carbons (Color By Atom, White)
+    """
+    call_args = []
+    if selection is not None: call_args.append(selection)
+    
+    res = send_request("util.cbaw", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed util.cbaw successfully."
+
+
+@mcp.tool()
+def util_cbag(selection: Optional[str] = "all") -> str:
+    """
+    Colors by atom, green carbons (Color By Atom, Green)
+    """
+    call_args = []
+    if selection is not None: call_args.append(selection)
+    
+    res = send_request("util.cbag", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed util.cbag successfully."
+
+
+@mcp.tool()
+def util_cbac(selection: Optional[str] = "all") -> str:
+    """
+    Colors by atom, cyan carbons (Color By Atom, Cyan)
+    """
+    call_args = []
+    if selection is not None: call_args.append(selection)
+    
+    res = send_request("util.cbac", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed util.cbac successfully."
+
+
+@mcp.tool()
+def util_cbam(selection: Optional[str] = "all") -> str:
+    """
+    Colors by atom, magenta carbons (Color By Atom, Magenta)
+    """
+    call_args = []
+    if selection is not None: call_args.append(selection)
+    
+    res = send_request("util.cbam", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed util.cbam successfully."
+
+
+@mcp.tool()
+def util_cbay(selection: Optional[str] = "all") -> str:
+    """
+    Colors by atom, yellow carbons (Color By Atom, Yellow)
+    """
+    call_args = []
+    if selection is not None: call_args.append(selection)
+    
+    res = send_request("util.cbay", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed util.cbay successfully."
+
+
+@mcp.tool()
+def util_cbas(selection: Optional[str] = "all") -> str:
+    """
+    Colors by atom, salmon carbons (Color By Atom, Salmon)
+    """
+    call_args = []
+    if selection is not None: call_args.append(selection)
+    
+    res = send_request("util.cbas", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed util.cbas successfully."
+
+
+@mcp.tool()
+def util_cbab(selection: Optional[str] = "all") -> str:
+    """
+    Colors by atom, slate carbons (Color By Atom, slateBLue)
+    """
+    call_args = []
+    if selection is not None: call_args.append(selection)
+    
+    res = send_request("util.cbab", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed util.cbab successfully."
+
+
+@mcp.tool()
+def util_cbao(selection: Optional[str] = "all") -> str:
+    """
+    Colors by atom, orange carbons (Color By Atom, Orange)
+    """
+    call_args = []
+    if selection is not None: call_args.append(selection)
+    
+    res = send_request("util.cbao", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed util.cbao successfully."
+
+
+@mcp.tool()
+def util_cbap(selection: Optional[str] = "all") -> str:
+    """
+    Colors by atom, purple carbons (Color By Atom, Purple)
+    """
+    call_args = []
+    if selection is not None: call_args.append(selection)
+    
+    res = send_request("util.cbap", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed util.cbap successfully."
+
+
+@mcp.tool()
+def util_cbak(selection: Optional[str] = "all") -> str:
+    """
+    Colors by atom, pink carbons (Color By Atom, pinK)
+    """
+    call_args = []
+    if selection is not None: call_args.append(selection)
+    
+    res = send_request("util.cbak", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed util.cbak successfully."
+
+
+@mcp.tool()
+def util_chainbow(selection: Optional[str] = "all") -> str:
+    """
+    Colors chains in rainbow gradient (CHAINs in rainBOW)
+    """
+    call_args = []
+    if selection is not None: call_args.append(selection)
+    
+    res = send_request("util.chainbow", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed util.chainbow successfully."
+
+
+@mcp.tool()
+def util_rainbow(selection: Optional[str] = "all") -> str:
+    """
+    Colors residues in rainbow from N to C terminus
+    """
+    call_args = []
+    if selection is not None: call_args.append(selection)
+    
+    res = send_request("util.rainbow", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed util.rainbow successfully."
+
+
+@mcp.tool()
+def util_ss(selection: Optional[str] = "all") -> str:
+    """
+    Colors by secondary structure
+    """
+    call_args = []
+    if selection is not None: call_args.append(selection)
+    
+    res = send_request("util.ss", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed util.ss successfully."
+
+
+@mcp.tool()
+def util_color_by_element(selection: Optional[str] = "all") -> str:
+    """
+    Colors atoms by their element
+    """
+    call_args = []
+    if selection is not None: call_args.append(selection)
+    
+    res = send_request("util.color_by_element", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed util.color_by_element successfully."
+
+
+@mcp.tool()
+def util_color_secondary(selection: Optional[str] = "all") -> str:
+    """
+    Colors secondary structure elements
+    """
+    call_args = []
+    if selection is not None: call_args.append(selection)
+    
+    res = send_request("util.color_secondary", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed util.color_secondary successfully."
+
+
+@mcp.tool()
+def spheroid(selection: Optional[str] = "all") -> str:
+    """
+    Displays atoms as smooth spheres
+    """
+    call_args = []
+    if selection is not None: call_args.append(selection)
+    
+    res = send_request("spheroid", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed spheroid successfully."
+
+
+@mcp.tool()
+def isomesh(name: str, map_object: str, level: str, selection: Optional[str] = "all") -> str:
+    """
+    Creates a mesh isosurface
+    """
+    call_args = []
+    if name is not None: call_args.append(name)
+    if map_object is not None: call_args.append(map_object)
+    if level is not None: call_args.append(level)
+    if selection is not None: call_args.append(selection)
+    
+    res = send_request("isomesh", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed isomesh successfully."
+
+
+@mcp.tool()
+def isosurface(name: str, map_object: str, level: str, selection: Optional[str] = "all") -> str:
+    """
+    Creates a solid isosurface
+    """
+    call_args = []
+    if name is not None: call_args.append(name)
+    if map_object is not None: call_args.append(map_object)
+    if level is not None: call_args.append(level)
+    if selection is not None: call_args.append(selection)
+    
+    res = send_request("isosurface", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed isosurface successfully."
+
+
+@mcp.tool()
+def sculpt_activate(obj: str) -> str:
+    """
+    Activates sculpting mode for an object
+    """
+    call_args = []
+    if obj is not None: call_args.append(obj)
+    
+    res = send_request("sculpt_activate", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed sculpt_activate successfully."
+
+
+@mcp.tool()
+def sculpt_deactivate(obj: str) -> str:
+    """
+    Deactivates sculpting mode for an object
+    """
+    call_args = []
+    if obj is not None: call_args.append(obj)
+    
+    res = send_request("sculpt_deactivate", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed sculpt_deactivate successfully."
+
+
+@mcp.tool()
+def sculpt_iterate(iterations: str, obj: Optional[str] = "all") -> str:
+    """
+    Performs sculpting iterations
+    """
+    call_args = []
+    if iterations is not None: call_args.append(iterations)
+    if obj is not None: call_args.append(obj)
+    
+    res = send_request("sculpt_iterate", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed sculpt_iterate successfully."
+
+
+@mcp.tool()
+def scene(key: str, action: Optional[str] = "recall") -> str:
+    """
+    Manages scenes for later recall
+    """
+    call_args = []
+    if key is not None: call_args.append(key)
+    if action is not None: call_args.append(action)
+    
+    res = send_request("scene", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed scene successfully."
+
+
+@mcp.tool()
+def scene_order(scene_list: str) -> str:
+    """
+    Sets the order of scenes
+    """
+    call_args = []
+    if scene_list is not None: call_args.append(scene_list)
+    
+    res = send_request("scene_order", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed scene_order successfully."
+
+
+@mcp.tool()
+def mset(specification: str) -> str:
+    """
+    Defines a sequence of states for movie playback
+    """
+    call_args = []
+    if specification is not None: call_args.append(specification)
+    
+    res = send_request("mset", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed mset successfully."
+
+
+@mcp.tool()
+def mplay() -> str:
+    """
+    Starts playing the movie
+    """
+    call_args = []
+
+    
+    res = send_request("mplay", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed mplay successfully."
+
+
+@mcp.tool()
+def mstop() -> str:
+    """
+    Stops the movie
+    """
+    call_args = []
+
+    
+    res = send_request("mstop", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed mstop successfully."
+
+
+@mcp.tool()
+def frame(frame_number: Optional[str] = None) -> str:
+    """
+    Sets or queries the current frame
+    """
+    call_args = []
+    if frame_number is not None: call_args.append(frame_number)
+    
+    res = send_request("frame", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed frame successfully."
+
+
+@mcp.tool()
+def forward() -> str:
+    """
+    Advances one frame
+    """
+    call_args = []
+
+    
+    res = send_request("forward", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed forward successfully."
+
+
+@mcp.tool()
+def backward() -> str:
+    """
+    Goes back one frame
+    """
+    call_args = []
+
+    
+    res = send_request("backward", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed backward successfully."
+
+
+@mcp.tool()
+def rock() -> str:
+    """
+    Toggles a rocking animation
+    """
+    call_args = []
+
+    
+    res = send_request("rock", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed rock successfully."
+
+
+@mcp.tool()
+def ray(width: Optional[str] = None, height: Optional[str] = None) -> str:
+    """
+    Performs ray-tracing
+    """
+    call_args = []
+    if width is not None: call_args.append(width)
+    if height is not None: call_args.append(height)
+    
+    res = send_request("ray", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed ray successfully."
+
+
+@mcp.tool()
+def draw(width: Optional[str] = None, height: Optional[str] = None) -> str:
+    """
+    Uses OpenGL renderer (faster but lower quality)
+    """
+    call_args = []
+    if width is not None: call_args.append(width)
+    if height is not None: call_args.append(height)
+    
+    res = send_request("draw", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed draw successfully."
+
+
+@mcp.tool()
+def mpng(prefix: str) -> str:
+    """
+    Saves a series of PNG images for movie frames
+    """
+    call_args = []
+    if prefix is not None: call_args.append(prefix)
+    
+    res = send_request("mpng", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed mpng successfully."
+
+
+@mcp.tool()
+def symexp(prefix: str, selection: str, cutoff: Optional[str] = "20", segi: Optional[str] = None) -> str:
+    """
+    Generates symmetry-related copies
+    """
+    call_args = []
+    if prefix is not None: call_args.append(prefix)
+    if selection is not None: call_args.append(selection)
+    if cutoff is not None: call_args.append(cutoff)
+    if segi is not None: call_args.append(segi)
+    
+    res = send_request("symexp", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed symexp successfully."
+
+
+@mcp.tool()
+def set_symmetry(selection: str, a: str, b: str, c: str, alpha: str, beta: str, gamma: str) -> str:
+    """
+    Sets symmetry parameters for an object
+    """
+    call_args = []
+    if selection is not None: call_args.append(selection)
+    if a is not None: call_args.append(a)
+    if b is not None: call_args.append(b)
+    if c is not None: call_args.append(c)
+    if alpha is not None: call_args.append(alpha)
+    if beta is not None: call_args.append(beta)
+    if gamma is not None: call_args.append(gamma)
+    
+    res = send_request("set_symmetry", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed set_symmetry successfully."
+
+
+@mcp.tool()
+def fab(sequence: str, options: Optional[str] = None) -> str:
+    """
+    Creates a peptide chain from a sequence
+    """
+    call_args = []
+    if sequence is not None: call_args.append(sequence)
+    if options is not None: call_args.append(options)
+    
+    res = send_request("fab", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed fab successfully."
+
+
+@mcp.tool()
+def fragment(name: str) -> str:
+    """
+    Loads a molecular fragment
+    """
+    call_args = []
+    if name is not None: call_args.append(name)
+    
+    res = send_request("fragment", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed fragment successfully."
+
+
+@mcp.tool()
+def full_screen() -> str:
+    """
+    Toggles fullscreen mode
+    """
+    call_args = []
+
+    
+    res = send_request("full_screen", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed full_screen successfully."
+
+
+@mcp.tool()
+def viewport(width: str, height: str) -> str:
+    """
+    Sets the viewport size
+    """
+    call_args = []
+    if width is not None: call_args.append(width)
+    if height is not None: call_args.append(height)
+    
+    res = send_request("viewport", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed viewport successfully."
+
+
+@mcp.tool()
+def cd(path: str) -> str:
+    """
+    Changes the current directory
+    """
+    call_args = []
+    if path is not None: call_args.append(path)
+    
+    res = send_request("cd", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed cd successfully."
+
+
+@mcp.tool()
+def pwd() -> str:
+    """
+    Prints the current directory
+    """
+    call_args = []
+
+    
+    res = send_request("pwd", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed pwd successfully."
+
+
+@mcp.tool()
+def ls(path: Optional[str] = None) -> str:
+    """
+    Lists files in the current directory
+    """
+    call_args = []
+    if path is not None: call_args.append(path)
+    
+    res = send_request("ls", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed ls successfully."
+
+
+@mcp.tool()
+def system(command: str) -> str:
+    """
+    Executes a system command
+    """
+    call_args = []
+    if command is not None: call_args.append(command)
+    
+    res = send_request("system", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed system successfully."
+
+
+@mcp.tool()
+def help(command: Optional[str] = None) -> str:
+    """
+    Shows help for a command
+    """
+    call_args = []
+    if command is not None: call_args.append(command)
+    
+    res = send_request("help", args=call_args)
+    if res.get("status") == "error": return res.get("error")
+    return f"Executed help successfully."
+
 
 def main():
     mcp.run()

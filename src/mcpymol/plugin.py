@@ -27,6 +27,12 @@ class PyMOLSocketServer:
         if cmd is None:
             return {"status": "error", "error": "PyMOL cmd module not available."}
             
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except json.JSONDecodeError as e:
+                return {"status": "error", "error": f"Invalid JSON payload: {e}"}
+                
         action = payload.get("action")
         args = payload.get("args", [])
         kwargs = payload.get("kwargs", {})
@@ -53,39 +59,21 @@ class PyMOLSocketServer:
                 selection = args[0] if args else kwargs.get("selection", "all")
                 chains = cmd.get_chains(selection)
                 return {"status": "success", "result": chains}
-                
-            elif action == "remove":
-                cmd.remove(*args, **kwargs)
-                return {"status": "success", "result": "Removed selection"}
-                
-            elif action == "show":
-                cmd.show(*args, **kwargs)
-                return {"status": "success", "result": "Show executed"}
-                
-            elif action == "hide":
-                cmd.hide(*args, **kwargs)
-                return {"status": "success", "result": "Hide executed"}
-                
-            elif action == "color":
-                cmd.color(*args, **kwargs)
-                return {"status": "success", "result": "Color executed"}
-                
-            elif action == "select":
-                cmd.select(*args, **kwargs)
-                return {"status": "success", "result": "Selection created"}
-                
-            elif action == "distance":
-                cmd.distance(*args, **kwargs)
-                return {"status": "success", "result": "Distance measured"}
+            
+            # Dynamic resolution for all native PyMOL cmd methods
+            elif hasattr(cmd, action) and callable(getattr(cmd, action)):
+                method = getattr(cmd, action)
+                method(*args, **kwargs)
+                return {"status": "success", "result": f"Executed '{action}' successfully."}
                 
             else:
-                return {"status": "error", "error": f"Unknown action: {action}"}
+                return {"status": "error", "error": f"Unknown action or method not found on cmd: {action}"}
                 
         except Exception as e:
             err_msg = str(e)
             print(f"MCPymol Plugin Error executing {action}: {err_msg}")
             traceback.print_exc()
-            return {"status": "error", "error": err_msg}
+            return {"status": "error", "error": f"PyMOL execution error: {err_msg}"}
 
     def _listen_loop(self):
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
