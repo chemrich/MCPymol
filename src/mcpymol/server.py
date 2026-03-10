@@ -828,6 +828,127 @@ def mutation_view(obj_name: str, mutations: str) -> str:
 
 
 @mcp.tool()
+def textbook_view(obj_name: str) -> str:
+    """
+    Configures PyMOL for a crisp, cel-shaded illustrative look ("Textbook Illustration").
+
+    This view transforms the structure into a bold, 2D illustrative style with sharp
+    black outlines, ideal for presentations or textbook-style diagrams. It hides
+    the interior complexities, showing a solid white cartoon and surface with heavy
+    black edge contours. Ligands are styled similarly as opaque white sticks with outlines.
+
+    Args:
+        obj_name: PyMOL object name (e.g. "1abc")
+    """
+    send_request("hide", args=["everything", obj_name])
+    
+    # White background for print/textbook style
+    send_request("do", args=["bg_color white"])
+    
+    # Show main structure as white cartoon and surface
+    send_request("show", args=["cartoon", f"({obj_name}) and polymer.protein"])
+    send_request("show", args=["surface", f"({obj_name}) and polymer.protein"])
+    send_request("color", args=["white", f"({obj_name}) and polymer.protein"])
+    
+    # Ligands as thick white sticks
+    org_sel = f"({obj_name}) and organic"
+    send_request("show", args=["sticks", org_sel])
+    send_request("color", args=["white", org_sel])
+    send_request("set", args=["stick_radius", "0.3", org_sel])
+    
+    # The "cel shading" effect
+    send_request("set", args=["ray_trace_mode", "3"])      # 3 = comic-book style coloring
+    send_request("set", args=["ray_trace_depth_factor", "0.4"]) 
+    send_request("set", args=["ray_trace_disco_factor", "1.0"])
+    
+    # Heavy contour lines
+    send_request("set", args=["antialias", "2"])
+    
+    # Improve surface appearance for cel shading
+    send_request("set", args=["transparency", "0.0", obj_name])
+    send_request("set", args=["surface_quality", "1", obj_name])
+    
+    send_request("orient", args=[obj_name])
+    return f"Textbook Illustration view applied to {obj_name}. Note: the full cel-shaded outline effect requires rendering (use the 'ray' command)."
+
+
+@mcp.tool()
+def cinematic_view(obj_name: str) -> str:
+    """
+    Configures PyMOL for a depth-cued, cinematic look with dramatic lighting.
+
+    This view emphasizes volume and scale using deep shadows, fog, and depth-cueing.
+    The core of the structure emerges from a dark background, making massive
+    complexes (like ribosomes or viral capsids) look dramatic and imposing.
+    Protein uses standard coloring but with altered material properties.
+
+    Args:
+        obj_name: PyMOL object name (e.g. "1abc")
+    """
+    # Restore basic representation if not present
+    send_request("show", args=["cartoon", f"({obj_name}) and polymer.protein"])
+    send_request("show", args=["surface", f"({obj_name}) and polymer.protein"])
+    
+    # Dramatic deep black background
+    send_request("do", args=["bg_color black"])
+    
+    # Enable fog and depth cueing
+    send_request("set", args=["depth_cue", "1"])
+    send_request("set", args=["fog", "1"])
+    send_request("set", args=["fog_start", "0.45"])   # Fog starts mid-structure
+    send_request("set", args=["fog_color", "black"])
+    
+    # Cinematic lighting and shadows
+    send_request("set", args=["light_count", "2"])
+    send_request("set", args=["spec_reflect", "0.3"]) # Slightly glossy
+    send_request("set", args=["ray_shadows", "1"])
+    send_request("set", args=["ray_shadow_decay_factor", "0.1"])
+    send_request("set", args=["ray_shadow_decay_range", "3"])
+    
+    # Enhance the surface material
+    send_request("set", args=["transparency", "0.0", obj_name])
+    
+    return f"Cinematic view applied to {obj_name}. Fog and depth-cueing enabled. Use the 'ray' command to see the full dramatic shadow effect."
+
+
+@mcp.tool()
+def pointillist_view(obj_name: str) -> str:
+    """
+    Renders the structure as an artistic, abstract pointillist/starfield cloud.
+
+    The continuous surface is replaced by thousands of individual dots representing
+    the solvent-accessible surface, resembling a galaxy or pointillist painting.
+    The protein backbone is hidden to emphasize the scattered volume. Ligands
+    are shown as bright yellow spheres (stars) embedded in the cloud.
+
+    Args:
+        obj_name: PyMOL object name (e.g. "1abc")
+    """
+    send_request("hide", args=["everything", obj_name])
+    send_request("do", args=["bg_color black"])
+    
+    # The "Starfield" point cloud
+    send_request("show", args=["dots", f"({obj_name}) and polymer.protein"])
+    send_request("do", args=[f"cartoon automatic, {obj_name}"]) # Default color recovery
+    
+    # Increase dot density for the pointillist effect
+    send_request("set", args=["dot_density", "4"])
+    send_request("set", args=["dot_width", "2"])
+    
+    # Optional: Light outline of the backbone trace 
+    send_request("show", args=["ribbon", f"({obj_name}) and polymer.protein"])
+    send_request("set", args=["ribbon_width", "0.5"])
+    send_request("color", args=["grey30", f"({obj_name}) and polymer.protein and ribbon"])
+    
+    # Ligands as bright stars
+    org_sel = f"({obj_name}) and organic"
+    send_request("show", args=["spheres", org_sel])
+    send_request("color", args=["yellow", org_sel])
+    send_request("set", args=["sphere_scale", "0.4", org_sel])
+    
+    send_request("orient", args=[obj_name])
+    return f"Pointillist/Starfield view applied to {obj_name}."
+
 def set(setting: str, value: str, selection: Optional[str] = None) -> str:
     """
     Sets a PyMOL setting to a specified value

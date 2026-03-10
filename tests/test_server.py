@@ -8,7 +8,7 @@ from mcpymol.server import (
     ligand_view, interface_view, putty_view,
     hydrophobic_surface_view, electrostatic_view,
     crosslink_view, pocket_view, pharmacophore_view,
-    mutation_view,
+    mutation_view, textbook_view, cinematic_view, pointillist_view
 )
 
 
@@ -367,6 +367,46 @@ def test_mutation_view_valid(mock_sr):
     assert "color" in acts
     assert "label" in acts
     assert "zoom" in acts
+
+
+@patch("mcpymol.server.send_request")
+def test_textbook_view(mock_sr):
+    mock_sr.return_value = {"status": "success", "result": "OK"}
+
+    result = textbook_view(obj_name="1ABC")
+
+    assert "Textbook Illustration" in result
+    acts = _actions(mock_sr)
+    assert "show" in acts
+    assert "color" in acts
+    assert "set" in acts
+
+
+@patch("mcpymol.server.send_request")
+def test_cinematic_view(mock_sr):
+    mock_sr.return_value = {"status": "success", "result": "OK"}
+
+    result = cinematic_view(obj_name="1ABC")
+
+    assert "Cinematic view" in result
+    acts = _actions(mock_sr)
+    assert "show" in acts
+    assert "do" in acts
+    assert "set" in acts
+
+
+@patch("mcpymol.server.send_request")
+def test_pointillist_view(mock_sr):
+    mock_sr.return_value = {"status": "success", "result": "OK"}
+
+    result = pointillist_view(obj_name="1ABC")
+
+    assert "Pointillist/Starfield" in result
+    acts = _actions(mock_sr)
+    assert "hide" in acts
+    assert "show" in acts
+    assert "set" in acts
+    assert "color" in acts
 
 
 @patch("mcpymol.server.send_request")
