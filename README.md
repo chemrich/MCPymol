@@ -25,27 +25,11 @@ MCPymol is designed for structural biologists, bioinformaticians, and anyone int
 - "Measure the distance between residue 10 and residue 20."
 - "Highlight the active site."
 
-## 💾 Installation
+## 💾 Installation & Configuration
 
-This project relies on `uv` for fast dependency management. 
+Because PyMOL requires its own isolated Python environment to run its GUI and rendering loops, using MCPymol requires starting both the PyMOL plugin and configuring the external MCP server for your AI assistant.
 
-1. **Clone the repository:**
-   ```bash
-   git clone https://github.com/yourusername/MCPymol.git
-   cd MCPymol
-   ```
-
-2. **Install dependencies:**
-   Ensure you have `uv` installed, then run:
-   ```bash
-   uv sync
-   ```
-
-## 🚀 Usage
-
-Because PyMOL requires its own isolated Python environment to run its GUI and rendering loops, using MCPymol requires starting both the PyMOL plugin and the external MCP server.
-
-### 1. Start the Native PyMOL Plugin
+### 1. Start the Native PyMOL Plugin (Required for all setups)
 1. Open your standard PyMOL desktop application.
 2. In the PyMOL command line, manually initialize the background listener script. Adjust the path to where you cloned the repository:
    ```pymol
@@ -66,64 +50,78 @@ The default port is `9876`. If you need to run multiple MCP servers simultaneous
 # PyMOL (macOS example)
 MCPYMOL_PORT=9867 open -a PyMOL
 
-# MCP bridge
+# MCP bridge/server
 MCPYMOL_PORT=9867 uv run mcpymol
 ```
 
-### 2. Start the MCP Server Bridge
-From your terminal, in the root of the cloned `MCPymol` directory, start the server:
-```bash
-uv run mcpymol
-```
+---
 
-### 3. Configure Claude Desktop
-To interact with the server via Claude Desktop, add the following to your `claude_desktop_config.json` file:
+### 2. Configure Your AI Assistant
 
-```json
-{
-  "mcpServers": {
-    "mcpymol": {
-      "command": "uv",
-      "args": [
-        "--directory",
-        "/absolute/path/to/MCPymol",
-        "run",
-        "mcpymol"
-      ]
-    }
-  }
-}
-```
-Restart Claude Desktop, ensure the PyMOL plugin is running, and you're ready to start asking conversational questions about protein structures!
-
-### 4. Configure Gemini CLI
-To interact with the server via Gemini CLI, run the following command in your terminal:
+Choose ONE of the following three setups based on your environment and preferred AI assistant. All instructions assume you have cloned the repository to your machine.
 
 ```bash
-gemini mcp add mcpymol uv --directory /absolute/path/to/MCPymol run mcpymol
-# After adding, refresh the tools
-gemini mcp refresh
+git clone https://github.com/yourusername/MCPymol.git
+cd MCPymol
 ```
 
-#### 🛡️ Restricted Environments (Corporate Laptops)
-If you are running on a managed machine (e.g. a corporate laptop) where tools like `uv` are restricted or blocked by security policies, you must use a standard Python virtual environment instead.
+#### Option A: macOS with Claude Desktop (Using `uv`)
+This is the standard, unrestricted setup for Claude users using `uv` for dependency management.
 
-1. First, create and activate a virtual environment using a modern Python version (3.10+):
+1. **Install dependencies:**
+   ```bash
+   uv sync
+   ```
+2. **Configure Claude Desktop:** Add the following to your `claude_desktop_config.json` file:
+   ```json
+   {
+     "mcpServers": {
+       "mcpymol": {
+         "command": "uv",
+         "args": [
+           "--directory",
+           "/absolute/path/to/MCPymol",
+           "run",
+           "mcpymol"
+         ]
+       }
+     }
+   }
+   ```
+3. Restart Claude Desktop. Ensure the PyMOL plugin is running, and you're ready to start asking conversational questions about protein structures!
+
+#### Option B: macOS with Gemini CLI (Using `uv`)
+This is the standard, unrestricted setup for Gemini CLI users using `uv`.
+
+1. **Install dependencies:**
+   ```bash
+   uv sync
+   ```
+2. **Configure Gemini CLI:** Run the following commands in your terminal:
+   ```bash
+   gemini mcp add mcpymol uv --directory /absolute/path/to/MCPymol run mcpymol
+   gemini mcp refresh
+   ```
+
+#### Option C: macOS in a Restricted Environment (Corporate Laptop) with Gemini CLI
+If you are running on a managed machine where tools like `uv` are restricted or blocked by security policies, you must use a standard Python virtual environment instead.
+
+1. **Create and activate a virtual environment** using a modern Python version (3.10+):
    ```bash
    python3 -m venv .venv
    source .venv/bin/activate
    ```
    *(Note: macOS users may need to specify a newer python binary like `python3.11` if the system default is older than 3.10).*
-2. Upgrade `pip` to support modern pyproject.toml installs, then install the package natively:
+2. **Install the package:** Upgrade `pip` to support pyproject.toml installs, then install natively from within `.venv`:
    ```bash
    pip install --upgrade pip
    pip install -e .
    ```
-3. Add the server to Gemini CLI, pointing directly to the generated script inside the virtual environment:
+3. **Configure Gemini CLI:** Add the server to Gemini CLI, pointing directly to the generated script inside the virtual environment:
    ```bash
    gemini mcp add mcpymol /absolute/path/to/MCPymol/.venv/bin/mcpymol
    ```
-*(Note: If configuring Claude Code in a restricted environment, ensure the `claude_desktop_config.json` `command` points to the `.venv/bin/python` executable and uses arguments `["-m", "mcpymol"]`).*
+   *(Note: If configuring Claude Code in a restricted environment, ensure the `claude_desktop_config.json` `command` points to the `.venv/bin/python` executable and uses arguments `["-m", "mcpymol"]`).*
 
 ## 🧪 Running Tests
 The repository includes a rigorous, "Google Engineer" grade `pytest` suite testing both the socket payload generation and simulated PyMOL API execution boundaries.
