@@ -96,6 +96,35 @@ To interact with the server via Claude Desktop, add the following to your `claud
 ```
 Restart Claude Desktop, ensure the PyMOL plugin is running, and you're ready to start asking conversational questions about protein structures!
 
+### 4. Configure Gemini CLI
+To interact with the server via Gemini CLI, run the following command in your terminal:
+
+```bash
+gemini mcp add mcpymol uv --directory /absolute/path/to/MCPymol run mcpymol
+# After adding, refresh the tools
+gemini mcp refresh
+```
+
+#### 🛡️ Restricted Environments (Corporate Laptops)
+If you are running on a managed machine (e.g. a corporate laptop) where tools like `uv` are restricted or blocked by security policies, you must use a standard Python virtual environment instead.
+
+1. First, create and activate a virtual environment using a modern Python version (3.10+):
+   ```bash
+   python3 -m venv .venv
+   source .venv/bin/activate
+   ```
+   *(Note: macOS users may need to specify a newer python binary like `python3.11` if the system default is older than 3.10).*
+2. Upgrade `pip` to support modern pyproject.toml installs, then install the package natively:
+   ```bash
+   pip install --upgrade pip
+   pip install -e .
+   ```
+3. Add the server to Gemini CLI, pointing directly to the generated script inside the virtual environment:
+   ```bash
+   gemini mcp add mcpymol /absolute/path/to/MCPymol/.venv/bin/mcpymol
+   ```
+*(Note: If configuring Claude Code in a restricted environment, ensure the `claude_desktop_config.json` `command` points to the `.venv/bin/python` executable and uses arguments `["-m", "mcpymol"]`).*
+
 ## 🧪 Running Tests
 The repository includes a rigorous, "Google Engineer" grade `pytest` suite testing both the socket payload generation and simulated PyMOL API execution boundaries.
 To run the automated tests:
