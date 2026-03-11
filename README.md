@@ -2,11 +2,11 @@
 
 ![Nucleosome core particle (1AOI) visualized with MCPymol's ghost heart style](assets/nucleosome.png)
 
-**MCPymol** is a Model Context Protocol (MCP) server that provides a conversational interface for viewing and analyzing protein structures using PyMOL. It exposes PyMOL's powerful molecular visualization capabilities to AI assistants (like Claude), allowing you to seamlessly load structures, manipulate views, and explore proteins using natural language.
+**MCPymol** is a Model Context Protocol (MCP) server that provides a conversational interface for viewing and analyzing protein structures using PyMOL. It exposes PyMOL's powerful molecular visualization capabilities to AI assistants (like Claude), allowing you to seamlessly load structures, manipulate views, and explore proteins using natural language. For example, I made the image above by typing this prompt into Claude Code, "Show me a nucleosome". Literally, that was it. 
 
 **A few words...** Let's face it. Pymol is great, but it's terrible to use. The syntax is extremely obscure, and while it's got python in the name, it's not exacly python. This is for people who just want to look at structures and have fun with proteins in a simple, conversational way. 
 
-This code was developed from scratch using a combination of Antigravity, Gemini Pro 3.1 (until I ran out of credits) and then Claude Code (Sonnet 4.6 thinking). Claude gave itself credit. Gemini did not. Read into that what you will. All the development was done on macos, with testing using the open source pymol available through homebrew. Hoping to test it with Gemini CLI soon. No plans to test on other models.
+This code was developed from scratch using a combination of Antigravity, Gemini Pro 3.1 (until I ran out of tokens) and then Claude Code (Sonnet 4.6 thinking). Claude gave itself credit. Gemini did not. Read into that what you will. All the development was done on macos, with testing using the open source pymol available through homebrew. It's been tested with both Claude Code and Gemini CLI. No plans to test on other models/assistants.
 
 **the name** My best friend in high school once shared an apartment with MC Chris, who voiced MC Pee Pants in Aqua Teen Hunger force. I'm not saying that this was the inspiration for the name of this project, but I'm also not denying it.
 
