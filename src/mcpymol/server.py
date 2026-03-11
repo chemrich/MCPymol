@@ -40,12 +40,13 @@ def _apply_ghost_heart(name: str):
     # Inorganic ions and metals: spheres, colored by chemical element
     send_request("show", args=["spheres", f"({name}) and inorganic"])
     send_request("color", args=["atomic", f"({name}) and inorganic"])
-    send_request("set", args=["sphere_scale", "0.4", f"({name}) and inorganic"])
+    send_request("set", args=["sphere_scale", "0.3", f"({name}) and inorganic"])
 
-    # DNA: brightorange backbone, deepteal ladders
-    dna_sel = f"({name}) and resn DA+DC+DG+DT"
-    send_request("set", args=["cartoon_nucleic_acid_color", "brightorange", dna_sel])
-    send_request("set", args=["cartoon_ladder_color", "deepteal", dna_sel])
+
+    # Nucleic acids (DNA/RNA): brightorange backbone, deepteal ladders
+    na_sel = f"({name}) and polymer.nucleic"
+    send_request("set", args=["cartoon_nucleic_acid_color", "brightorange", na_sel])
+    send_request("set", args=["cartoon_ladder_color", "deepteal", na_sel])
 
     # Center view and set rotation pivot to structure center
     send_request("center", args=[name])
@@ -60,13 +61,41 @@ def send_request(action: str, args: list = None, kwargs: dict = None) -> dict:
     }
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.settimeout(2.0)
+            s.settimeout(10.0)
             s.connect((HOST, PORT))
             s.sendall(json.dumps(payload).encode('utf-8'))
             data = s.recv(8192).decode('utf-8')
             return json.loads(data)
     except Exception as e:
         return {"status": "error", "error": f"Socket connection failed: {e}. Is the PyMOL plugin running?"}
+
+def _apply_multimer_heuristic(name: str, cutoff: float = 5.0):
+    """BFS expansion to find all connected chains in a multimer."""
+    # 1. Get initial chains
+    res = send_request("get_chains", args=[name])
+    if res.get("status") != "success" or not res.get("result"):
+        return
+    
+    all_chains = res.get("result")
+    kept_chains = {all_chains[0]}
+    
+    # 2. Expand until stable
+    while True:
+        chain_sel = "+".join(list(kept_chains))
+        # Find chains nearby the current set
+        nearby_res = send_request("get_chains", args=[f"({name} and not chain {chain_sel}) and bychain (({name} and chain {chain_sel}) around {cutoff})"])
+        
+        if nearby_res.get("status") == "success":
+            new_chains = [c for c in nearby_res.get("result", []) if c in all_chains]
+            if new_chains and not set(new_chains).issubset(kept_chains):
+                kept_chains.update(new_chains)
+                continue
+        break
+        
+    # 3. Apply the removal
+    final_sel = "+".join(list(kept_chains))
+    send_request("remove", args=[f"({name}) and not chain {final_sel}"])
+    send_request("hide", args=["everything", f"({name}) and solvent"])
 
 @mcp.tool()
 def fetch_structure(pdb_code: str, obj_name: Optional[str] = None) -> str:
@@ -78,53 +107,38 @@ def fetch_structure(pdb_code: str, obj_name: Optional[str] = None) -> str:
     name = obj_name if obj_name else pdb_code
 
     send_request("do", args=["reinitialize"])
-    send_request("set", args=["mouse_wheel_scale", "0.2"])
+    send_request("set", args=["mouse_wheel_scale", "0.1"])
     send_request("delete", args=[name])
+    
+    # Use standard fetch (assembly=1 was causing CmdException)
     res = send_request("fetch", args=[pdb_code, name])
     if res.get("status") == "error":
         return f"Error fetching {pdb_code}: {res.get('error')}"
         
-    # Apply heuristic
-    chains_res = send_request("get_chains", args=[f"({name})"])
-    if chains_res.get("status") == "success":
-        chains = chains_res.get("result", [])
-        if isinstance(chains, list) and chains:
-            first = chains[0]
-            keep_sel = f"({name} and chain {first}) or bychain ({name} and chain {first} around 5)"
-            send_request("remove", args=[f"({name}) and not ({keep_sel})"])
-            send_request("hide", args=["everything", f"({name}) and solvent"])
-            _apply_ghost_heart(name)
-            return f"Successfully fetched {pdb_code} as '{name}' and applied multimer, solvent, and ghost heart heuristics."
-
+    _apply_multimer_heuristic(name)
     _apply_ghost_heart(name)
-    return f"Successfully fetched {pdb_code} as '{name}' with ghost heart style, but no chains were found to apply heuristic."
+    send_request("zoom", args=[name])
+    return f"Successfully fetched {pdb_code} as '{name}' with ghost heart style and BFS multimer heuristic."
+
+
 
 @mcp.tool()
 def load_structure(file_path: str, obj_name: str) -> str:
     """
-    Loads a structure from a local file path and applies the multimer heuristic.
+    Loads a structure from a local file path and applies the BFS multimer heuristic.
     """
     send_request("do", args=["reinitialize"])
-    send_request("set", args=["mouse_wheel_scale", "0.2"])
+    send_request("set", args=["mouse_wheel_scale", "0.1"])
     send_request("delete", args=[obj_name])
     res = send_request("load", args=[file_path, obj_name])
     if res.get("status") == "error":
         return f"Error loading {file_path}: {res.get('error')}"
         
-    # Apply heuristic
-    chains_res = send_request("get_chains", args=[f"({obj_name})"])
-    if chains_res.get("status") == "success":
-        chains = chains_res.get("result", [])
-        if isinstance(chains, list) and chains:
-            first = chains[0]
-            keep_sel = f"({obj_name} and chain {first}) or bychain ({obj_name} and chain {first} around 5)"
-            send_request("remove", args=[f"({obj_name}) and not ({keep_sel})"])
-            send_request("hide", args=["everything", f"({obj_name}) and solvent"])
-            _apply_ghost_heart(obj_name)
-            return f"Successfully loaded {file_path} as '{obj_name}' and applied multimer, solvent, and ghost heart heuristics."
-
+    _apply_multimer_heuristic(obj_name)
     _apply_ghost_heart(obj_name)
-    return f"Loaded {file_path} as '{obj_name}' with ghost heart style."
+    send_request("zoom", args=[obj_name])
+    return f"Successfully loaded {file_path} as '{obj_name}' with ghost heart style and BFS multimer heuristic."
+
 
 @mcp.tool()
 def show(representation: str, selection: str = "all") -> str:
@@ -206,11 +220,15 @@ def ligand_view(obj_name: str, ligand_resn: str) -> str:
     send_request("do", args=[f"util.cbaw {pocket_sel}"])
     send_request("color", args=["lightblue", f"({pocket_sel}) and elem C"])
 
-    # Ligand as thick sticks with yellow carbons
-    send_request("show", args=["sticks", lig_sel])
-    send_request("set", args=["stick_radius", "0.25", lig_sel])
+    # Ligand as thick sticks with yellow carbons (organic) or spheres (inorganic)
+    send_request("show", args=["sticks", f"({lig_sel}) and organic"])
+    send_request("set", args=["stick_radius", "0.25", f"({lig_sel}) and organic"])
+    send_request("show", args=["spheres", f"({lig_sel}) and inorganic"])
+    send_request("set", args=["sphere_scale", "0.3", f"({lig_sel}) and inorganic"])
+    
     send_request("do", args=[f"util.cbaw {lig_sel}"])
-    send_request("color", args=["yellow", f"({lig_sel}) and elem C"])
+    send_request("color", args=["yellow", f"({lig_sel}) and organic and elem C"])
+    send_request("color", args=["atomic", f"({lig_sel}) and inorganic"])
 
     # H-bonds between ligand and pocket (mode=2: polar contacts by geometry)
     send_request("do", args=[f"distance hbonds, ({lig_sel}), ({pocket_sel}), 3.5, 2"])
@@ -949,7 +967,8 @@ def pointillist_view(obj_name: str) -> str:
     send_request("orient", args=[obj_name])
     return f"Pointillist/Starfield view applied to {obj_name}."
 
-def set(setting: str, value: str, selection: Optional[str] = None) -> str:
+@mcp.tool(name="set")
+def set_setting(setting: str, value: str, selection: Optional[str] = None) -> str:
     """
     Sets a PyMOL setting to a specified value
     """
@@ -1233,8 +1252,8 @@ def align(mobile: str, target: Optional[str] = "all", options: Optional[str] = N
     return f"Executed align successfully."
 
 
-@mcp.tool()
-def super(mobile: str, target: Optional[str] = "all", options: Optional[str] = None) -> str:
+@mcp.tool(name="super")
+def super_tool(mobile: str, target: Optional[str] = "all", options: Optional[str] = None) -> str:
     """
     Superimposes one selection onto another
     """

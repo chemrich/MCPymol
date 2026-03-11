@@ -70,8 +70,8 @@ class PyMOLSocketServer:
             # Dynamic resolution for all native PyMOL cmd methods
             elif hasattr(cmd, action) and callable(getattr(cmd, action)):
                 method = getattr(cmd, action)
-                method(*args, **kwargs)
-                return {"status": "success", "result": f"Executed '{action}' successfully."}
+                rv = method(*args, **kwargs)
+                return {"status": "success", "result": rv if rv is not None else f"Executed '{action}' successfully."}
                 
             else:
                 return {"status": "error", "error": f"Unknown action or method not found on cmd: {action}"}

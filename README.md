@@ -14,7 +14,7 @@ This code was developed from scratch using a combination of Antigravity, Gemini 
 
 MCPymol acts as a bridge between an AI assistant and a running PyMOL desktop instance. It provides:
 - **50+ Auto-Generated PyMOL Commands**: Claude has direct access to PyMOL primitives like `show`, `hide`, `color`, `distance`, `get_chains`, `select`, and many more.
-- **Smart Multimer & Solvent Heuristics**: When fetching or loading structures, MCPymol automatically applies heuristics to isolate the primary chain (and any chains within 5Å of it) while hiding waters, non-standard crystallization additives, and solvents. This ensures a clean, relevant view of the protein structure immediately upon loading.
+- **Smart Multimer & Solvent Heuristics**: When fetching or loading structures, MCPymol automatically attempts to fetch the **biological assembly** (the functional multimer) and applies an **iterative Breadth-First Search (BFS) style heuristic** to isolate the primary multimer. Starting with the first chain, it recursively adds all neighboring chains within a customizable radius (default **5.0Å**) until the selection stabilizes. This ensures that large circular or sprawling assemblies like the CRP pentamer or Ferritin cage are kept whole, while removing distant crystallographic copies from the unit cell. It also automatically hides waters, solvents, and non-standard crystallization additives for a clean, relevant view.
 - **Dual-Process Architecture**: To circumvent PyMOL's internal Python dependency limitations, MCPymol runs via a two-part bridge. A native PyMOL script runs a lightweight background socket listener inside your PyMOL App, while a standalone FastMCP server handles communication with the AI assistant.
 
 ## 🛠️ Intended Use
