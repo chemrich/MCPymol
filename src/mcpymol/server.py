@@ -52,8 +52,15 @@ def _apply_ghost_heart(name: str):
     send_request("center", args=[name])
     send_request("do", args=[f"origin {name}"])
 
-def send_request(action: str, args: list = None, kwargs: dict = None) -> dict:
-    """Send a JSON request to the PyMOL plugin socket server."""
+def send_request(action: str, args: list = None, kwargs: dict = None, timeout: float = 10.0) -> dict:
+    """Send a JSON request to the PyMOL plugin socket server.
+    
+    Args:
+        action: The PyMOL command or custom action to execute.
+        args: Positional arguments for the action.
+        kwargs: Keyword arguments for the action.
+        timeout: Socket timeout in seconds. Defaults to 10.0.
+    """
     payload = {
         "action": action,
         "args": args or [],
@@ -61,7 +68,7 @@ def send_request(action: str, args: list = None, kwargs: dict = None) -> dict:
     }
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.settimeout(10.0)
+            s.settimeout(timeout)
             s.connect((HOST, PORT))
             s.sendall(json.dumps(payload).encode('utf-8'))
             data = s.recv(8192).decode('utf-8')
@@ -98,11 +105,17 @@ def _apply_multimer_heuristic(name: str, cutoff: float = 5.0):
     send_request("hide", args=["everything", f"({name}) and solvent"])
 
 @mcp.tool()
-def fetch_structure(pdb_code: str, obj_name: Optional[str] = None) -> str:
+def fetch_structure(pdb_code: str, obj_name: Optional[str] = None, multimer_cutoff: float = 8.0) -> str:
     """
-    Fetches a protein structure from the PDB by its 4-letter code, and applies the multimer heuristic.
-    The heuristic automatically removes all chains except the first chain and any other chains
-    that are within 5 angstroms of the first chain (preserving associated multimers).
+    Fetches a protein structure from the PDB.
+    By default, it attempts to fetch the first biological assembly (multimer),
+    and removes any unrelated chains/states that are not part of the primary multimer.
+
+    Args:
+        pdb_code: 4-letter PDB code (e.g. "1abc")
+        obj_name: Optional custom name for the object in PyMOL
+        multimer_cutoff: Distance (A) between chains to keep them in the same multimer.
+                         Default 8.0A is suitable for most functional assemblies.
     """
     name = obj_name if obj_name else pdb_code
 
@@ -110,22 +123,29 @@ def fetch_structure(pdb_code: str, obj_name: Optional[str] = None) -> str:
     send_request("set", args=["mouse_wheel_scale", "0.1"])
     send_request("delete", args=[name])
     
-    # Use standard fetch (assembly=1 was causing CmdException)
+    # Use standard fetch
     res = send_request("fetch", args=[pdb_code, name])
     if res.get("status") == "error":
         return f"Error fetching {pdb_code}: {res.get('error')}"
         
-    _apply_multimer_heuristic(name)
+    _apply_multimer_heuristic(name, multimer_cutoff)
     _apply_ghost_heart(name)
     send_request("zoom", args=[name])
-    return f"Successfully fetched {pdb_code} as '{name}' with ghost heart style and BFS multimer heuristic."
+    return f"Successfully fetched {pdb_code} as '{name}' with ghost heart style and BFS multimer heuristic (cutoff={multimer_cutoff}A)."
+
 
 
 
 @mcp.tool()
-def load_structure(file_path: str, obj_name: str) -> str:
+def load_structure(file_path: str, obj_name: str, multimer_cutoff: float = 8.0) -> str:
     """
     Loads a structure from a local file path and applies the BFS multimer heuristic.
+
+    Args:
+        file_path: Path to the structure file (PDB, MMCIF, etc.)
+        obj_name: Name for the object in PyMOL
+        multimer_cutoff: Distance (A) between chains to keep them in the same multimer.
+                         Default 8.0A is suitable for most functional assemblies.
     """
     send_request("do", args=["reinitialize"])
     send_request("set", args=["mouse_wheel_scale", "0.1"])
@@ -134,10 +154,11 @@ def load_structure(file_path: str, obj_name: str) -> str:
     if res.get("status") == "error":
         return f"Error loading {file_path}: {res.get('error')}"
         
-    _apply_multimer_heuristic(obj_name)
+    _apply_multimer_heuristic(obj_name, multimer_cutoff)
     _apply_ghost_heart(obj_name)
     send_request("zoom", args=[obj_name])
-    return f"Successfully loaded {file_path} as '{obj_name}' with ghost heart style and BFS multimer heuristic."
+    return f"Successfully loaded {file_path} as '{obj_name}' with ghost heart style and BFS multimer heuristic (cutoff={multimer_cutoff}A)."
+
 
 
 @mcp.tool()
