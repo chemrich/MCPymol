@@ -123,6 +123,31 @@ If you are running on a managed machine where tools like `uv` are restricted or 
    ```
    *(Note: If configuring Claude Code in a restricted environment, ensure the `claude_desktop_config.json` `command` points to the `.venv/bin/python` executable and uses arguments `["-m", "mcpymol"]`).*
 
+#### Option D: Linux in a Restricted Environment with Gemini CLI
+If you are running on a managed Linux workstation where standard python environments are strictly managed, you will need to create a `venv` to bypass those restrictions. 
+
+1. **Verify your PyMOL installation:** Ensure you have PyMOL installed and accessible via your GUI.
+   ```bash
+   sudo apt-get install pymol
+   ```
+2. **Create and activate a virtual environment:**
+   ```bash
+   cd MCPymol
+   python3 -m venv .venv
+   source .venv/bin/activate
+   ```
+   *(Note: If you get an error that the `venv` module is missing on Debian/gLinux, you may need to run `sudo apt-get install python3-venv` first).*
+3. **Install the package dependencies natively into the virtual environment:**
+   ```bash
+   pip install --upgrade pip
+   pip install -e .
+   ```
+4. **Configure Gemini CLI:** Add the server to Gemini CLI, pointing directly to the generated script inside the virtual environment:
+   ```bash
+   gemini mcp add mcpymol /absolute/path/to/MCPymol/.venv/bin/mcpymol
+   ```
+   *(Note: Ensure that you've run the `plugin.py` native script inside your PyMOL GUI window as instructed in Step 1 before testing the server).*
+
 ## 🧪 Running Tests
 The repository includes a rigorous, "Google Engineer" grade `pytest` suite testing both the socket payload generation and simulated PyMOL API execution boundaries.
 To run the automated tests:
