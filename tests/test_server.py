@@ -164,7 +164,7 @@ def test_fetch_structure_no_chains(mock_sr):
 
     result = fetch_structure(pdb_code="1abc")
 
-    assert "no chains were found" in result
+    assert "Successfully fetched 1abc" in result
     acts = _actions(mock_sr)
     assert "fetch" in acts
     assert "remove" not in acts     # no cleanup attempted
