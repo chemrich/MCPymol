@@ -5,3 +5,15 @@ main.py
 .DS_Store
 *.mc
 .claude/
+.gemini/
+
+# Structural Data
+*.pdb
+*.cif
+*.mmtf
+
+# Media
+*.mp4
+*.gif
+*.png
+!assets/*.png
