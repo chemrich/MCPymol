@@ -116,8 +116,8 @@ This is the standard, unrestricted setup for Gemini CLI users using `uv`.
    gemini mcp refresh
    ```
 
-#### Option D: macOS in a Restricted Environment (Corporate Laptop) with Gemini CLI
-If you are running on a managed machine where tools like `uv` are restricted or blocked by security policies, you must use a standard Python virtual environment instead.
+#### Option C: macOS in a Restricted Environment (Corporate Laptop) with Gemini CLI
+If you are running on a managed machine where tools like `uv` are restricted or blocked by security policies, you must use a standard Python virtual environment instead. If you're working in an environment where package repos are managed, you might have to tweak some of the addresses in the uv.lock to work with your organization's rules.
 
 1. **Create and activate a virtual environment** using a modern Python version (3.10+):
    ```bash
@@ -136,8 +136,8 @@ If you are running on a managed machine where tools like `uv` are restricted or 
    ```
    *(Note: If configuring Claude Code CLI in a restricted environment, point directly to the venv binary: `claude mcp add mcpymol /absolute/path/to/MCPymol/.venv/bin/mcpymol`).*
 
-#### Option E: Linux in a Restricted Environment with Gemini CLI
-If you are running on a managed Linux workstation where standard python environments are strictly managed, you will need to create a `venv` to bypass those restrictions. 
+#### Option D: Linux in a Restricted Environment with Gemini CLI
+If you are running on a managed Linux workstation where standard python environments are strictly managed, you will need to create a `venv` to bypass those restrictions. If you're working in an environment where package repos are managed, you might have to tweak some of the addresses in the uv.lock to work with your organization's rules.
 
 1. **Verify your PyMOL installation:** Ensure you have PyMOL installed and accessible via your GUI.
    ```bash
