@@ -58,15 +58,28 @@ MCPYMOL_PORT=9867 uv run mcpymol
 
 ### 2. Configure Your AI Assistant
 
-Choose ONE of the following three setups based on your environment and preferred AI assistant. All instructions assume you have cloned the repository to your machine.
+Choose ONE of the following setups based on your environment and preferred AI assistant. All instructions assume you have cloned the repository to your machine.
 
 ```bash
 git clone https://github.com/yourusername/MCPymol.git
 cd MCPymol
 ```
 
-#### Option A: macOS with Claude Desktop (Using `uv`)
-This is the standard, unrestricted setup for Claude users using `uv` for dependency management.
+#### Option A: macOS with Claude Code CLI (Using `uv`)
+This is the recommended setup if you are using Claude Code in the terminal (i.e., the `claude` CLI, not the Claude Desktop app).
+
+1. **Install dependencies:**
+   ```bash
+   uv sync
+   ```
+2. **Register the MCP server** by running the following in your terminal:
+   ```bash
+   claude mcp add mcpymol -- uv --directory /absolute/path/to/MCPymol run mcpymol
+   ```
+3. Start a new Claude Code session. Ensure the PyMOL plugin is running, and you're ready to start asking conversational questions about protein structures!
+
+#### Option B: macOS with Claude Desktop (Using `uv`)
+This is the standard setup for users of the Claude Desktop app using `uv` for dependency management.
 
 1. **Install dependencies:**
    ```bash
@@ -90,7 +103,7 @@ This is the standard, unrestricted setup for Claude users using `uv` for depende
    ```
 3. Restart Claude Desktop. Ensure the PyMOL plugin is running, and you're ready to start asking conversational questions about protein structures!
 
-#### Option B: macOS with Gemini CLI (Using `uv`)
+#### Option C: macOS with Gemini CLI (Using `uv`)
 This is the standard, unrestricted setup for Gemini CLI users using `uv`.
 
 1. **Install dependencies:**
@@ -121,7 +134,7 @@ If you are running on a managed machine where tools like `uv` are restricted or 
    ```bash
    gemini mcp add mcpymol /absolute/path/to/MCPymol/.venv/bin/mcpymol
    ```
-   *(Note: If configuring Claude Code in a restricted environment, ensure the `claude_desktop_config.json` `command` points to the `.venv/bin/python` executable and uses arguments `["-m", "mcpymol"]`).*
+   *(Note: If configuring Claude Code CLI in a restricted environment, point directly to the venv binary: `claude mcp add mcpymol /absolute/path/to/MCPymol/.venv/bin/mcpymol`).*
 
 #### Option D: Linux in a Restricted Environment with Gemini CLI
 If you are running on a managed Linux workstation where standard python environments are strictly managed, you will need to create a `venv` to bypass those restrictions. If you're working in an environment where package repos are managed, you might have to tweak some of the addresses in the uv.lock to work with your organization's rules.
