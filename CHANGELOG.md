@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `conservation_view` tool — evolutionary conservation visualization using Shannon entropy
+- MMseqs2 integration via ColabFold public API (configurable for local servers via `MCPYMOL_MMSEQS_URL` env var)
+- Full pipeline: sequence extraction → MSA generation → entropy scoring → B-factor mapping → spectrum coloring
+- A3M parser with insertion-stripping for clean MSA alignment
+- Per-residue Shannon entropy calculation normalized to [0, 1]
+- 18 new tests covering A3M parsing, entropy math, API mocking, and end-to-end conservation_view
+
 ## [1.0.0] - 2026-03-30
 
 ### Added
