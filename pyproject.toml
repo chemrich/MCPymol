@@ -1,13 +1,47 @@
 [project]
 name = "mcpymol"
-version = "1.0.0"
+version = "1.1.1"
 description = "A conversational MCP server interface for PyMOL protein visualization"
 readme = "README.md"
 requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [
+    { name = "chemrich" },
+]
+keywords = [
+    "pymol",
+    "mcp",
+    "model-context-protocol",
+    "claude",
+    "gemini",
+    "structural-biology",
+    "protein-visualization",
+    "bioinformatics",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Topic :: Scientific/Engineering :: Visualization",
+]
 dependencies = [
     "fastmcp>=0.4.1",
     "mcp>=1.26.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/chemrich/MCPymol"
+Repository = "https://github.com/chemrich/MCPymol"
+Issues = "https://github.com/chemrich/MCPymol/issues"
+Changelog = "https://github.com/chemrich/MCPymol/blob/main/CHANGELOG.md"
 
 [project.scripts]
 mcpymol = "mcpymol.server:main"
@@ -24,3 +58,7 @@ build-backend = "hatchling.build"
 
 [tool.uv]
 package = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

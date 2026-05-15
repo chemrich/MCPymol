@@ -5,6 +5,28 @@ All notable changes to MCPymol will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1] - 2026-05-15
+
+### Fixed
+- **Bridge framing.** Both the in-PyMOL plugin and the external bridge now drain TCP responses to EOF (with incremental JSON parsing as a fallback for mock-style peers), instead of truncating at the first 8 KB chunk. Long PyMOL responses — `get_fastastr` on multi-hundred-residue chains, `get_chains` on large assemblies, error tracebacks — no longer corrupt the JSON.
+- **`util.*` tool dispatch.** The plugin previously checked `hasattr(cmd, action)` for every action, so dotted names like `util.cbc` / `util.cbaw` / `util.chainbow` silently failed even though the tools were registered. Plugin now resolves dotted names through `pymol.util` (and falls back to a general attribute walk).
+- **`conservation_view` residue mapping.** Previous version assumed `resi == i + 1` along the FASTA, which silently misaligned scores in structures with non-contiguous residue numbering (gaps, modified termini). Now walks the actual CA `resi` values from PyMOL and maps via a stored dict.
+
+### Performance
+- **`conservation_view`** alter loop collapsed from O(2N) socket round-trips to a single batched `cmd.do` script. For a 300-residue chain this drops from ~10 s of TCP overhead alone to one round-trip.
+
+### Added
+- `list_objects`, `list_chains(obj_name)`, `list_ligands(obj_name)` introspection tools so models can ground themselves in actual session state instead of guessing object names, chain IDs, or 3-letter ligand codes.
+- `python -m mcpymol` entry point via `__main__.py`.
+- GitHub Actions CI running pytest on Python 3.10–3.13.
+
+### Changed
+- Tool descriptions for `show`, `hide`, `color`, `select`, `remove`, `distance`, `execute_pymol_command` now enumerate valid argument vocabularies (representation names, color names) and include a brief PyMOL selection-syntax primer. Stronger guardrail on `execute_pymol_command` so models reach for it less.
+- `pyproject.toml` enriched with authors, urls, classifiers, keywords, and a `[tool.pytest.ini_options]` block so `pytest` Just Works from the repo root.
+- `.gitignore` extended to cover `venv/`, `refresh/`, `.vscode/`, `build/`, `dist/`.
+- README rewritten: fixed duplicate "Option C", fixed `yourusername/MCPymol` placeholder, added missing views (`bfactor_view`, `textbook_view`, `cinematic_view`, `pointillist_view`, `conservation_view`), added a how-it-talks architecture diagram, a troubleshooting table, and a "Try it" prompt list.
+- New `CONTRIBUTING.md`.
+
 ## [1.1.0] - 2026-03-31
 
 ### Added
