@@ -222,29 +222,67 @@ def _apply_ghost_heart(name: str):
     send_request("center", args=[name])
     send_request("do", args=[f"origin {name}"])
 
+# A single recv() chunk size.  We loop until the plugin half-closes, so this
+# is just a memory hint, not a cap on the total response size.
+_RECV_CHUNK = 65536
+
+
 def send_request(action: str, args: list = None, kwargs: dict = None, timeout: float = 10.0) -> dict:
     """Send a JSON request to the PyMOL plugin socket server.
-    
+
+    The framing is one request per TCP connection: we write the JSON payload,
+    half-close our write side so the plugin sees EOF, then drain the response
+    until the plugin half-closes its write side.  This avoids the 8 KB
+    response truncation that bit ``get_fastastr`` on long chains.
+
     Args:
         action: The PyMOL command or custom action to execute.
         args: Positional arguments for the action.
         kwargs: Keyword arguments for the action.
         timeout: Socket timeout in seconds. Defaults to 10.0.
+
+    Returns:
+        A dict with at least a ``status`` key (``success`` or ``error``).
+        ``error`` responses always include a human-readable ``error`` field.
     """
     payload = {
         "action": action,
         "args": args or [],
-        "kwargs": kwargs or {}
+        "kwargs": kwargs or {},
     }
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.settimeout(timeout)
             s.connect((HOST, PORT))
-            s.sendall(json.dumps(payload).encode('utf-8'))
-            data = s.recv(8192).decode('utf-8')
-            return json.loads(data)
+            s.sendall(json.dumps(payload).encode("utf-8"))
+            try:
+                s.shutdown(socket.SHUT_WR)
+            except OSError:
+                pass
+            chunks: list[bytes] = []
+            while True:
+                chunk = s.recv(_RECV_CHUNK)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                # JSON is self-delimiting once we have enough bytes.  Try to
+                # parse after every chunk so we don't depend on the peer
+                # half-closing (handy for test mocks too).
+                try:
+                    return json.loads(b"".join(chunks).decode("utf-8"))
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    continue
+            if not chunks:
+                return {"status": "error", "error": "Empty response from PyMOL plugin."}
+            try:
+                return json.loads(b"".join(chunks).decode("utf-8"))
+            except (json.JSONDecodeError, UnicodeDecodeError) as e:
+                return {"status": "error", "error": f"Malformed response from PyMOL plugin: {e}"}
     except Exception as e:
-        return {"status": "error", "error": f"Socket connection failed: {e}. Is the PyMOL plugin running?"}
+        return {
+            "status": "error",
+            "error": f"Socket connection failed: {e}. Is the PyMOL plugin running?",
+        }
 
 def _apply_multimer_heuristic(name: str, cutoff: float = 5.0):
     """BFS expansion to find all connected chains in a multimer."""
@@ -331,54 +369,175 @@ def load_structure(file_path: str, obj_name: str, multimer_cutoff: float = 8.0) 
 
 
 
+# ── Primitive tools ──────────────────────────────────────────────────────────
+#
+# A note on PyMOL selection syntax (what to put in ``selection``):
+#   "all"                      every atom in every loaded object
+#   "1abc"                     all atoms of the object named 1abc
+#   "1abc and chain A"         chain A of object 1abc
+#   "1abc and resi 10-20"      residue range
+#   "1abc and resn ATP"        residues with name ATP (e.g. ligands)
+#   "1abc and name CA"         atom names
+#   "1abc and ss H"            secondary-structure helix
+#   "polymer.protein"          protein-only macro
+#   "organic"                  small-molecule cofactors
+#   "byres (a around 5)"       residues with any atom within 5 Å of selection a
+
 @mcp.tool()
 def show(representation: str, selection: str = "all") -> str:
-    """Shows a representation for a given selection."""
+    """Shows a graphical representation for a given selection.
+
+    Args:
+        representation: One of ``cartoon``, ``sticks``, ``spheres``, ``surface``,
+            ``lines``, ``ribbon``, ``dots``, ``mesh``, ``nb_spheres``, ``labels``.
+        selection: PyMOL selection string. See module-level note for syntax.
+    """
     res = send_request("show", args=[representation, selection])
     if res.get("status") == "error": return res.get("error")
     return f"Showing {representation} for selection '{selection}'"
 
 @mcp.tool()
 def hide(representation: str, selection: str = "all") -> str:
-    """Hides a representation for a given selection."""
+    """Hides a graphical representation for a given selection.
+
+    Args:
+        representation: Same vocabulary as :func:`show`, plus ``everything`` to
+            hide all reps for the selection.
+        selection: PyMOL selection string.
+    """
     res = send_request("hide", args=[representation, selection])
     if res.get("status") == "error": return res.get("error")
     return f"Hiding {representation} for selection '{selection}'"
 
 @mcp.tool()
 def color(color_name: str, selection: str = "all") -> str:
-    """Sets the color for the specified selection."""
+    """Sets the color for a selection.
+
+    Args:
+        color_name: A PyMOL color. Common names: ``red``, ``blue``, ``green``,
+            ``yellow``, ``magenta``, ``cyan``, ``orange``, ``salmon``, ``marine``,
+            ``forest``, ``palegreen``, ``skyblue``, ``violet``, ``grey50``,
+            ``white``, ``black``. Use ``atomic`` to color non-carbon atoms by
+            element while leaving carbons untouched.
+        selection: PyMOL selection string.
+    """
     res = send_request("color", args=[color_name, selection])
     if res.get("status") == "error": return res.get("error")
     return f"Colored selection '{selection}' with {color_name}"
-        
+
 @mcp.tool()
 def select(name: str, selection: str) -> str:
-    """Creates a named selection for subsequent use."""
+    """Creates (or replaces) a named selection for later reuse.
+
+    Args:
+        name: Identifier you'll refer to later (e.g. ``active_site``).
+        selection: PyMOL selection expression to assign to that name.
+    """
     res = send_request("select", args=[name, selection])
     if res.get("status") == "error": return res.get("error")
     return f"Created named selection '{name}' for '{selection}'"
 
 @mcp.tool()
 def remove(selection: str) -> str:
-    """Removes atoms or structures matching the selection."""
+    """Permanently removes the atoms matching the selection.
+
+    This deletes atoms; it does not just hide them. To hide instead, use
+    :func:`hide`.
+    """
     res = send_request("remove", args=[selection])
     if res.get("status") == "error": return res.get("error")
     return f"Removed selection '{selection}'"
 
 @mcp.tool()
 def distance(name: str, selection1: str, selection2: str) -> str:
-    """Measures and displays the distance between two selections."""
+    """Measures and draws a distance object between two selections.
+
+    Args:
+        name: Name for the distance object (used to delete/recolor later).
+        selection1: First selection.
+        selection2: Second selection.
+    """
     res = send_request("distance", args=[name, selection1, selection2])
     if res.get("status") == "error": return res.get("error")
     return f"Measured distance between '{selection1}' and '{selection2}' as '{name}'"
 
 @mcp.tool()
 def execute_pymol_command(command: str) -> str:
-    """Executes a raw PyMOL command string. Use this only for commands not covered by primitive tools."""
+    """Executes a raw PyMOL command string (PyMOL CLI syntax).
+
+    PREFER the dedicated tools when one exists — show, color, select, distance,
+    ligand_view, interface_view, etc. They have better defaults, do compound
+    setup in one call, and produce cleaner results.
+
+    Reach for this tool only when no other tool covers what you need (e.g.
+    ``set ray_shadow, 0``, ``bg_color grey20``, multi-statement scripts).
+    Note: this accepts the PyMOL ``cmd.do`` mini-language, not Python.
+    """
     res = send_request("do", args=[command])
     if res.get("status") == "error": return res.get("error")
     return f"Executed command: {command}"
+
+
+# ── Scene introspection ──────────────────────────────────────────────────────
+
+@mcp.tool()
+def list_objects() -> str:
+    """Lists all loaded PyMOL objects.
+
+    Call this when you don't know what's currently in the session — for
+    example before composing a selection or running a view tool that needs
+    an ``obj_name``.
+    """
+    res = send_request("get_object_list", args=["all"])
+    if res.get("status") == "error":
+        return res.get("error")
+    objs = res.get("result") or []
+    if not objs:
+        return "No objects are loaded."
+    return "Loaded objects: " + ", ".join(objs)
+
+
+@mcp.tool()
+def list_chains(obj_name: str = "all") -> str:
+    """Lists the chain IDs present in an object (or in all objects).
+
+    Useful before calling :func:`interface_view`, :func:`conservation_view`
+    or any tool that needs a specific chain ID.
+    """
+    res = send_request("get_chains", args=[obj_name])
+    if res.get("status") == "error":
+        return res.get("error")
+    chains = res.get("result") or []
+    if not chains:
+        return f"No chains found in '{obj_name}'."
+    return f"Chains in '{obj_name}': " + ", ".join(chains)
+
+
+@mcp.tool()
+def list_ligands(obj_name: str) -> str:
+    """Lists the small-molecule (organic) ligand residue names in an object.
+
+    Call this before :func:`ligand_view`, :func:`pocket_view`, or
+    :func:`pharmacophore_view` when you don't already know the ligand's
+    3-letter residue name.
+    """
+    # We could use `iterate (...) and organic, stored.ligs.add(resn)` and then
+    # read `stored.ligs` back, but PyMOL doesn't have a built-in "send me a
+    # variable" command, so we'd need a side channel. Cheaper: ask PyMOL to
+    # dump the organic atoms as PDB text and parse the resn column.
+    fetch = send_request("get_pdbstr", args=[f"({obj_name}) and organic"])
+    if fetch.get("status") == "error":
+        return fetch.get("error")
+    pdb = fetch.get("result") or ""
+    ligs: set[str] = set()
+    for line in pdb.splitlines():
+        if line.startswith(("HETATM", "ATOM  ")):
+            resn = line[17:20].strip()
+            if resn:
+                ligs.add(resn)
+    if not ligs:
+        return f"No organic ligands found in '{obj_name}'."
+    return f"Ligands in '{obj_name}': " + ", ".join(sorted(ligs))
 
 
 @mcp.tool()
@@ -552,45 +711,46 @@ def conservation_view(
         _conservation_cache[cache_key] = entropies
         msa_note = f"{len(msa)} sequences"
 
-    # 5. Map conservation scores onto B-factor column
-    #    We invert entropy so that high B = conserved (for intuitive spectrum coloring)
+    # 5. Map conservation scores onto B-factor column.
+    #
+    # We invert entropy so that high B = conserved (intuitive spectrum coloring).
+    # Both scale modes produce scores in [0, 100]: 100 = most conserved.
+    #
+    # IMPORTANT: structures often have non-contiguous residue numbering (gaps,
+    # insertion codes, modified termini), so we can't just use i+1 → resi.  We
+    # let PyMOL walk the CAs in selection order and map *its* resi → our score
+    # via a stored dict, then apply the mapping in a single alter pass.  This
+    # collapses ~2N socket round-trips into one.
     n_residues = len(entropies)
     min_entropy = min(entropies)
     max_entropy = max(entropies)
-
-    # Build a PyMOL command to alter B-factors residue by residue
-    # First, zero out all B-factors
-    send_request("do", args=[f"alter {chain_sel}, b=0"])
-
-    # Get the residue indices from PyMOL to map entropy values correctly
-    resi_res = send_request("do", args=[
-        f'stored.resi_list = []\n'
-        f'iterate {chain_sel} and name CA, stored.resi_list.append(resi)'
-    ])
-
-    # Compute per-residue conservation scores based on scaling mode
-    # Both modes produce scores in [0, 100] where 100 = most conserved
     entropy_range = max_entropy - min_entropy
 
-    for i, entropy in enumerate(entropies):
+    scores: list[float] = []
+    for entropy in entropies:
         if scale == "relative" and entropy_range > 0:
-            # Relative: min_entropy → 100 (most conserved), max_entropy → 0
-            conservation_score = (1.0 - (entropy - min_entropy) / entropy_range) * 100.0
+            score = (1.0 - (entropy - min_entropy) / entropy_range) * 100.0
         else:
-            # Absolute (or relative with zero range, i.e. all positions identical)
-            conservation_score = (1.0 - entropy) * 100.0
+            score = (1.0 - entropy) * 100.0
+        scores.append(round(score, 2))
 
-        # resi is 1-indexed in PDB convention; we use rank-order from the FASTA
-        resi_idx = i + 1
-        send_request("do", args=[
-            f"alter ({chain_sel}) and resi {resi_idx} and name CA, b={conservation_score:.1f}"
-        ])
-        # Propagate CA B-factor to all atoms in the residue
-        send_request("do", args=[
-            f"alter ({chain_sel}) and resi {resi_idx} and not name CA, "
-            f"b=cmd.get_model('({chain_sel}) and resi {resi_idx} and name CA').atom[0].b "
-            f"if cmd.get_model('({chain_sel}) and resi {resi_idx} and name CA').atom else 0"
-        ])
+    # One do block: zero out, push scores, build resi → score map by walking
+    # CAs in selection order, then alter all atoms in one pass.
+    apply_script = "\n".join([
+        f"alter {chain_sel}, b=0",
+        f"stored.cons_scores = {json.dumps(scores)}",
+        "stored.cons_map = {}",
+        "stored.cons_idx = 0",
+        (
+            f"iterate {chain_sel} and name CA, "
+            "stored.cons_map[resi] = stored.cons_scores[stored.cons_idx] "
+            "if stored.cons_idx < len(stored.cons_scores) else 0.0; "
+            "stored.cons_idx = stored.cons_idx + 1"
+        ),
+        f"alter {chain_sel}, b=stored.cons_map.get(resi, 0.0)",
+        f"rebuild {obj_name}",
+    ])
+    send_request("do", args=[apply_script])
 
     # 6. Apply visualization
     send_request("hide", args=["everything", obj_name])
@@ -607,9 +767,6 @@ def conservation_view(
     send_request("do", args=["bg_color black"])
     send_request("center", args=[obj_name])
     send_request("do", args=[f"origin {obj_name}"])
-
-    # Rebuild to apply B-factor changes
-    send_request("do", args=["rebuild"])
 
     scale_label = "relative" if scale == "relative" else "absolute"
     return (
