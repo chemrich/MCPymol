@@ -301,6 +301,24 @@ chains); `method="voxel"` is robust for thin nucleic acids and slightly
 thickens fragile features for printability. In your slicer, load the first STL,
 then add the others as *parts* (don't re-centre) and assign a filament per part.
 
+### `print_ribbon_view` — print-ready chunky ribbons
+
+A preset that solves the classic problem of printing cartoons: PyMOL builds
+each β-strand and loop as a separate mesh segment, so the strand→loop junctions
+have no connecting geometry and slice into fragile, disconnected pieces.
+`print_ribbon_view` configures chunky β-strand arrows and a fat helix, hides
+the loop cartoon, and adds a continuous backbone *spine* (`<obj>_spine`, a
+`cartoon tube` that ignores secondary structure and runs unbroken through the
+whole chain). Exported together the voxel step fuses them into one watertight
+solid with no junction discontinuity — and the spine doubles as internal rebar
+for print rigidity. Tune `spine_radius` for more or less reinforcement.
+
+```
+print_ribbon_view(obj_name="1ema")
+print_export(obj_name="1ema", groups="1ema=(1ema or 1ema_spine)",
+             method="voxel", voxel_pitch=0.2)
+```
+
 ## The name
 
 My best friend in high school once shared an apartment with MC Chris, who voiced MC Pee Pants in Aqua Teen Hunger Force. I'm not saying that was the inspiration for the name of this project, but I'm not denying it either.
