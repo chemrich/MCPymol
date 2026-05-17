@@ -33,6 +33,7 @@ from mcpymol.server import (
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+
 def _sr_mock(**action_results):
     """Return a side_effect for patching send_request.
 
@@ -40,12 +41,14 @@ def _sr_mock(**action_results):
     other calls return a generic success response.  If a value is callable
     it is invoked with (action, args, kwargs) to produce the result.
     """
+
     def fake(action, args=None, kwargs=None):
         if action in action_results:
             val = action_results[action]
             result = val(action, args, kwargs) if callable(val) else val
             return {"status": "success", "result": result}
         return {"status": "success", "result": "OK"}
+
     return fake
 
 
@@ -55,6 +58,7 @@ def _actions(mock_sr):
 
 
 # ── socket.socket fixture ─────────────────────────────────────────────────────
+
 
 @pytest.fixture
 def mock_socket():
@@ -69,6 +73,7 @@ def mock_socket():
 
 
 # ── send_request unit tests ───────────────────────────────────────────────────
+
 
 def test_send_request_success(mock_socket):
     """Low-level wire format and return value."""
@@ -85,8 +90,8 @@ def test_send_request_success(mock_socket):
 def test_send_request_connection_refused():
     """ConnectionRefusedError returns a structured error dict."""
     with patch("socket.socket") as mock_cls:
-        mock_cls.return_value.__enter__.return_value.connect.side_effect = (
-            ConnectionRefusedError("Connection refused")
+        mock_cls.return_value.__enter__.return_value.connect.side_effect = ConnectionRefusedError(
+            "Connection refused"
         )
         res = send_request("test")
     assert res["status"] == "error"
@@ -97,15 +102,14 @@ def test_send_request_connection_refused():
 def test_send_request_timeout():
     """Socket timeout returns a structured error dict."""
     with patch("socket.socket") as mock_cls:
-        mock_cls.return_value.__enter__.return_value.connect.side_effect = (
-            TimeoutError("Timed out")
-        )
+        mock_cls.return_value.__enter__.return_value.connect.side_effect = TimeoutError("Timed out")
         res = send_request("test")
     assert res["status"] == "error"
     assert "Timed out" in res["error"]
 
 
 # ── Primitive tool wrappers ───────────────────────────────────────────────────
+
 
 def test_tool_show(mock_socket):
     result = show(representation="cartoon", selection="chain A")
@@ -136,16 +140,19 @@ def test_tool_select(mock_socket):
 
 def test_tool_error_propagation(mock_socket):
     """Plugin errors surface back to the MCP caller."""
-    mock_socket.recv.return_value = json.dumps({
-        "status": "error",
-        "error": "PyMOL encountered a problem: invalid selection",
-    }).encode()
+    mock_socket.recv.return_value = json.dumps(
+        {
+            "status": "error",
+            "error": "PyMOL encountered a problem: invalid selection",
+        }
+    ).encode()
     result = show(representation="spheres")
     assert "invalid selection" in result
     assert result.startswith("PyMOL encountered")
 
 
 # ── fetch_structure ───────────────────────────────────────────────────────────
+
 
 @patch("mcpymol.server.send_request")
 def test_fetch_structure_multimer(mock_sr):
@@ -156,11 +163,11 @@ def test_fetch_structure_multimer(mock_sr):
 
     assert "Successfully fetched 1ubq" in result
     acts = _actions(mock_sr)
-    assert acts[0] == "do"          # reinitialize
+    assert acts[0] == "do"  # reinitialize
     assert "fetch" in acts
     assert "get_chains" in acts
-    assert "remove" in acts         # multimer cleanup
-    assert "hide" in acts           # solvent hidden
+    assert "remove" in acts  # multimer cleanup
+    assert "hide" in acts  # solvent hidden
 
 
 @patch("mcpymol.server.send_request")
@@ -186,16 +193,18 @@ def test_fetch_structure_no_chains(mock_sr):
     assert "Successfully fetched 1abc" in result
     acts = _actions(mock_sr)
     assert "fetch" in acts
-    assert "remove" not in acts     # no cleanup attempted
+    assert "remove" not in acts  # no cleanup attempted
 
 
 @patch("mcpymol.server.send_request")
 def test_fetch_structure_error(mock_sr):
     """Fetch failure is propagated as a readable error string."""
+
     def fake(action, args=None, kwargs=None):
         if action == "fetch":
             return {"status": "error", "error": "PDB ID not found"}
         return {"status": "success", "result": "OK"}
+
     mock_sr.side_effect = fake
 
     result = fetch_structure(pdb_code="XXXX")
@@ -221,6 +230,7 @@ def test_fetch_structure_custom_obj_name(mock_sr):
 
 # ── load_structure ────────────────────────────────────────────────────────────
 
+
 @patch("mcpymol.server.send_request")
 def test_load_structure_success(mock_sr):
     mock_sr.side_effect = _sr_mock(get_chains=["A"])
@@ -240,6 +250,7 @@ def test_load_structure_error(mock_sr):
         if action == "load":
             return {"status": "error", "error": "File not found"}
         return {"status": "success", "result": "OK"}
+
     mock_sr.side_effect = fake
 
     result = load_structure(file_path="/bad/path.pdb", obj_name="test")
@@ -249,6 +260,7 @@ def test_load_structure_error(mock_sr):
 
 
 # ── View functions ────────────────────────────────────────────────────────────
+
 
 @patch("mcpymol.server.send_request")
 def test_ligand_view(mock_sr):
@@ -441,6 +453,7 @@ def test_mutation_view_invalid_input(mock_sr):
 
 # ── Scene introspection ───────────────────────────────────────────────────────
 
+
 @patch("mcpymol.server.send_request")
 def test_list_objects_with_objects(mock_sr):
     mock_sr.return_value = {"status": "success", "result": ["1ubq", "lig"]}
@@ -493,10 +506,10 @@ def test_list_ligands_no_organic(mock_sr):
 
 # ── print_export ──────────────────────────────────────────────────────────────
 
+
 def test_parse_groups_valid():
     pairs = _parse_groups("protein=polymer.protein; nucleic=chain N+R+T")
-    assert pairs == [("protein", "polymer.protein"),
-                     ("nucleic", "chain N+R+T")]
+    assert pairs == [("protein", "polymer.protein"), ("nucleic", "chain N+R+T")]
 
 
 def test_parse_groups_trailing_semicolon_and_spaces():
@@ -522,8 +535,7 @@ def test_print_export_missing_deps(mock_sr):
 @patch("mcpymol.server.send_request")
 def test_print_export_happy_path(mock_sr, mock_repair, tmp_path):
     mock_sr.return_value = {"status": "success", "result": "OK"}
-    mock_repair.return_value = {"method": "poisson", "faces": 144290,
-                                "watertight": True}
+    mock_repair.return_value = {"method": "poisson", "faces": 144290, "watertight": True}
 
     with patch.dict(sys.modules, {"trimesh": MagicMock()}):
         result = print_export(
@@ -556,9 +568,9 @@ def test_print_export_bad_group(mock_sr):
 def test_print_export_save_error_reported(mock_sr, mock_repair, tmp_path):
     mock_sr.return_value = {"status": "error", "error": "disk full"}
     with patch.dict(sys.modules, {"trimesh": MagicMock()}):
-        result = print_export(obj_name="1MSW",
-                               groups="protein=polymer.protein",
-                               out_dir=str(tmp_path))
+        result = print_export(
+            obj_name="1MSW", groups="protein=polymer.protein", out_dir=str(tmp_path)
+        )
     assert "disk full" in result
     mock_repair.assert_not_called()
 
@@ -580,8 +592,7 @@ def test_repair_auto_light_path_when_already_watertight():
 
     # pymeshlab set to None so any Poisson attempt would raise ImportError.
     with patch.dict(sys.modules, {"trimesh": fake_tm, "pymeshlab": None}):
-        info = _repair_to_stl("in.obj", "out.stl", "auto",
-                              voxel_pitch=0.7, poisson_depth=10)
+        info = _repair_to_stl("in.obj", "out.stl", "auto", voxel_pitch=0.7, poisson_depth=10)
 
     assert info["method"] == "light (already watertight)"
     assert info["watertight"] is True

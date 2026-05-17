@@ -17,14 +17,17 @@ from mcpymol.server import (
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
+
 def _sr_mock(**action_results):
     """Return a side_effect for patching send_request."""
+
     def fake(action, args=None, kwargs=None):
         if action in action_results:
             val = action_results[action]
             result = val(action, args, kwargs) if callable(val) else val
             return {"status": "success", "result": result}
         return {"status": "success", "result": "OK"}
+
     return fake
 
 
@@ -65,6 +68,7 @@ ACDEY
 
 # ── _parse_a3m tests ────────────────────────────────────────────────────────
 
+
 def test_parse_a3m_basic():
     """Parses sequences and strips lowercase insertions."""
     msa = _parse_a3m(SAMPLE_A3M)
@@ -104,6 +108,7 @@ def test_parse_a3m_single_sequence():
 
 
 # ── _compute_shannon_entropy tests ──────────────────────────────────────────
+
 
 def test_entropy_perfectly_conserved():
     """A column where every sequence has the same residue → entropy 0."""
@@ -168,6 +173,7 @@ def test_entropy_empty_msa():
 
 # ── _run_mmseqs2 tests ──────────────────────────────────────────────────────
 
+
 @patch("mcpymol.server.urllib.request.urlopen")
 def test_run_mmseqs2_success(mock_urlopen):
     """Successful submit → poll → download cycle."""
@@ -216,7 +222,9 @@ def test_run_mmseqs2_error_status(mock_urlopen):
     submit_resp.__exit__ = MagicMock(return_value=False)
 
     error_resp = MagicMock()
-    error_resp.read.return_value = json.dumps({"status": "ERROR", "message": "DB not found"}).encode()
+    error_resp.read.return_value = json.dumps(
+        {"status": "ERROR", "message": "DB not found"}
+    ).encode()
     error_resp.__enter__ = MagicMock(return_value=error_resp)
     error_resp.__exit__ = MagicMock(return_value=False)
 
@@ -228,10 +236,12 @@ def test_run_mmseqs2_error_status(mock_urlopen):
 
 # ── conservation_view integration tests ─────────────────────────────────────
 
+
 @patch("mcpymol.server._run_mmseqs2")
 @patch("mcpymol.server.send_request")
 def test_conservation_view_success(mock_sr, mock_mmseqs):
     """Full pipeline: get chain → get FASTA → run mmseqs2 → color."""
+
     # Mock send_request: return chain A and a FASTA sequence
     def fake_sr(action, args=None, kwargs=None):
         if action == "get_chains":
@@ -239,6 +249,7 @@ def test_conservation_view_success(mock_sr, mock_mmseqs):
         if action == "get_fastastr":
             return {"status": "success", "result": ">chain_A\nMKFLILLFNILCRGSG\n"}
         return {"status": "success", "result": "OK"}
+
     mock_sr.side_effect = fake_sr
 
     # Mock mmseqs2 to return a small MSA
@@ -268,10 +279,12 @@ def test_conservation_view_success(mock_sr, mock_mmseqs):
 @patch("mcpymol.server.send_request")
 def test_conservation_view_specific_chain(mock_sr, mock_mmseqs):
     """When chain is specified, skip get_chains and use that chain directly."""
+
     def fake_sr(action, args=None, kwargs=None):
         if action == "get_fastastr":
             return {"status": "success", "result": ">chain_B\nACDEFGHIKL\n"}
         return {"status": "success", "result": "OK"}
+
     mock_sr.side_effect = fake_sr
 
     mock_mmseqs.return_value = ">query\nACDEFGHIKL\n>hit1\nACDEFGHIKL\n>hit2\nACYEFGHIKL\n"
@@ -298,12 +311,14 @@ def test_conservation_view_no_chains(mock_sr):
 @patch("mcpymol.server.send_request")
 def test_conservation_view_short_sequence(mock_sr):
     """Sequence shorter than 10 residues is rejected."""
+
     def fake_sr(action, args=None, kwargs=None):
         if action == "get_chains":
             return {"status": "success", "result": ["A"]}
         if action == "get_fastastr":
             return {"status": "success", "result": ">chain_A\nACDE\n"}
         return {"status": "success", "result": "OK"}
+
     mock_sr.side_effect = fake_sr
 
     result = conservation_view(obj_name="tiny")
@@ -315,12 +330,14 @@ def test_conservation_view_short_sequence(mock_sr):
 @patch("mcpymol.server.send_request")
 def test_conservation_view_mmseqs_error(mock_sr, mock_mmseqs):
     """MMseqs2 failure is propagated as a user-readable error."""
+
     def fake_sr(action, args=None, kwargs=None):
         if action == "get_chains":
             return {"status": "success", "result": ["A"]}
         if action == "get_fastastr":
             return {"status": "success", "result": ">chain_A\nMKFLILLFNILCRGSG\n"}
         return {"status": "success", "result": "OK"}
+
     mock_sr.side_effect = fake_sr
 
     mock_mmseqs.side_effect = RuntimeError("Server unreachable")
@@ -335,12 +352,14 @@ def test_conservation_view_mmseqs_error(mock_sr, mock_mmseqs):
 @patch("mcpymol.server.send_request")
 def test_conservation_view_insufficient_msa(mock_sr, mock_mmseqs):
     """MSA with only the query sequence produces a warning."""
+
     def fake_sr(action, args=None, kwargs=None):
         if action == "get_chains":
             return {"status": "success", "result": ["A"]}
         if action == "get_fastastr":
             return {"status": "success", "result": ">chain_A\nMKFLILLFNILCRGSG\n"}
         return {"status": "success", "result": "OK"}
+
     mock_sr.side_effect = fake_sr
 
     mock_mmseqs.return_value = ">query\nMKFLILLFNILCRGSG\n"
@@ -351,6 +370,7 @@ def test_conservation_view_insufficient_msa(mock_sr, mock_mmseqs):
 
 
 # ── Caching tests ───────────────────────────────────────────────────────────
+
 
 @pytest.fixture(autouse=True)
 def clear_conservation_cache():
@@ -442,14 +462,17 @@ def test_scale_change_uses_cache(mock_sr, mock_mmseqs):
 
 # ── Scaling mode tests ──────────────────────────────────────────────────────
 
+
 def _conservation_sr_mock():
     """Shared send_request side_effect for scaling tests."""
+
     def fake_sr(action, args=None, kwargs=None):
         if action == "get_chains":
             return {"status": "success", "result": ["A"]}
         if action == "get_fastastr":
             return {"status": "success", "result": ">chain_A\nMKFLILLFNILCRGSG\n"}
         return {"status": "success", "result": "OK"}
+
     return fake_sr
 
 
@@ -466,12 +489,11 @@ def _extract_cons_scores(mock_sr):
     """Pull the per-residue conservation score list from the batched apply
     script that ``conservation_view`` now sends as a single ``do`` call."""
     import re
+
     for call in mock_sr.call_args_list:
         if call.args[0] != "do":
             continue
-        cmd_str = call.kwargs.get(
-            "args", call.args[1] if len(call.args) > 1 else [""]
-        )[0]
+        cmd_str = call.kwargs.get("args", call.args[1] if len(call.args) > 1 else [""])[0]
         m = re.search(r"stored\.cons_scores\s*=\s*(\[[^\]]*\])", cmd_str)
         if m:
             return json.loads(m.group(1))
@@ -536,9 +558,7 @@ def test_conservation_view_uniform_entropy_falls_back(mock_sr, mock_mmseqs):
     mock_sr.side_effect = _conservation_sr_mock()
     # All sequences identical → all entropies are 0 → entropy_range is 0
     mock_mmseqs.return_value = (
-        ">query\nMKFLILLFNILCRGSG\n"
-        ">hit1\nMKFLILLFNILCRGSG\n"
-        ">hit2\nMKFLILLFNILCRGSG\n"
+        ">query\nMKFLILLFNILCRGSG\n>hit1\nMKFLILLFNILCRGSG\n>hit2\nMKFLILLFNILCRGSG\n"
     )
 
     result = conservation_view(obj_name="1ubq", scale="relative")

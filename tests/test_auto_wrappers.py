@@ -96,10 +96,11 @@ def _check_send_request(mock_socket, expected_action, expected_args):
     assert mock_socket.sendall.call_count == 1
     payload = json.loads(mock_socket.sendall.call_args[0][0])
     assert payload["action"] == expected_action
-    
-    # FastMCP tools often drop optional None arguments or pass them as str. 
+
+    # FastMCP tools often drop optional None arguments or pass them as str.
     # Check that whatever args were passed match expectation.
     assert payload["args"] == expected_args
+
 
 # Define (function, tuple of args, expected_action_name, expected_args_list)
 WRAPPER_TESTS = [
@@ -165,7 +166,12 @@ WRAPPER_TESTS = [
     (draw, ("800", "600"), "draw", ["800", "600"]),
     (mpng, ("frame_",), "mpng", ["frame_"]),
     (symexp, ("sym_", "1abc", "20", "A"), "symexp", ["sym_", "1abc", "20", "A"]),
-    (set_symmetry, ("1abc", "10", "10", "10", "90", "90", "90"), "set_symmetry", ["1abc", "10", "10", "10", "90", "90", "90"]),
+    (
+        set_symmetry,
+        ("1abc", "10", "10", "10", "90", "90", "90"),
+        "set_symmetry",
+        ["1abc", "10", "10", "10", "90", "90", "90"],
+    ),
     (fab, ("ACDEFGH", "1"), "fab", ["ACDEFGH", "1"]),
     (fragment, ("benzene",), "fragment", ["benzene"]),
     (full_screen, (), "full_screen", []),
@@ -174,13 +180,22 @@ WRAPPER_TESTS = [
     (pwd, (), "pwd", []),
     (ls, ("/tmp",), "ls", ["/tmp"]),
     (system, ("echo hello",), "system", ["echo hello"]),
-    (help, ("show",), "help", ["show"])
+    (help, ("show",), "help", ["show"]),
 ]
+
 
 @pytest.mark.parametrize("func,args,expected_action,expected_args", WRAPPER_TESTS)
 def test_auto_wrappers(mock_socket, func, args, expected_action, expected_args):
     """Test that all boilerplate generic wrappers correctly pass arguments to send_request."""
     result = func(*args)
-    assert "Executed" in result or "successfully" in result or result.startswith(expected_action) or "Mocked execution" in result or "Executed command" in result or "Hiding" in result or "Removed" in result or "Measured" in result
+    assert (
+        "Executed" in result
+        or "successfully" in result
+        or result.startswith(expected_action)
+        or "Mocked execution" in result
+        or "Executed command" in result
+        or "Hiding" in result
+        or "Removed" in result
+        or "Measured" in result
+    )
     _check_send_request(mock_socket, expected_action, expected_args)
-
