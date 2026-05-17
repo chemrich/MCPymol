@@ -1,15 +1,18 @@
-import pytest
 import json
-from unittest.mock import patch, MagicMock
 
 # We need to mock pymol.cmd before we can even import plugin.py
 import sys
+from unittest.mock import MagicMock
+
+import pytest
+
 mock_pymol = MagicMock()
 sys.modules['pymol'] = mock_pymol
 sys.modules['pymol.cmd'] = mock_pymol.cmd
 
 # Now we can import the plugin
 from mcpymol.plugin import PyMOLSocketServer
+
 
 @pytest.fixture
 def plugin_server():

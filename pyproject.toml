@@ -1,13 +1,47 @@
 [project]
 name = "mcpymol"
-version = "1.0.0"
+version = "1.1.1"
 description = "A conversational MCP server interface for PyMOL protein visualization"
 readme = "README.md"
 requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [
+    { name = "chemrich" },
+]
+keywords = [
+    "pymol",
+    "mcp",
+    "model-context-protocol",
+    "claude",
+    "gemini",
+    "structural-biology",
+    "protein-visualization",
+    "bioinformatics",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Topic :: Scientific/Engineering :: Visualization",
+]
 dependencies = [
     "fastmcp>=0.4.1",
     "mcp>=1.26.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/chemrich/MCPymol"
+Repository = "https://github.com/chemrich/MCPymol"
+Issues = "https://github.com/chemrich/MCPymol/issues"
+Changelog = "https://github.com/chemrich/MCPymol/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 # 3D-print export (print_export tool): mesh repair to watertight STL.
@@ -26,6 +60,9 @@ mcpymol = "mcpymol.server:main"
 dev = [
     "pytest>=9.0.2",
     "pytest-mock>=3.15.1",
+    "pytest-cov>=6.0",
+    "ruff>=0.14",
+    "mypy>=1.13",
 ]
 
 [build-system]
@@ -34,3 +71,36 @@ build-backend = "hatchling.build"
 
 [tool.uv]
 package = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+# Lenient start: these are deliberate style choices in this codebase, not
+# bugs — left ignored for now so CI is green; revisit in a cleanup pass.
+#   E701   single-line `if cond: stmt` bodies
+#   E501   a handful of long lines
+#   SIM105 try/except/pass preferred over contextlib.suppress here
+#   RUF001/RUF003  intentional en dashes in prose strings/comments
+ignore = ["E701", "E501", "SIM105", "RUF001", "RUF003"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests mock `pymol` in sys.modules before importing the package under test,
+# so module-level imports legitimately come after that setup.
+"tests/**" = ["E402"]
+
+[tool.mypy]
+files = ["src"]
+python_version = "3.10"
+# Lenient start: catch obvious mistakes without demanding full annotation
+# coverage. Tighten (disallow_untyped_defs, strict) in a follow-up.
+ignore_missing_imports = true
+warn_redundant_casts = true
+warn_unused_ignores = false
+check_untyped_defs = true

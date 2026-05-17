@@ -1,315 +1,271 @@
-# MCPymol: An MCP Server for PyMOL
+# MCPymol — talk to PyMOL
 
-![Nucleosome core particle (1AOI) visualized with MCPymol's ghost heart style](assets/nucleosome.png)
+![Nucleosome core particle (1AOI) rendered in MCPymol's ghost-heart style](assets/nucleosome.png)
 
-**MCPymol** is a Model Context Protocol (MCP) server that provides a conversational interface for viewing and analyzing protein structures using PyMOL. It exposes PyMOL's powerful molecular visualization capabilities to AI assistants (like Claude), allowing you to seamlessly load structures, manipulate views, and explore proteins using natural language. For example, I made the image above by typing this prompt into Claude Code, "Show me a nucleosome". Literally, that was it. 
+**MCPymol** is a [Model Context Protocol](https://modelcontextprotocol.io/) server that lets you drive PyMOL with natural language. Load structures, set up analytical views, measure things, and explore proteins by talking to Claude or Gemini. The image above was made by typing *"show me a nucleosome"* into Claude Code. That was the whole prompt.
 
-**A few words...** Let's face it. Pymol is great, but it's terrible to use. The syntax is extremely obscure, and while it's got python in the name, it's not exacly python. This is for people who just want to look at structures and have fun with proteins in a simple, conversational way. 
+PyMOL is great, but its syntax is famously obscure — and despite the name, it isn't quite Python. MCPymol is for people who'd rather just look at structures.
 
-This code was developed from scratch using a combination of Antigravity, Gemini Pro 3.1 (until I ran out of tokens) and then Claude Code (Sonnet 4.6 thinking). Claude gave itself credit. Gemini did not. Read into that what you will. All the development was done on macos, with testing using the open source pymol available through homebrew. It's been tested with both Claude Code and Gemini CLI. No plans to test on other models/assistants.
+## What you get
 
-**the name** My best friend in high school once shared an apartment with MC Chris, who voiced MC Pee Pants in Aqua Teen Hunger force. I'm not saying that this was the inspiration for the name of this project, but I'm also not denying it.
+- **A vocabulary the LLM understands.** Tools like `fetch_structure`, `ligand_view`, `interface_view`, `mutation_view`, `conservation_view` do high-level setup in one call: pick the biological assembly, hide solvent, color sensibly, label the right residues, draw the right H-bonds.
+- **~60 PyMOL primitives** exposed as individual tools (`show`, `hide`, `color`, `select`, `distance`, `align`, `spectrum`, …) so the model can compose finer motions when the high-level tools don't quite fit.
+- **Scene introspection.** `list_objects`, `list_chains`, `list_ligands` let the model check what's actually loaded before guessing.
+- **Smart structure prep.** Fetching a PDB code grabs the biological assembly when one exists, then runs a BFS heuristic over chain–chain contacts (default radius 5 Å) so sprawling functional multimers like the CRP pentamer or ferritin cage stay whole while crystallographic copies get dropped. Waters and crystallization additives are hidden automatically.
+- **Two-process bridge.** PyMOL's GUI has its own Python; MCPymol works by running a tiny TCP listener *inside* PyMOL plus a separate FastMCP server *outside* it.
 
-## 🧬 What it Does
+## How it talks
 
-MCPymol acts as a bridge between an AI assistant and a running PyMOL desktop instance. It provides:
-- **50+ Auto-Generated PyMOL Commands**: Claude has direct access to PyMOL primitives like `show`, `hide`, `color`, `distance`, `get_chains`, `select`, and many more.
-- **Smart Multimer & Solvent Heuristics**: When fetching or loading structures, MCPymol automatically attempts to fetch the **biological assembly** (the functional multimer) and applies an **iterative Breadth-First Search (BFS) style heuristic** to isolate the primary multimer. Starting with the first chain, it recursively adds all neighboring chains within a customizable radius (default **5.0Å**) until the selection stabilizes. This ensures that large circular or sprawling assemblies like the CRP pentamer or Ferritin cage are kept whole, while removing distant crystallographic copies from the unit cell. It also automatically hides waters, solvents, and non-standard crystallization additives for a clean, relevant view.
-- **Dual-Process Architecture**: To circumvent PyMOL's internal Python dependency limitations, MCPymol runs via a two-part bridge. A native PyMOL script runs a lightweight background socket listener inside your PyMOL App, while a standalone FastMCP server handles communication with the AI assistant.
+```
+┌──────────────┐   MCP / stdio    ┌────────────────┐   JSON over    ┌──────────────┐
+│ Claude /     │ ───────────────▶ │ mcpymol server │ ◀── TCP :9876 ─▶ │ PyMOL GUI    │
+│ Gemini CLI   │                  │  (FastMCP)     │                │  (plugin.py) │
+└──────────────┘                  └────────────────┘                └──────────────┘
+```
 
-## 🛠️ Intended Use
+The plugin half runs inside PyMOL and dispatches to `pymol.cmd`. The bridge half is what the MCP client launches.
 
-MCPymol is designed for structural biologists, bioinformaticians, and anyone interested in protein structures who wants a natural language conversational partner for PyMOL. You can ask Claude to:
-- "Fetch ubiquitin (1ubq) and show it as a cartoon."
-- "Color the alpha helices red and the beta sheets blue."
-- "Measure the distance between residue 10 and residue 20."
-- "Highlight the active site."
+## Try it
 
-## 💾 Installation & Configuration
+> "Fetch ubiquitin (1ubq) and show it as a cartoon."
+> "Color the alpha helices red and the beta sheets blue."
+> "What ligands are in 1HSG?"
+> "Show the binding pocket around MK1 in 1HSG."
+> "Highlight mutations E6V, K16E, and V67F in hemoglobin (4HHB)."
+> "Run a Poisson-Boltzmann electrostatics calculation on 1LYZ."
 
-Because PyMOL requires its own isolated Python environment to run its GUI and rendering loops, using MCPymol requires starting both the PyMOL plugin and configuring the external MCP server for your AI assistant.
+Tip: if the model isn't sure what's loaded, ask it to *list the objects* — it'll call `list_objects` and ground itself before guessing names.
 
-### 1. Start the Native PyMOL Plugin (Required for all setups)
-1. Open your standard PyMOL desktop application.
-2. In the PyMOL command line, manually initialize the background listener script. Adjust the path to where you cloned the repository:
-   ```pymol
-   run /path/to/MCPymol/src/mcpymol/plugin.py
-   ```
-   *You should see a message in the PyMOL console indicating the plugin is listening on `127.0.0.1:9876`.*
+## Installation
 
-**💡 Pro Tip: Auto-Start the Plugin**
-The standard way to run initialization scripts in PyMOL is through its `pymolrc` resource file. To automatically run this plugin every time you launch PyMOL, add the following to `~/.pymolrc.py`:
+There are two halves to wire up: the **native plugin** (runs inside PyMOL) and the **MCP bridge** (runs outside, and is what your AI assistant launches).
+
+### 1. Start the native plugin
+
+Open PyMOL, then in the PyMOL command line:
+
+```pymol
+run /path/to/MCPymol/src/mcpymol/plugin.py
+```
+
+You should see `MCPymol Native Plugin listening on 127.0.0.1:9876`.
+
+To auto-load it on every PyMOL launch, add this to `~/.pymolrc.py`:
+
 ```python
-import os, pymol
-pymol.cmd.do("run /absolute/path/to/MCPymol/src/mcpymol/plugin.py")
+from pymol import cmd
+cmd.do("run /absolute/path/to/MCPymol/src/mcpymol/plugin.py")
 ```
 
-**🔌 Changing the Port**
-The default port is `9876`. If you need to run multiple MCP servers simultaneously, override it with the `MCPYMOL_PORT` environment variable before launching PyMOL **and** the bridge:
-```bash
-# PyMOL (macOS example)
-MCPYMOL_PORT=9867 open -a PyMOL
+**Changing the port.** Set `MCPYMOL_PORT` before launching **both** PyMOL and the bridge:
 
-# MCP bridge/server
-MCPYMOL_PORT=9867 uv run mcpymol
+```bash
+MCPYMOL_PORT=9867 open -a PyMOL       # macOS
+MCPYMOL_PORT=9867 uv run mcpymol      # bridge
 ```
 
----
+### 2. Register the bridge with your AI assistant
 
-### 2. Configure Your AI Assistant
-
-Choose ONE of the following setups based on your environment and preferred AI assistant. All instructions assume you have cloned the repository to your machine.
+Pick one. All paths are to the cloned repo.
 
 ```bash
-git clone https://github.com/yourusername/MCPymol.git
+git clone https://github.com/chemrich/MCPymol.git
 cd MCPymol
 ```
 
-#### Option A: macOS with Claude Code CLI (Using `uv`)
-This is the recommended setup if you are using Claude Code in the terminal (i.e., the `claude` CLI, not the Claude Desktop app).
+#### Claude Code CLI (macOS, `uv`)
 
-1. **Install dependencies:**
-   ```bash
-   uv sync
-   ```
-2. **Register the MCP server** by running the following in your terminal:
-   ```bash
-   claude mcp add mcpymol -- uv --directory /absolute/path/to/MCPymol run mcpymol
-   ```
-3. Start a new Claude Code session. Ensure the PyMOL plugin is running, and you're ready to start asking conversational questions about protein structures!
+```bash
+uv sync
+claude mcp add mcpymol -- uv --directory /absolute/path/to/MCPymol run mcpymol
+```
 
-#### Option B: macOS with Claude Desktop (Using `uv`)
-This is the standard setup for users of the Claude Desktop app using `uv` for dependency management.
+Start a new Claude Code session.
 
-1. **Install dependencies:**
-   ```bash
-   uv sync
-   ```
-2. **Configure Claude Desktop:** Add the following to your `claude_desktop_config.json` file:
-   ```json
-   {
-     "mcpServers": {
-       "mcpymol": {
-         "command": "uv",
-         "args": [
-           "--directory",
-           "/absolute/path/to/MCPymol",
-           "run",
-           "mcpymol"
-         ]
-       }
-     }
-   }
-   ```
-3. Restart Claude Desktop. Ensure the PyMOL plugin is running, and you're ready to start asking conversational questions about protein structures!
+#### Claude Desktop (macOS, `uv`)
 
-#### Option C: macOS with Gemini CLI (Using `uv`)
-This is the standard, unrestricted setup for Gemini CLI users using `uv`.
+```bash
+uv sync
+```
 
-1. **Install dependencies:**
-   ```bash
-   uv sync
-   ```
-2. **Configure Gemini CLI:** Run the following commands in your terminal:
-   ```bash
-   gemini mcp add mcpymol uv --directory /absolute/path/to/MCPymol run mcpymol
-   gemini mcp refresh
-   ```
+Add to `claude_desktop_config.json`:
 
-#### Option C: macOS in a Restricted Environment (Corporate Laptop) with Gemini CLI
-If you are running on a managed machine where tools like `uv` are restricted or blocked by security policies, you must use a standard Python virtual environment instead. If you're working in an environment where package repos are managed, you might have to tweak some of the addresses in the uv.lock to work with your organization's rules.
+```json
+{
+  "mcpServers": {
+    "mcpymol": {
+      "command": "uv",
+      "args": ["--directory", "/absolute/path/to/MCPymol", "run", "mcpymol"]
+    }
+  }
+}
+```
 
-1. **Create and activate a virtual environment** using a modern Python version (3.10+):
-   ```bash
-   python3 -m venv .venv
-   source .venv/bin/activate
-   ```
-   *(Note: macOS users may need to specify a newer python binary like `python3.11` if the system default is older than 3.10).*
-2. **Install the package:** Upgrade `pip` to support pyproject.toml installs, then install natively from within `.venv`:
-   ```bash
-   pip install --upgrade pip
-   pip install -e .
-   ```
-3. **Configure Gemini CLI:** Add the server to Gemini CLI, pointing directly to the generated script inside the virtual environment:
-   ```bash
-   gemini mcp add mcpymol /absolute/path/to/MCPymol/.venv/bin/mcpymol
-   ```
-   *(Note: If configuring Claude Code CLI in a restricted environment, point directly to the venv binary: `claude mcp add mcpymol /absolute/path/to/MCPymol/.venv/bin/mcpymol`).*
+Restart Claude Desktop.
 
-#### Option D: Linux in a Restricted Environment with Gemini CLI
-If you are running on a managed Linux workstation where standard python environments are strictly managed, you will need to create a `venv` to bypass those restrictions. If you're working in an environment where package repos are managed, you might have to tweak some of the addresses in the uv.lock to work with your organization's rules.
+#### Gemini CLI (macOS, `uv`)
 
-1. **Verify your PyMOL installation:** Ensure you have PyMOL installed and accessible via your GUI.
-   ```bash
-   sudo apt-get install pymol
-   ```
-2. **Create and activate a virtual environment:**
-   ```bash
-   cd MCPymol
-   python3 -m venv .venv
-   source .venv/bin/activate
-   ```
-   *(Note: If you get an error that the `venv` module is missing on Debian/gLinux, you may need to run `sudo apt-get install python3-venv` first).*
-3. **Install the package dependencies natively into the virtual environment:**
-   ```bash
-   pip install --upgrade pip
-   pip install -e .
-   ```
-4. **Configure Gemini CLI:** Add the server to Gemini CLI, pointing directly to the generated script inside the virtual environment:
-   ```bash
-   gemini mcp add mcpymol /absolute/path/to/MCPymol/.venv/bin/mcpymol
-   ```
-   *(Note: Ensure that you've run the `plugin.py` native script inside your PyMOL GUI window as instructed in Step 1 before testing the server).*
+```bash
+uv sync
+gemini mcp add mcpymol uv --directory /absolute/path/to/MCPymol run mcpymol
+gemini mcp refresh
+```
 
-## 🧪 Running Tests
-The repository includes a rigorous, "Google Engineer" grade `pytest` suite testing both the socket payload generation and simulated PyMOL API execution boundaries.
-To run the automated tests:
+#### Restricted environments — no `uv`
+
+If `uv` is blocked by your org's security policy, use a standard venv. On Linux you may need `sudo apt-get install python3-venv pymol` first.
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+pip install -e .
+
+# Point the assistant directly at the venv binary
+claude mcp add mcpymol /absolute/path/to/MCPymol/.venv/bin/mcpymol
+# or
+gemini mcp add mcpymol /absolute/path/to/MCPymol/.venv/bin/mcpymol
+```
+
+If your network blocks PyPI, you may also need to tweak the repository URLs inside `uv.lock` to match your internal mirror.
+
+## Troubleshooting
+
+| Symptom | Likely cause | Fix |
+| --- | --- | --- |
+| Every tool returns *"Socket connection failed. Is the PyMOL plugin running?"* | Plugin not loaded in PyMOL | `run /path/to/plugin.py` inside PyMOL, or add it to `~/.pymolrc.py` |
+| *"Address already in use"* on plugin start | A previous PyMOL session left the port open, or another app uses 9876 | Quit lingering PyMOL processes, or set `MCPYMOL_PORT=9867` on both sides |
+| Long `get_fastastr` / `get_chains` calls fail with a JSON parse error | You're on a pre-2026-05 version of MCPymol that capped recv() at 8 KB | Pull main — the bridge now drains the response in full |
+| `conservation_view` is slow | First call hits the ColabFold MMseqs2 API (30 s–few min); subsequent calls for the same sequence hit a local cache | If you have an internal MMseqs2 server, set `MCPYMOL_MMSEQS_URL` |
+| `poisson_boltzmann_view` fails | `apbs` or `pdb2pqr` missing | `brew install brewsci/bio/apbs` and `pip install pdb2pqr` |
+
+## Tests
+
 ```bash
 PYTHONPATH=src uv run pytest tests/
 ```
 
-## 🎨 Visualization Views
+The suite mocks the socket layer and PyMOL's `cmd` module, so it runs without a PyMOL install. 130+ tests cover the socket payloads, the bridge framing, the conservation pipeline (A3M parsing, Shannon entropy, MMseqs2 mocking, MSA→B-factor mapping), and every view.
 
-MCPymol includes a set of high-level visualization tools that go beyond raw PyMOL commands. Each view is designed for a specific analytical task and can be invoked with a single natural language request.
+## The view library
 
----
+These are the high-level visualization tools. Each does its own setup — coloring, transparency, H-bonds, labels — in one prompt.
 
-### `ligand_view` — Binding Site
-**Demo:** cAMP-dependent protein kinase (1ATP) with ATP
+### `ligand_view` — binding site
 
-Shows the binding pocket around a ligand: pocket residues as element-colored sticks with labeled CA atoms, ligand as yellow sticks, H-bonds as yellow dashes, and the protein as a semi-transparent cartoon.
+Pocket residues (within 5 Å of the ligand) as element-colored sticks with CA labels, ligand as yellow sticks, H-bonds as yellow dashes, protein as a translucent cartoon.
 
-```
-Show me the ATP binding site in 1ATP
-```
+> Show me the ATP binding site in 1ATP
 
 ![Ligand view of ATP in cAMP-dependent kinase (1ATP)](assets/ligand_view.png)
 
----
+### `interface_view` — protein–protein interface
 
-### `interface_view` — Protein–Protein Interface
-**Demo:** Barnase–barstar complex (1BRS), chains A and D
+Chain A marine, chain B salmon. Interface residues (within 4 Å of the partner) as solid surface patches with sidechain sticks and CA labels. Cross-chain H-bonds as yellow dashes.
 
-Colors chain A marine blue and chain B salmon. Interface residues (within 4Å of the partner) are shown as solid surface patches with sidechain sticks and CA labels. Cross-chain H-bonds drawn as yellow dashes.
-
-```
-Show the interface between chain A and chain D in 1BRS
-```
+> Show the interface between chain A and chain D in 1BRS
 
 ![Interface view of barnase–barstar complex (1BRS)](assets/interface_view.png)
 
----
+### `putty_view` — B-factor flexibility
 
-### `putty_view` — B-Factor Flexibility
-**Demo:** Ubiquitin (1UBQ)
+Tube radius *and* color scale with B-factor: blue/thin = rigid, red/thick = flexible. A 70%-transparent surface adds shape context.
 
-Tube radius and color scale with B-factor: blue = rigid/ordered, red = flexible/disordered. A 70%-transparent surface provides shape context.
-
-```
-Show the B-factor flexibility of 1UBQ as a putty view
-```
+> Show the B-factor flexibility of 1UBQ as a putty view
 
 ![Putty view of ubiquitin (1UBQ)](assets/putty_view.png)
 
----
+### `bfactor_view` — B-factor flexibility, plain cartoon
 
-### `hydrophobic_surface_view` — Surface Chemistry
-**Demo:** *Candida antarctica* Lipase B (CalB, 1TCA)
+The same color story as `putty_view` (blue → red on B-factor) but on a plain cartoon. Cheaper, cleaner in figures where you don't want the putty distortion.
 
-Colors the molecular surface by amino acid chemical character: orange = hydrophobic, white = polar, skyblue = positive, salmon = negative. Useful for identifying hydrophobic patches, membrane-interacting belts, and charge complementarity. CalB is widely used by synthetic chemists for enantioselective transesterifications.
+> Color 1UBQ by B-factor
 
-```
-Show the hydrophobic surface of 1TCA
-```
+### `hydrophobic_surface_view` — surface chemistry
 
-![Hydrophobic surface view of Candida antarctica Lipase B, CalB (1TCA)](assets/hydrophobic_surface_view.png)
+Surface colored by amino-acid chemistry: orange = hydrophobic, white = polar, sky blue = positive, salmon = negative. Useful for spotting hydrophobic patches, membrane belts, and charge complementarity.
 
----
+> Show the hydrophobic surface of 1TCA
 
-### `electrostatic_view` — Approximate Electrostatics
-**Demo:** Hen egg-white lysozyme (1LYZ)
+![Hydrophobic surface view of *Candida antarctica* Lipase B (1TCA)](assets/hydrophobic_surface_view.png)
 
-Colors the molecular surface by residue-level electrostatic character using pKa-weighted partial charges: red = negative, white = neutral, blue = positive. Fast approximation — no external tools required.
+### `electrostatic_view` — approximate electrostatics
 
-```
-Show the electrostatic surface of 1LYZ
-```
+Red→white→blue surface coloring driven by per-residue pKa-weighted partial charges. Two modes: `atomic` (charges on the actual charge-center atoms — localized, natural falloff) and `residue` (uniform across charged residues — saturated patches).
+
+> Show the electrostatic surface of 1LYZ
 
 ![Electrostatic view of lysozyme (1LYZ)](assets/electrostatic_view.png)
 
----
+### `poisson_boltzmann_view` — true PB electrostatics
 
-### `poisson_boltzmann_view` — True Electrostatic Potential
-**Demo:** Hen egg-white lysozyme (1LYZ)
+Full Poisson-Boltzmann potential via [APBS](https://github.com/Electrostatics/apbs) and [PDB2PQR](https://github.com/Electrostatics/pdb2pqr), mapped onto the surface at ±20 kT/e. Physically correct, accounts for solvent screening and ionic strength.
 
-Computes a full Poisson-Boltzmann electrostatic potential using [APBS](https://github.com/Electrostatics/apbs) and [PDB2PQR](https://github.com/Electrostatics/pdb2pqr), mapped onto the molecular surface at ±20 kT/e. Produces physically accurate charge distributions accounting for solvent screening and ionic strength.
-
-> **Prerequisites:** both tools must be installed and on your `PATH` before using this view.
+> **Prerequisites** (must be on `PATH`):
 > ```bash
-> # APBS (macOS via Homebrew)
 > brew install brewsci/bio/apbs
->
-> # PDB2PQR (via pip)
 > pip install pdb2pqr
 > ```
 
-```
-Run a Poisson-Boltzmann electrostatics calculation on 1LYZ
-```
+> Run a Poisson-Boltzmann electrostatics calculation on 1LYZ
 
 ![Poisson-Boltzmann electrostatic surface of lysozyme (1LYZ)](assets/poisson_boltzmann_view.png)
 
----
+### `conservation_view` — evolutionary conservation
 
-### `crosslink_view` — Disulfide Bonds & Metal Coordination
-**Demo:** Cellulase (1CEL)
+Pipeline: extract the chain's sequence → submit to MMseqs2 (ColabFold public API by default; override with `MCPYMOL_MMSEQS_URL`) → parse the A3M alignment → compute per-position Shannon entropy → map onto B-factor and color via `cyan_white_magenta` spectrum.
 
-Highlights structural crosslinks: CYS sidechains and disulfide bonds in yellow, metal coordination bonds in orange. The rest of the protein is shown as a thin grey cartoon.
+Magenta = conserved, white = moderate, cyan = variable. First call takes 30 s – few minutes depending on sequence length; results are cached in memory by sequence, so re-running on the same protein (or changing only the color scale) is instant.
 
-```
-Show the disulfide bonds in 1CEL
-```
+> Color 1ubq by conservation
+
+### `crosslink_view` — disulfides & metal coordination
+
+CYS sidechains and disulfide bonds in yellow, metal coordination bonds in orange, the rest of the protein as a thin grey cartoon.
+
+> Show the disulfide bonds in 1CEL
 
 ![Crosslink view of cellulase (1CEL)](assets/crosslink_view.png)
 
----
+### `pocket_view` — binding pocket surface
 
-### `pocket_view` — Binding Pocket Surface
-**Demo:** HIV-1 protease with inhibitor MK1 (1HSG)
+The pocket cavity (residues within 5 Å of the ligand) as a semi-transparent surface colored by chemistry. Sticks for the pocket sidechains, yellow sticks for the ligand, cyan dashes for H-bonds.
 
-Shows the binding cavity as a surface colored by chemical character: orange = hydrophobic, white = polar, skyblue = positive, salmon = negative. Pocket sidechain sticks are shown with CA labels. Ligand rendered as yellow sticks. H-bonds between ligand and pocket drawn as cyan dashes.
-
-```
-Show the binding pocket around MK1 in 1HSG
-```
+> Show the binding pocket around MK1 in 1HSG
 
 ![Pocket view of MK1 binding site in HIV-1 protease (1HSG)](assets/pocket_view.png)
 
----
+### `pharmacophore_view` — ligand pharmacophore features
 
-### `pharmacophore_view` — Ligand Pharmacophore Features
-**Demo:** HIV-1 protease with inhibitor MK1 (1HSG)
+The ligand colored by pharmacophore type: violet = aromatic ring carbon, yellow = aliphatic carbon, sky blue = N (donor/acceptor), salmon = O (acceptor), gold = S, pale green = halogen. Interacting residue sticks with CA labels, cyan dashes for H-bonds.
 
-Colors the ligand by pharmacophore feature type: violet = ring/aromatic carbon, yellow = aliphatic carbon, skyblue = nitrogen (H-bond donor/acceptor), salmon = oxygen (H-bond acceptor), gold = sulfur, palegreen = halogen. Interacting residue sidechains shown as element-colored sticks with CA labels. H-bonds to protein shown as cyan dashes.
-
-```
-Show the pharmacophore features of MK1 in 1HSG
-```
+> Show the pharmacophore features of MK1 in 1HSG
 
 ![Pharmacophore view of MK1 in HIV-1 protease (1HSG)](assets/pharmacophore_view.png)
 
----
+### `mutation_view` — mutation hotspots
 
-### `mutation_view` — Mutation Hotspots
-**Demo:** Human hemoglobin (4HHB) with sickle cell and related mutations E6V, K16E, V67F
+Grey cartoon, mutated sidechains as magenta sticks with white CA labels, neighboring residues (within 4 Å) as thin element-colored sticks for packing context. Standard `A123G` notation; optional chain prefix `A:A123G`.
 
-Renders the protein as a grey cartoon. Mutated residue sidechains are shown as magenta sticks with white CA labels. Nearby residues (within 4Å) are shown as thin element-colored sticks for packing context. Accepts standard mutation notation (e.g. `A123G`).
-
-```
-Highlight mutations E6V, K16E, and V67F in hemoglobin (4HHB)
-```
+> Highlight mutations E6V, K16E, and V67F in hemoglobin (4HHB)
 
 ![Mutation view of hemoglobin (4HHB) showing E6V, K16E, V67F](assets/mutation_view.png)
+
+### `textbook_view` — cel-shaded illustration
+
+White cartoon + surface with heavy ray-trace contours. The cel-shaded look kicks in after you run `ray` (or ask the model to render).
+
+> Make 4HHB look like a textbook illustration
+
+### `cinematic_view` — fog and shadows
+
+Depth-cueing + fog + soft shadows on a black background. Best on big assemblies — ribosomes, capsids, nucleosomes — where you want a sense of scale. Run `ray` for the full effect.
+
+> Give me a cinematic view of the ribosome
+
+### `pointillist_view` — starfield surface
+
+Replaces the surface with a dense dot cloud; ligands become bright yellow stars. More art than analysis.
 
 ## 🖨️ 3D Printing Export
 
@@ -322,7 +278,7 @@ stays in the same coordinate frame, so a slicer can load them as aligned
 multi-material parts.
 
 This tool needs the optional `print` extra (trimesh, pymeshlab, scipy,
-scikit-image):
+scikit-image, networkx):
 
 ```bash
 uv sync --extra print          # from a MCPymol checkout
@@ -344,3 +300,15 @@ already-closed surface. Otherwise it falls back to Poisson, then voxel.
 chains); `method="voxel"` is robust for thin nucleic acids and slightly
 thickens fragile features for printability. In your slicer, load the first STL,
 then add the others as *parts* (don't re-centre) and assign a filament per part.
+
+## The name
+
+My best friend in high school once shared an apartment with MC Chris, who voiced MC Pee Pants in Aqua Teen Hunger Force. I'm not saying that was the inspiration for the name of this project, but I'm not denying it either.
+
+## Provenance
+
+Built on macOS using the open-source PyMOL available via Homebrew. Started with Antigravity, then Gemini Pro 3.1 until I ran out of tokens, then Claude Code (Sonnet 4.6 thinking). Tested with Claude Code and Gemini CLI. Conservation analysis uses the [ColabFold](https://github.com/sokrypton/ColabFold) public MMseqs2 API (please don't hammer it).
+
+## License
+
+[MIT](LICENSE).

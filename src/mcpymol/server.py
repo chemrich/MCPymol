@@ -4,10 +4,10 @@ import math
 import os
 import socket
 import time
-import urllib.request
-import urllib.parse
 import urllib.error
-from typing import Optional
+import urllib.parse
+import urllib.request
+
 from mcp.server.fastmcp import FastMCP
 
 # Initialize FastMCP server
@@ -31,7 +31,7 @@ _AA_ALPHABET = set("ACDEFGHIKLMNPQRSTVWY")
 _conservation_cache: dict[str, list[float]] = {}
 
 
-def _run_mmseqs2(sequence: str, server_url: str = None, use_env: bool = True) -> str:
+def _run_mmseqs2(sequence: str, server_url: str | None = None, use_env: bool = True) -> str:
     """Submit a protein sequence to the ColabFold MMseqs2 API and return an A3M MSA.
 
     Uses a submit → poll → download pattern against the ColabFold public API
@@ -64,7 +64,7 @@ def _run_mmseqs2(sequence: str, server_url: str = None, use_env: bool = True) ->
             break
         except (urllib.error.URLError, TimeoutError) as e:
             if attempt == max_retries - 1:
-                raise RuntimeError(f"Failed to submit MMseqs2 job after {max_retries} attempts: {e}")
+                raise RuntimeError(f"Failed to submit MMseqs2 job after {max_retries} attempts: {e}") from e
             time.sleep(2 ** attempt)
 
     ticket_id = ticket.get("id")
@@ -91,8 +91,8 @@ def _run_mmseqs2(sequence: str, server_url: str = None, use_env: bool = True) ->
     # 3. Download the result
     dl_url = f"{host}/result/download/{ticket_id}"
     with urllib.request.urlopen(dl_url, timeout=30) as resp:
-        import tarfile
         import io
+        import tarfile
         tar_bytes = resp.read()
 
     # The download is a tar.gz containing .a3m files
@@ -155,7 +155,6 @@ def _compute_shannon_entropy(msa: list[list[str]]) -> list[float]:
         return []
 
     n_positions = len(msa[0])
-    n_seqs = len(msa)
     max_entropy = math.log2(20)  # theoretical max for 20 amino acids
     entropies = []
 
@@ -222,29 +221,67 @@ def _apply_ghost_heart(name: str):
     send_request("center", args=[name])
     send_request("do", args=[f"origin {name}"])
 
-def send_request(action: str, args: list = None, kwargs: dict = None, timeout: float = 10.0) -> dict:
+# A single recv() chunk size.  We loop until the plugin half-closes, so this
+# is just a memory hint, not a cap on the total response size.
+_RECV_CHUNK = 65536
+
+
+def send_request(action: str, args: list | None = None, kwargs: dict | None = None, timeout: float = 10.0) -> dict:
     """Send a JSON request to the PyMOL plugin socket server.
-    
+
+    The framing is one request per TCP connection: we write the JSON payload,
+    half-close our write side so the plugin sees EOF, then drain the response
+    until the plugin half-closes its write side.  This avoids the 8 KB
+    response truncation that bit ``get_fastastr`` on long chains.
+
     Args:
         action: The PyMOL command or custom action to execute.
         args: Positional arguments for the action.
         kwargs: Keyword arguments for the action.
         timeout: Socket timeout in seconds. Defaults to 10.0.
+
+    Returns:
+        A dict with at least a ``status`` key (``success`` or ``error``).
+        ``error`` responses always include a human-readable ``error`` field.
     """
     payload = {
         "action": action,
         "args": args or [],
-        "kwargs": kwargs or {}
+        "kwargs": kwargs or {},
     }
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.settimeout(timeout)
             s.connect((HOST, PORT))
-            s.sendall(json.dumps(payload).encode('utf-8'))
-            data = s.recv(8192).decode('utf-8')
-            return json.loads(data)
+            s.sendall(json.dumps(payload).encode("utf-8"))
+            try:
+                s.shutdown(socket.SHUT_WR)
+            except OSError:
+                pass
+            chunks: list[bytes] = []
+            while True:
+                chunk = s.recv(_RECV_CHUNK)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                # JSON is self-delimiting once we have enough bytes.  Try to
+                # parse after every chunk so we don't depend on the peer
+                # half-closing (handy for test mocks too).
+                try:
+                    return json.loads(b"".join(chunks).decode("utf-8"))
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    continue
+            if not chunks:
+                return {"status": "error", "error": "Empty response from PyMOL plugin."}
+            try:
+                return json.loads(b"".join(chunks).decode("utf-8"))
+            except (json.JSONDecodeError, UnicodeDecodeError) as e:
+                return {"status": "error", "error": f"Malformed response from PyMOL plugin: {e}"}
     except Exception as e:
-        return {"status": "error", "error": f"Socket connection failed: {e}. Is the PyMOL plugin running?"}
+        return {
+            "status": "error",
+            "error": f"Socket connection failed: {e}. Is the PyMOL plugin running?",
+        }
 
 def _apply_multimer_heuristic(name: str, cutoff: float = 5.0):
     """BFS expansion to find all connected chains in a multimer."""
@@ -275,7 +312,7 @@ def _apply_multimer_heuristic(name: str, cutoff: float = 5.0):
     send_request("hide", args=["everything", f"({name}) and solvent"])
 
 @mcp.tool()
-def fetch_structure(pdb_code: str, obj_name: Optional[str] = None, multimer_cutoff: float = 8.0) -> str:
+def fetch_structure(pdb_code: str, obj_name: str | None = None, multimer_cutoff: float = 8.0) -> str:
     """
     Fetches a protein structure from the PDB.
     By default, it attempts to fetch the first biological assembly (multimer),
@@ -331,54 +368,175 @@ def load_structure(file_path: str, obj_name: str, multimer_cutoff: float = 8.0) 
 
 
 
+# ── Primitive tools ──────────────────────────────────────────────────────────
+#
+# A note on PyMOL selection syntax (what to put in ``selection``):
+#   "all"                      every atom in every loaded object
+#   "1abc"                     all atoms of the object named 1abc
+#   "1abc and chain A"         chain A of object 1abc
+#   "1abc and resi 10-20"      residue range
+#   "1abc and resn ATP"        residues with name ATP (e.g. ligands)
+#   "1abc and name CA"         atom names
+#   "1abc and ss H"            secondary-structure helix
+#   "polymer.protein"          protein-only macro
+#   "organic"                  small-molecule cofactors
+#   "byres (a around 5)"       residues with any atom within 5 Å of selection a
+
 @mcp.tool()
 def show(representation: str, selection: str = "all") -> str:
-    """Shows a representation for a given selection."""
+    """Shows a graphical representation for a given selection.
+
+    Args:
+        representation: One of ``cartoon``, ``sticks``, ``spheres``, ``surface``,
+            ``lines``, ``ribbon``, ``dots``, ``mesh``, ``nb_spheres``, ``labels``.
+        selection: PyMOL selection string. See module-level note for syntax.
+    """
     res = send_request("show", args=[representation, selection])
     if res.get("status") == "error": return res.get("error")
     return f"Showing {representation} for selection '{selection}'"
 
 @mcp.tool()
 def hide(representation: str, selection: str = "all") -> str:
-    """Hides a representation for a given selection."""
+    """Hides a graphical representation for a given selection.
+
+    Args:
+        representation: Same vocabulary as :func:`show`, plus ``everything`` to
+            hide all reps for the selection.
+        selection: PyMOL selection string.
+    """
     res = send_request("hide", args=[representation, selection])
     if res.get("status") == "error": return res.get("error")
     return f"Hiding {representation} for selection '{selection}'"
 
 @mcp.tool()
 def color(color_name: str, selection: str = "all") -> str:
-    """Sets the color for the specified selection."""
+    """Sets the color for a selection.
+
+    Args:
+        color_name: A PyMOL color. Common names: ``red``, ``blue``, ``green``,
+            ``yellow``, ``magenta``, ``cyan``, ``orange``, ``salmon``, ``marine``,
+            ``forest``, ``palegreen``, ``skyblue``, ``violet``, ``grey50``,
+            ``white``, ``black``. Use ``atomic`` to color non-carbon atoms by
+            element while leaving carbons untouched.
+        selection: PyMOL selection string.
+    """
     res = send_request("color", args=[color_name, selection])
     if res.get("status") == "error": return res.get("error")
     return f"Colored selection '{selection}' with {color_name}"
-        
+
 @mcp.tool()
 def select(name: str, selection: str) -> str:
-    """Creates a named selection for subsequent use."""
+    """Creates (or replaces) a named selection for later reuse.
+
+    Args:
+        name: Identifier you'll refer to later (e.g. ``active_site``).
+        selection: PyMOL selection expression to assign to that name.
+    """
     res = send_request("select", args=[name, selection])
     if res.get("status") == "error": return res.get("error")
     return f"Created named selection '{name}' for '{selection}'"
 
 @mcp.tool()
 def remove(selection: str) -> str:
-    """Removes atoms or structures matching the selection."""
+    """Permanently removes the atoms matching the selection.
+
+    This deletes atoms; it does not just hide them. To hide instead, use
+    :func:`hide`.
+    """
     res = send_request("remove", args=[selection])
     if res.get("status") == "error": return res.get("error")
     return f"Removed selection '{selection}'"
 
 @mcp.tool()
 def distance(name: str, selection1: str, selection2: str) -> str:
-    """Measures and displays the distance between two selections."""
+    """Measures and draws a distance object between two selections.
+
+    Args:
+        name: Name for the distance object (used to delete/recolor later).
+        selection1: First selection.
+        selection2: Second selection.
+    """
     res = send_request("distance", args=[name, selection1, selection2])
     if res.get("status") == "error": return res.get("error")
     return f"Measured distance between '{selection1}' and '{selection2}' as '{name}'"
 
 @mcp.tool()
 def execute_pymol_command(command: str) -> str:
-    """Executes a raw PyMOL command string. Use this only for commands not covered by primitive tools."""
+    """Executes a raw PyMOL command string (PyMOL CLI syntax).
+
+    PREFER the dedicated tools when one exists — show, color, select, distance,
+    ligand_view, interface_view, etc. They have better defaults, do compound
+    setup in one call, and produce cleaner results.
+
+    Reach for this tool only when no other tool covers what you need (e.g.
+    ``set ray_shadow, 0``, ``bg_color grey20``, multi-statement scripts).
+    Note: this accepts the PyMOL ``cmd.do`` mini-language, not Python.
+    """
     res = send_request("do", args=[command])
     if res.get("status") == "error": return res.get("error")
     return f"Executed command: {command}"
+
+
+# ── Scene introspection ──────────────────────────────────────────────────────
+
+@mcp.tool()
+def list_objects() -> str:
+    """Lists all loaded PyMOL objects.
+
+    Call this when you don't know what's currently in the session — for
+    example before composing a selection or running a view tool that needs
+    an ``obj_name``.
+    """
+    res = send_request("get_object_list", args=["all"])
+    if res.get("status") == "error":
+        return res.get("error")
+    objs = res.get("result") or []
+    if not objs:
+        return "No objects are loaded."
+    return "Loaded objects: " + ", ".join(objs)
+
+
+@mcp.tool()
+def list_chains(obj_name: str = "all") -> str:
+    """Lists the chain IDs present in an object (or in all objects).
+
+    Useful before calling :func:`interface_view`, :func:`conservation_view`
+    or any tool that needs a specific chain ID.
+    """
+    res = send_request("get_chains", args=[obj_name])
+    if res.get("status") == "error":
+        return res.get("error")
+    chains = res.get("result") or []
+    if not chains:
+        return f"No chains found in '{obj_name}'."
+    return f"Chains in '{obj_name}': " + ", ".join(chains)
+
+
+@mcp.tool()
+def list_ligands(obj_name: str) -> str:
+    """Lists the small-molecule (organic) ligand residue names in an object.
+
+    Call this before :func:`ligand_view`, :func:`pocket_view`, or
+    :func:`pharmacophore_view` when you don't already know the ligand's
+    3-letter residue name.
+    """
+    # We could use `iterate (...) and organic, stored.ligs.add(resn)` and then
+    # read `stored.ligs` back, but PyMOL doesn't have a built-in "send me a
+    # variable" command, so we'd need a side channel. Cheaper: ask PyMOL to
+    # dump the organic atoms as PDB text and parse the resn column.
+    fetch = send_request("get_pdbstr", args=[f"({obj_name}) and organic"])
+    if fetch.get("status") == "error":
+        return fetch.get("error")
+    pdb = fetch.get("result") or ""
+    ligs: set[str] = set()
+    for line in pdb.splitlines():
+        if line.startswith(("HETATM", "ATOM  ")):
+            resn = line[17:20].strip()
+            if resn:
+                ligs.add(resn)
+    if not ligs:
+        return f"No organic ligands found in '{obj_name}'."
+    return f"Ligands in '{obj_name}': " + ", ".join(sorted(ligs))
 
 
 @mcp.tool()
@@ -466,9 +624,9 @@ def bfactor_view(obj_name: str) -> str:
 def conservation_view(
     obj_name: str,
     selection: str = "all",
-    server_url: Optional[str] = None,
+    server_url: str | None = None,
     use_env: bool = True,
-    chain: Optional[str] = None,
+    chain: str | None = None,
     scale: str = "relative",
     force_refresh: bool = False,
 ) -> str:
@@ -552,45 +710,46 @@ def conservation_view(
         _conservation_cache[cache_key] = entropies
         msa_note = f"{len(msa)} sequences"
 
-    # 5. Map conservation scores onto B-factor column
-    #    We invert entropy so that high B = conserved (for intuitive spectrum coloring)
+    # 5. Map conservation scores onto B-factor column.
+    #
+    # We invert entropy so that high B = conserved (intuitive spectrum coloring).
+    # Both scale modes produce scores in [0, 100]: 100 = most conserved.
+    #
+    # IMPORTANT: structures often have non-contiguous residue numbering (gaps,
+    # insertion codes, modified termini), so we can't just use i+1 → resi.  We
+    # let PyMOL walk the CAs in selection order and map *its* resi → our score
+    # via a stored dict, then apply the mapping in a single alter pass.  This
+    # collapses ~2N socket round-trips into one.
     n_residues = len(entropies)
     min_entropy = min(entropies)
     max_entropy = max(entropies)
-
-    # Build a PyMOL command to alter B-factors residue by residue
-    # First, zero out all B-factors
-    send_request("do", args=[f"alter {chain_sel}, b=0"])
-
-    # Get the residue indices from PyMOL to map entropy values correctly
-    resi_res = send_request("do", args=[
-        f'stored.resi_list = []\n'
-        f'iterate {chain_sel} and name CA, stored.resi_list.append(resi)'
-    ])
-
-    # Compute per-residue conservation scores based on scaling mode
-    # Both modes produce scores in [0, 100] where 100 = most conserved
     entropy_range = max_entropy - min_entropy
 
-    for i, entropy in enumerate(entropies):
+    scores: list[float] = []
+    for entropy in entropies:
         if scale == "relative" and entropy_range > 0:
-            # Relative: min_entropy → 100 (most conserved), max_entropy → 0
-            conservation_score = (1.0 - (entropy - min_entropy) / entropy_range) * 100.0
+            score = (1.0 - (entropy - min_entropy) / entropy_range) * 100.0
         else:
-            # Absolute (or relative with zero range, i.e. all positions identical)
-            conservation_score = (1.0 - entropy) * 100.0
+            score = (1.0 - entropy) * 100.0
+        scores.append(round(score, 2))
 
-        # resi is 1-indexed in PDB convention; we use rank-order from the FASTA
-        resi_idx = i + 1
-        send_request("do", args=[
-            f"alter ({chain_sel}) and resi {resi_idx} and name CA, b={conservation_score:.1f}"
-        ])
-        # Propagate CA B-factor to all atoms in the residue
-        send_request("do", args=[
-            f"alter ({chain_sel}) and resi {resi_idx} and not name CA, "
-            f"b=cmd.get_model('({chain_sel}) and resi {resi_idx} and name CA').atom[0].b "
-            f"if cmd.get_model('({chain_sel}) and resi {resi_idx} and name CA').atom else 0"
-        ])
+    # One do block: zero out, push scores, build resi → score map by walking
+    # CAs in selection order, then alter all atoms in one pass.
+    apply_script = "\n".join([
+        f"alter {chain_sel}, b=0",
+        f"stored.cons_scores = {json.dumps(scores)}",
+        "stored.cons_map = {}",
+        "stored.cons_idx = 0",
+        (
+            f"iterate {chain_sel} and name CA, "
+            "stored.cons_map[resi] = stored.cons_scores[stored.cons_idx] "
+            "if stored.cons_idx < len(stored.cons_scores) else 0.0; "
+            "stored.cons_idx = stored.cons_idx + 1"
+        ),
+        f"alter {chain_sel}, b=stored.cons_map.get(resi, 0.0)",
+        f"rebuild {obj_name}",
+    ])
+    send_request("do", args=[apply_script])
 
     # 6. Apply visualization
     send_request("hide", args=["everything", obj_name])
@@ -607,9 +766,6 @@ def conservation_view(
     send_request("do", args=["bg_color black"])
     send_request("center", args=[obj_name])
     send_request("do", args=[f"origin {obj_name}"])
-
-    # Rebuild to apply B-factor changes
-    send_request("do", args=["rebuild"])
 
     scale_label = "relative" if scale == "relative" else "absolute"
     return (
@@ -688,7 +844,7 @@ def interface_view(obj_name: str, chain_a: str, chain_b: str) -> str:
 
 
 @mcp.tool(name="as")
-def as_tool(representation: str, selection: Optional[str] = "all") -> str:
+def as_tool(representation: str, selection: str | None = "all") -> str:
     """
     Shows one representation while hiding all others for the specified selection
     """
@@ -698,7 +854,7 @@ def as_tool(representation: str, selection: Optional[str] = "all") -> str:
     
     res = send_request("as", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed as successfully."
+    return "Executed as successfully."
 
 
 @mcp.tool()
@@ -855,9 +1011,9 @@ def poisson_boltzmann_view(obj_name: str) -> str:
     Args:
         obj_name: PyMOL object name (e.g. "1abc")
     """
+    import os
     import subprocess
     import tempfile
-    import os
 
     with tempfile.TemporaryDirectory() as tmpdir:
         pdb_path = os.path.join(tmpdir, f"{obj_name}.pdb")
@@ -886,7 +1042,7 @@ def poisson_boltzmann_view(obj_name: str) -> str:
             return f"APBS failed: {result.stderr[-500:]}"
 
         if not os.path.exists(dx_path):
-            return f"APBS did not produce a .dx map. Check APBS output."
+            return "APBS did not produce a .dx map. Check APBS output."
 
         # Load map and apply to surface
         send_request("do", args=[f"load {dx_path}, {obj_name}_esp_map"])
@@ -1317,7 +1473,7 @@ def pointillist_view(obj_name: str) -> str:
     return f"Pointillist/Starfield view applied to {obj_name}."
 
 @mcp.tool(name="set")
-def set_setting(setting: str, value: str, selection: Optional[str] = None) -> str:
+def set_setting(setting: str, value: str, selection: str | None = None) -> str:
     """
     Sets a PyMOL setting to a specified value
     """
@@ -1328,11 +1484,11 @@ def set_setting(setting: str, value: str, selection: Optional[str] = None) -> st
     
     res = send_request("set", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed set successfully."
+    return "Executed set successfully."
 
 
 @mcp.tool()
-def cartoon(item_type: str, selection: Optional[str] = "all") -> str:
+def cartoon(item_type: str, selection: str | None = "all") -> str:
     """
     Sets the cartoon type for the specified selection
     """
@@ -1342,11 +1498,11 @@ def cartoon(item_type: str, selection: Optional[str] = "all") -> str:
     
     res = send_request("cartoon", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed cartoon successfully."
+    return "Executed cartoon successfully."
 
 
 @mcp.tool()
-def spectrum(expression: str, palette: Optional[str] = "rainbow", selection: Optional[str] = "all") -> str:
+def spectrum(expression: str, palette: str | None = "rainbow", selection: str | None = "all") -> str:
     """
     Colors selection in a spectrum
     """
@@ -1357,11 +1513,11 @@ def spectrum(expression: str, palette: Optional[str] = "rainbow", selection: Opt
     
     res = send_request("spectrum", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed spectrum successfully."
+    return "Executed spectrum successfully."
 
 
 @mcp.tool()
-def label(selection: str, expression: Optional[str] = "name") -> str:
+def label(selection: str, expression: str | None = "name") -> str:
     """
     Adds labels to atoms in the selection
     """
@@ -1371,11 +1527,11 @@ def label(selection: str, expression: Optional[str] = "name") -> str:
     
     res = send_request("label", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed label successfully."
+    return "Executed label successfully."
 
 
 @mcp.tool()
-def angle(name: Optional[str] = None, selection1: Optional[str] = "(pk1)", selection2: Optional[str] = "(pk2)", selection3: Optional[str] = "(pk3)") -> str:
+def angle(name: str | None = None, selection1: str | None = "(pk1)", selection2: str | None = "(pk2)", selection3: str | None = "(pk3)") -> str:
     """
     Measures the angle between three selections
     """
@@ -1387,11 +1543,11 @@ def angle(name: Optional[str] = None, selection1: Optional[str] = "(pk1)", selec
     
     res = send_request("angle", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed angle successfully."
+    return "Executed angle successfully."
 
 
 @mcp.tool()
-def dihedral(name: Optional[str] = None, selection1: Optional[str] = "(pk1)", selection2: Optional[str] = "(pk2)", selection3: Optional[str] = "(pk3)", selection4: Optional[str] = "(pk4)") -> str:
+def dihedral(name: str | None = None, selection1: str | None = "(pk1)", selection2: str | None = "(pk2)", selection3: str | None = "(pk3)", selection4: str | None = "(pk4)") -> str:
     """
     Measures the dihedral angle between four selections
     """
@@ -1404,11 +1560,11 @@ def dihedral(name: Optional[str] = None, selection1: Optional[str] = "(pk1)", se
     
     res = send_request("dihedral", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed dihedral successfully."
+    return "Executed dihedral successfully."
 
 
 @mcp.tool()
-def center(selection: Optional[str] = "all") -> str:
+def center(selection: str | None = "all") -> str:
     """
     Centers the view on a selection
     """
@@ -1417,11 +1573,11 @@ def center(selection: Optional[str] = "all") -> str:
     
     res = send_request("center", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed center successfully."
+    return "Executed center successfully."
 
 
 @mcp.tool()
-def orient(selection: Optional[str] = "all") -> str:
+def orient(selection: str | None = "all") -> str:
     """
     Orients the view to align with principal axes of the selection
     """
@@ -1430,11 +1586,11 @@ def orient(selection: Optional[str] = "all") -> str:
     
     res = send_request("orient", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed orient successfully."
+    return "Executed orient successfully."
 
 
 @mcp.tool()
-def zoom(selection: Optional[str] = "all", buffer: Optional[str] = "5") -> str:
+def zoom(selection: str | None = "all", buffer: str | None = "5") -> str:
     """
     Zooms the view on a selection
     """
@@ -1444,11 +1600,11 @@ def zoom(selection: Optional[str] = "all", buffer: Optional[str] = "5") -> str:
     
     res = send_request("zoom", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed zoom successfully."
+    return "Executed zoom successfully."
 
 
 @mcp.tool()
-def reset(obj: Optional[str] = None) -> str:
+def reset(obj: str | None = None) -> str:
     """
     Resets the view, optionally resetting an object's matrix
     """
@@ -1457,11 +1613,11 @@ def reset(obj: Optional[str] = None) -> str:
     
     res = send_request("reset", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed reset successfully."
+    return "Executed reset successfully."
 
 
 @mcp.tool()
-def turn(axis: str, angle: Optional[str] = "90") -> str:
+def turn(axis: str, angle: str | None = "90") -> str:
     """
     Rotates the camera around an axis
     """
@@ -1471,11 +1627,11 @@ def turn(axis: str, angle: Optional[str] = "90") -> str:
     
     res = send_request("turn", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed turn successfully."
+    return "Executed turn successfully."
 
 
 @mcp.tool()
-def move(axis: str, distance: Optional[str] = "1") -> str:
+def move(axis: str, distance: str | None = "1") -> str:
     """
     Moves the camera along an axis
     """
@@ -1485,11 +1641,11 @@ def move(axis: str, distance: Optional[str] = "1") -> str:
     
     res = send_request("move", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed move successfully."
+    return "Executed move successfully."
 
 
 @mcp.tool()
-def clip(mode: str, distance: Optional[str] = "1") -> str:
+def clip(mode: str, distance: str | None = "1") -> str:
     """
     Adjusts the clipping planes
     """
@@ -1499,11 +1655,11 @@ def clip(mode: str, distance: Optional[str] = "1") -> str:
     
     res = send_request("clip", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed clip successfully."
+    return "Executed clip successfully."
 
 
 @mcp.tool()
-def save(filename: str, selection: Optional[str] = "all", state: Optional[str] = "-1") -> str:
+def save(filename: str, selection: str | None = "all", state: str | None = "-1") -> str:
     """
     Saves data to a file
     """
@@ -1514,11 +1670,11 @@ def save(filename: str, selection: Optional[str] = "all", state: Optional[str] =
     
     res = send_request("save", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed save successfully."
+    return "Executed save successfully."
 
 
 @mcp.tool()
-def png(filename: str, options: Optional[str] = None) -> str:
+def png(filename: str, options: str | None = None) -> str:
     """
     Saves a PNG image
     """
@@ -1528,7 +1684,7 @@ def png(filename: str, options: Optional[str] = None) -> str:
     
     res = send_request("png", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed png successfully."
+    return "Executed png successfully."
 
 
 @mcp.tool()
@@ -1541,11 +1697,11 @@ def deselect() -> str:
     
     res = send_request("deselect", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed deselect successfully."
+    return "Executed deselect successfully."
 
 
 @mcp.tool()
-def create(name: str, selection: Optional[str] = "all", source_state: Optional[str] = "1") -> str:
+def create(name: str, selection: str | None = "all", source_state: str | None = "1") -> str:
     """
     Creates a new object from a selection
     """
@@ -1556,11 +1712,11 @@ def create(name: str, selection: Optional[str] = "all", source_state: Optional[s
     
     res = send_request("create", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed create successfully."
+    return "Executed create successfully."
 
 
 @mcp.tool()
-def extract(name: str, selection: Optional[str] = "all") -> str:
+def extract(name: str, selection: str | None = "all") -> str:
     """
     Extracts a selection to a new object
     """
@@ -1570,7 +1726,7 @@ def extract(name: str, selection: Optional[str] = "all") -> str:
     
     res = send_request("extract", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed extract successfully."
+    return "Executed extract successfully."
 
 
 @mcp.tool()
@@ -1583,11 +1739,11 @@ def delete(name: str) -> str:
     
     res = send_request("delete", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed delete successfully."
+    return "Executed delete successfully."
 
 
 @mcp.tool()
-def align(mobile: str, target: Optional[str] = "all", options: Optional[str] = None) -> str:
+def align(mobile: str, target: str | None = "all", options: str | None = None) -> str:
     """
     Aligns one selection to another
     """
@@ -1598,11 +1754,11 @@ def align(mobile: str, target: Optional[str] = "all", options: Optional[str] = N
     
     res = send_request("align", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed align successfully."
+    return "Executed align successfully."
 
 
 @mcp.tool(name="super")
-def super_tool(mobile: str, target: Optional[str] = "all", options: Optional[str] = None) -> str:
+def super_tool(mobile: str, target: str | None = "all", options: str | None = None) -> str:
     """
     Superimposes one selection onto another
     """
@@ -1613,7 +1769,7 @@ def super_tool(mobile: str, target: Optional[str] = "all", options: Optional[str
     
     res = send_request("super", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed super successfully."
+    return "Executed super successfully."
 
 
 @mcp.tool()
@@ -1626,7 +1782,7 @@ def intra_fit(selection: str) -> str:
     
     res = send_request("intra_fit", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed intra_fit successfully."
+    return "Executed intra_fit successfully."
 
 
 @mcp.tool()
@@ -1639,7 +1795,7 @@ def intra_rms(selection: str) -> str:
     
     res = send_request("intra_rms", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed intra_rms successfully."
+    return "Executed intra_rms successfully."
 
 
 @mcp.tool()
@@ -1653,7 +1809,7 @@ def alter(selection: str, expression: str) -> str:
     
     res = send_request("alter", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed alter successfully."
+    return "Executed alter successfully."
 
 
 @mcp.tool()
@@ -1668,11 +1824,11 @@ def alter_state(state: str, selection: str, expression: str) -> str:
     
     res = send_request("alter_state", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed alter_state successfully."
+    return "Executed alter_state successfully."
 
 
 @mcp.tool()
-def h_add(selection: Optional[str] = "all") -> str:
+def h_add(selection: str | None = "all") -> str:
     """
     Adds hydrogens to a selection
     """
@@ -1681,11 +1837,11 @@ def h_add(selection: Optional[str] = "all") -> str:
     
     res = send_request("h_add", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed h_add successfully."
+    return "Executed h_add successfully."
 
 
 @mcp.tool()
-def h_fill(selection: Optional[str] = "all") -> str:
+def h_fill(selection: str | None = "all") -> str:
     """
     Adds hydrogens and adjusts valences
     """
@@ -1694,11 +1850,11 @@ def h_fill(selection: Optional[str] = "all") -> str:
     
     res = send_request("h_fill", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed h_fill successfully."
+    return "Executed h_fill successfully."
 
 
 @mcp.tool()
-def bond(atom1: str, atom2: str, order: Optional[str] = "1") -> str:
+def bond(atom1: str, atom2: str, order: str | None = "1") -> str:
     """
     Creates a bond between two atoms
     """
@@ -1709,7 +1865,7 @@ def bond(atom1: str, atom2: str, order: Optional[str] = "1") -> str:
     
     res = send_request("bond", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed bond successfully."
+    return "Executed bond successfully."
 
 
 @mcp.tool()
@@ -1723,11 +1879,11 @@ def unbond(atom1: str, atom2: str) -> str:
     
     res = send_request("unbond", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed unbond successfully."
+    return "Executed unbond successfully."
 
 
 @mcp.tool()
-def rebuild(selection: Optional[str] = "all") -> str:
+def rebuild(selection: str | None = "all") -> str:
     """
     Regenerates all displayed geometry
     """
@@ -1736,7 +1892,7 @@ def rebuild(selection: Optional[str] = "all") -> str:
     
     res = send_request("rebuild", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed rebuild successfully."
+    return "Executed rebuild successfully."
 
 
 @mcp.tool()
@@ -1749,11 +1905,11 @@ def refresh() -> str:
     
     res = send_request("refresh", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed refresh successfully."
+    return "Executed refresh successfully."
 
 
 @mcp.tool()
-def util_cbc(selection: Optional[str] = "all") -> str:
+def util_cbc(selection: str | None = "all") -> str:
     """
     Colors by chain (Color By Chain)
     """
@@ -1762,11 +1918,11 @@ def util_cbc(selection: Optional[str] = "all") -> str:
     
     res = send_request("util.cbc", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed util.cbc successfully."
+    return "Executed util.cbc successfully."
 
 
 @mcp.tool()
-def util_cbaw(selection: Optional[str] = "all") -> str:
+def util_cbaw(selection: str | None = "all") -> str:
     """
     Colors by atom, white carbons (Color By Atom, White)
     """
@@ -1775,11 +1931,11 @@ def util_cbaw(selection: Optional[str] = "all") -> str:
     
     res = send_request("util.cbaw", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed util.cbaw successfully."
+    return "Executed util.cbaw successfully."
 
 
 @mcp.tool()
-def util_cbag(selection: Optional[str] = "all") -> str:
+def util_cbag(selection: str | None = "all") -> str:
     """
     Colors by atom, green carbons (Color By Atom, Green)
     """
@@ -1788,11 +1944,11 @@ def util_cbag(selection: Optional[str] = "all") -> str:
     
     res = send_request("util.cbag", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed util.cbag successfully."
+    return "Executed util.cbag successfully."
 
 
 @mcp.tool()
-def util_cbac(selection: Optional[str] = "all") -> str:
+def util_cbac(selection: str | None = "all") -> str:
     """
     Colors by atom, cyan carbons (Color By Atom, Cyan)
     """
@@ -1801,11 +1957,11 @@ def util_cbac(selection: Optional[str] = "all") -> str:
     
     res = send_request("util.cbac", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed util.cbac successfully."
+    return "Executed util.cbac successfully."
 
 
 @mcp.tool()
-def util_cbam(selection: Optional[str] = "all") -> str:
+def util_cbam(selection: str | None = "all") -> str:
     """
     Colors by atom, magenta carbons (Color By Atom, Magenta)
     """
@@ -1814,11 +1970,11 @@ def util_cbam(selection: Optional[str] = "all") -> str:
     
     res = send_request("util.cbam", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed util.cbam successfully."
+    return "Executed util.cbam successfully."
 
 
 @mcp.tool()
-def util_cbay(selection: Optional[str] = "all") -> str:
+def util_cbay(selection: str | None = "all") -> str:
     """
     Colors by atom, yellow carbons (Color By Atom, Yellow)
     """
@@ -1827,11 +1983,11 @@ def util_cbay(selection: Optional[str] = "all") -> str:
     
     res = send_request("util.cbay", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed util.cbay successfully."
+    return "Executed util.cbay successfully."
 
 
 @mcp.tool()
-def util_cbas(selection: Optional[str] = "all") -> str:
+def util_cbas(selection: str | None = "all") -> str:
     """
     Colors by atom, salmon carbons (Color By Atom, Salmon)
     """
@@ -1840,11 +1996,11 @@ def util_cbas(selection: Optional[str] = "all") -> str:
     
     res = send_request("util.cbas", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed util.cbas successfully."
+    return "Executed util.cbas successfully."
 
 
 @mcp.tool()
-def util_cbab(selection: Optional[str] = "all") -> str:
+def util_cbab(selection: str | None = "all") -> str:
     """
     Colors by atom, slate carbons (Color By Atom, slateBLue)
     """
@@ -1853,11 +2009,11 @@ def util_cbab(selection: Optional[str] = "all") -> str:
     
     res = send_request("util.cbab", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed util.cbab successfully."
+    return "Executed util.cbab successfully."
 
 
 @mcp.tool()
-def util_cbao(selection: Optional[str] = "all") -> str:
+def util_cbao(selection: str | None = "all") -> str:
     """
     Colors by atom, orange carbons (Color By Atom, Orange)
     """
@@ -1866,11 +2022,11 @@ def util_cbao(selection: Optional[str] = "all") -> str:
     
     res = send_request("util.cbao", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed util.cbao successfully."
+    return "Executed util.cbao successfully."
 
 
 @mcp.tool()
-def util_cbap(selection: Optional[str] = "all") -> str:
+def util_cbap(selection: str | None = "all") -> str:
     """
     Colors by atom, purple carbons (Color By Atom, Purple)
     """
@@ -1879,11 +2035,11 @@ def util_cbap(selection: Optional[str] = "all") -> str:
     
     res = send_request("util.cbap", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed util.cbap successfully."
+    return "Executed util.cbap successfully."
 
 
 @mcp.tool()
-def util_cbak(selection: Optional[str] = "all") -> str:
+def util_cbak(selection: str | None = "all") -> str:
     """
     Colors by atom, pink carbons (Color By Atom, pinK)
     """
@@ -1892,11 +2048,11 @@ def util_cbak(selection: Optional[str] = "all") -> str:
     
     res = send_request("util.cbak", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed util.cbak successfully."
+    return "Executed util.cbak successfully."
 
 
 @mcp.tool()
-def util_chainbow(selection: Optional[str] = "all") -> str:
+def util_chainbow(selection: str | None = "all") -> str:
     """
     Colors chains in rainbow gradient (CHAINs in rainBOW)
     """
@@ -1905,11 +2061,11 @@ def util_chainbow(selection: Optional[str] = "all") -> str:
     
     res = send_request("util.chainbow", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed util.chainbow successfully."
+    return "Executed util.chainbow successfully."
 
 
 @mcp.tool()
-def util_rainbow(selection: Optional[str] = "all") -> str:
+def util_rainbow(selection: str | None = "all") -> str:
     """
     Colors residues in rainbow from N to C terminus
     """
@@ -1918,11 +2074,11 @@ def util_rainbow(selection: Optional[str] = "all") -> str:
     
     res = send_request("util.rainbow", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed util.rainbow successfully."
+    return "Executed util.rainbow successfully."
 
 
 @mcp.tool()
-def util_ss(selection: Optional[str] = "all") -> str:
+def util_ss(selection: str | None = "all") -> str:
     """
     Colors by secondary structure
     """
@@ -1931,11 +2087,11 @@ def util_ss(selection: Optional[str] = "all") -> str:
     
     res = send_request("util.ss", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed util.ss successfully."
+    return "Executed util.ss successfully."
 
 
 @mcp.tool()
-def util_color_by_element(selection: Optional[str] = "all") -> str:
+def util_color_by_element(selection: str | None = "all") -> str:
     """
     Colors atoms by their element
     """
@@ -1944,11 +2100,11 @@ def util_color_by_element(selection: Optional[str] = "all") -> str:
     
     res = send_request("util.color_by_element", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed util.color_by_element successfully."
+    return "Executed util.color_by_element successfully."
 
 
 @mcp.tool()
-def util_color_secondary(selection: Optional[str] = "all") -> str:
+def util_color_secondary(selection: str | None = "all") -> str:
     """
     Colors secondary structure elements
     """
@@ -1957,11 +2113,11 @@ def util_color_secondary(selection: Optional[str] = "all") -> str:
     
     res = send_request("util.color_secondary", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed util.color_secondary successfully."
+    return "Executed util.color_secondary successfully."
 
 
 @mcp.tool()
-def spheroid(selection: Optional[str] = "all") -> str:
+def spheroid(selection: str | None = "all") -> str:
     """
     Displays atoms as smooth spheres
     """
@@ -1970,11 +2126,11 @@ def spheroid(selection: Optional[str] = "all") -> str:
     
     res = send_request("spheroid", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed spheroid successfully."
+    return "Executed spheroid successfully."
 
 
 @mcp.tool()
-def isomesh(name: str, map_object: str, level: str, selection: Optional[str] = "all") -> str:
+def isomesh(name: str, map_object: str, level: str, selection: str | None = "all") -> str:
     """
     Creates a mesh isosurface
     """
@@ -1986,11 +2142,11 @@ def isomesh(name: str, map_object: str, level: str, selection: Optional[str] = "
     
     res = send_request("isomesh", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed isomesh successfully."
+    return "Executed isomesh successfully."
 
 
 @mcp.tool()
-def isosurface(name: str, map_object: str, level: str, selection: Optional[str] = "all") -> str:
+def isosurface(name: str, map_object: str, level: str, selection: str | None = "all") -> str:
     """
     Creates a solid isosurface
     """
@@ -2002,7 +2158,7 @@ def isosurface(name: str, map_object: str, level: str, selection: Optional[str] 
     
     res = send_request("isosurface", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed isosurface successfully."
+    return "Executed isosurface successfully."
 
 
 @mcp.tool()
@@ -2015,7 +2171,7 @@ def sculpt_activate(obj: str) -> str:
     
     res = send_request("sculpt_activate", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed sculpt_activate successfully."
+    return "Executed sculpt_activate successfully."
 
 
 @mcp.tool()
@@ -2028,11 +2184,11 @@ def sculpt_deactivate(obj: str) -> str:
     
     res = send_request("sculpt_deactivate", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed sculpt_deactivate successfully."
+    return "Executed sculpt_deactivate successfully."
 
 
 @mcp.tool()
-def sculpt_iterate(iterations: str, obj: Optional[str] = "all") -> str:
+def sculpt_iterate(iterations: str, obj: str | None = "all") -> str:
     """
     Performs sculpting iterations
     """
@@ -2042,11 +2198,11 @@ def sculpt_iterate(iterations: str, obj: Optional[str] = "all") -> str:
     
     res = send_request("sculpt_iterate", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed sculpt_iterate successfully."
+    return "Executed sculpt_iterate successfully."
 
 
 @mcp.tool()
-def scene(key: str, action: Optional[str] = "recall") -> str:
+def scene(key: str, action: str | None = "recall") -> str:
     """
     Manages scenes for later recall
     """
@@ -2056,7 +2212,7 @@ def scene(key: str, action: Optional[str] = "recall") -> str:
     
     res = send_request("scene", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed scene successfully."
+    return "Executed scene successfully."
 
 
 @mcp.tool()
@@ -2069,7 +2225,7 @@ def scene_order(scene_list: str) -> str:
     
     res = send_request("scene_order", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed scene_order successfully."
+    return "Executed scene_order successfully."
 
 
 @mcp.tool()
@@ -2082,7 +2238,7 @@ def mset(specification: str) -> str:
     
     res = send_request("mset", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed mset successfully."
+    return "Executed mset successfully."
 
 
 @mcp.tool()
@@ -2095,7 +2251,7 @@ def mplay() -> str:
     
     res = send_request("mplay", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed mplay successfully."
+    return "Executed mplay successfully."
 
 
 @mcp.tool()
@@ -2108,11 +2264,11 @@ def mstop() -> str:
     
     res = send_request("mstop", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed mstop successfully."
+    return "Executed mstop successfully."
 
 
 @mcp.tool()
-def frame(frame_number: Optional[str] = None) -> str:
+def frame(frame_number: str | None = None) -> str:
     """
     Sets or queries the current frame
     """
@@ -2121,7 +2277,7 @@ def frame(frame_number: Optional[str] = None) -> str:
     
     res = send_request("frame", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed frame successfully."
+    return "Executed frame successfully."
 
 
 @mcp.tool()
@@ -2134,7 +2290,7 @@ def forward() -> str:
     
     res = send_request("forward", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed forward successfully."
+    return "Executed forward successfully."
 
 
 @mcp.tool()
@@ -2147,7 +2303,7 @@ def backward() -> str:
     
     res = send_request("backward", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed backward successfully."
+    return "Executed backward successfully."
 
 
 @mcp.tool()
@@ -2160,11 +2316,11 @@ def rock() -> str:
     
     res = send_request("rock", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed rock successfully."
+    return "Executed rock successfully."
 
 
 @mcp.tool()
-def ray(width: Optional[str] = None, height: Optional[str] = None) -> str:
+def ray(width: str | None = None, height: str | None = None) -> str:
     """
     Performs ray-tracing
     """
@@ -2174,11 +2330,11 @@ def ray(width: Optional[str] = None, height: Optional[str] = None) -> str:
     
     res = send_request("ray", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed ray successfully."
+    return "Executed ray successfully."
 
 
 @mcp.tool()
-def draw(width: Optional[str] = None, height: Optional[str] = None) -> str:
+def draw(width: str | None = None, height: str | None = None) -> str:
     """
     Uses OpenGL renderer (faster but lower quality)
     """
@@ -2188,7 +2344,7 @@ def draw(width: Optional[str] = None, height: Optional[str] = None) -> str:
     
     res = send_request("draw", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed draw successfully."
+    return "Executed draw successfully."
 
 
 @mcp.tool()
@@ -2201,11 +2357,11 @@ def mpng(prefix: str) -> str:
     
     res = send_request("mpng", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed mpng successfully."
+    return "Executed mpng successfully."
 
 
 @mcp.tool()
-def symexp(prefix: str, selection: str, cutoff: Optional[str] = "20", segi: Optional[str] = None) -> str:
+def symexp(prefix: str, selection: str, cutoff: str | None = "20", segi: str | None = None) -> str:
     """
     Generates symmetry-related copies
     """
@@ -2217,7 +2373,7 @@ def symexp(prefix: str, selection: str, cutoff: Optional[str] = "20", segi: Opti
     
     res = send_request("symexp", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed symexp successfully."
+    return "Executed symexp successfully."
 
 
 @mcp.tool()
@@ -2236,11 +2392,11 @@ def set_symmetry(selection: str, a: str, b: str, c: str, alpha: str, beta: str, 
     
     res = send_request("set_symmetry", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed set_symmetry successfully."
+    return "Executed set_symmetry successfully."
 
 
 @mcp.tool()
-def fab(sequence: str, options: Optional[str] = None) -> str:
+def fab(sequence: str, options: str | None = None) -> str:
     """
     Creates a peptide chain from a sequence
     """
@@ -2250,7 +2406,7 @@ def fab(sequence: str, options: Optional[str] = None) -> str:
     
     res = send_request("fab", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed fab successfully."
+    return "Executed fab successfully."
 
 
 @mcp.tool()
@@ -2263,7 +2419,7 @@ def fragment(name: str) -> str:
     
     res = send_request("fragment", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed fragment successfully."
+    return "Executed fragment successfully."
 
 
 @mcp.tool()
@@ -2276,7 +2432,7 @@ def full_screen() -> str:
     
     res = send_request("full_screen", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed full_screen successfully."
+    return "Executed full_screen successfully."
 
 
 @mcp.tool()
@@ -2290,7 +2446,7 @@ def viewport(width: str, height: str) -> str:
     
     res = send_request("viewport", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed viewport successfully."
+    return "Executed viewport successfully."
 
 
 @mcp.tool()
@@ -2303,7 +2459,7 @@ def cd(path: str) -> str:
     
     res = send_request("cd", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed cd successfully."
+    return "Executed cd successfully."
 
 
 @mcp.tool()
@@ -2316,11 +2472,11 @@ def pwd() -> str:
     
     res = send_request("pwd", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed pwd successfully."
+    return "Executed pwd successfully."
 
 
 @mcp.tool()
-def ls(path: Optional[str] = None) -> str:
+def ls(path: str | None = None) -> str:
     """
     Lists files in the current directory
     """
@@ -2329,7 +2485,7 @@ def ls(path: Optional[str] = None) -> str:
     
     res = send_request("ls", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed ls successfully."
+    return "Executed ls successfully."
 
 
 @mcp.tool()
@@ -2342,11 +2498,11 @@ def system(command: str) -> str:
     
     res = send_request("system", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed system successfully."
+    return "Executed system successfully."
 
 
 @mcp.tool()
-def help(command: Optional[str] = None) -> str:
+def help(command: str | None = None) -> str:
     """
     Shows help for a command
     """
@@ -2355,7 +2511,7 @@ def help(command: Optional[str] = None) -> str:
     
     res = send_request("help", args=call_args)
     if res.get("status") == "error": return res.get("error")
-    return f"Executed help successfully."
+    return "Executed help successfully."
 
 
 # ── 3D printing export ───────────────────────────────────────────────────────
@@ -2444,7 +2600,7 @@ def _repair_to_stl(src_obj: str, dst_stl: str, method: str,
                 try:
                     ms.apply_filter(n, **kw)
                     return
-                except Exception as e:  # noqa: BLE001
+                except Exception as e:
                     last = e
             raise RuntimeError(f"none of {names} worked: {last}")
 
@@ -2474,7 +2630,7 @@ def _repair_to_stl(src_obj: str, dst_stl: str, method: str,
             try:
                 mesh = _poisson(src_obj, dst_stl, poisson_depth)
                 used = "poisson"
-            except Exception:  # noqa: BLE001
+            except Exception:
                 mesh = _voxel(src_obj, dst_stl, voxel_pitch)
                 used = "voxel (poisson fallback)"
     elif method == "poisson":
@@ -2487,7 +2643,7 @@ def _repair_to_stl(src_obj: str, dst_stl: str, method: str,
 
     return {
         "method": used,
-        "faces": int(len(mesh.faces)),
+        "faces": len(mesh.faces),
         "watertight": bool(mesh.is_watertight),
     }
 

@@ -2,18 +2,18 @@
 
 import json
 import math
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
 
 import mcpymol.server as server_module
 from mcpymol.server import (
-    _parse_a3m,
+    _AA_ALPHABET,
     _compute_shannon_entropy,
+    _parse_a3m,
     _run_mmseqs2,
     conservation_view,
-    _AA_ALPHABET,
 )
-
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -462,6 +462,22 @@ _SCALING_MSA = (
 )
 
 
+def _extract_cons_scores(mock_sr):
+    """Pull the per-residue conservation score list from the batched apply
+    script that ``conservation_view`` now sends as a single ``do`` call."""
+    import re
+    for call in mock_sr.call_args_list:
+        if call.args[0] != "do":
+            continue
+        cmd_str = call.kwargs.get(
+            "args", call.args[1] if len(call.args) > 1 else [""]
+        )[0]
+        m = re.search(r"stored\.cons_scores\s*=\s*(\[[^\]]*\])", cmd_str)
+        if m:
+            return json.loads(m.group(1))
+    return None
+
+
 @patch("mcpymol.server._run_mmseqs2")
 @patch("mcpymol.server.send_request")
 def test_conservation_view_relative_scale_b_factors(mock_sr, mock_mmseqs):
@@ -473,23 +489,11 @@ def test_conservation_view_relative_scale_b_factors(mock_sr, mock_mmseqs):
 
     assert "relative scale" in result
 
-    # Collect all B-factor alter calls to inspect the scores
-    b_scores = {}
-    for call in mock_sr.call_args_list:
-        if call.args[0] == "do":
-            cmd_str = call.kwargs.get("args", call.args[1] if len(call.args) > 1 else [""])[0]
-            if "name CA, b=" in cmd_str:
-                # Extract resi and b-value
-                import re
-                m = re.search(r"resi (\d+) and name CA, b=([\d.]+)", cmd_str)
-                if m:
-                    b_scores[int(m.group(1))] = float(m.group(2))
-
-    if b_scores:
-        scores = list(b_scores.values())
-        # In relative mode, the most conserved should be 100.0 and most variable 0.0
-        assert max(scores) == pytest.approx(100.0, abs=0.1)
-        assert min(scores) == pytest.approx(0.0, abs=0.1)
+    scores = _extract_cons_scores(mock_sr)
+    assert scores is not None and len(scores) > 0
+    # In relative mode, the most conserved should be 100.0 and most variable 0.0
+    assert max(scores) == pytest.approx(100.0, abs=0.1)
+    assert min(scores) == pytest.approx(0.0, abs=0.1)
 
 
 @patch("mcpymol.server._run_mmseqs2")
@@ -503,25 +507,13 @@ def test_conservation_view_absolute_scale_b_factors(mock_sr, mock_mmseqs):
 
     assert "absolute scale" in result
 
-    # Collect B-factor alter calls
-    b_scores = {}
-    for call in mock_sr.call_args_list:
-        if call.args[0] == "do":
-            cmd_str = call.kwargs.get("args", call.args[1] if len(call.args) > 1 else [""])[0]
-            if "name CA, b=" in cmd_str:
-                import re
-                m = re.search(r"resi (\d+) and name CA, b=([\d.]+)", cmd_str)
-                if m:
-                    b_scores[int(m.group(1))] = float(m.group(2))
-
-    if b_scores:
-        scores = list(b_scores.values())
-        # In absolute mode, perfectly conserved positions should be 100.0
-        # but variable positions should NOT be 0.0 (they'd only be 0 at max theoretical entropy)
-        assert max(scores) == pytest.approx(100.0, abs=0.1)
-        # The most variable position has some entropy but nowhere near log2(20),
-        # so its absolute score should be well above 0
-        assert min(scores) > 10.0
+    scores = _extract_cons_scores(mock_sr)
+    assert scores is not None and len(scores) > 0
+    # In absolute mode, perfectly conserved positions should be 100.0,
+    # but variable positions should NOT be 0.0 (they'd only be 0 at max
+    # theoretical entropy log2(20)).
+    assert max(scores) == pytest.approx(100.0, abs=0.1)
+    assert min(scores) > 10.0
 
 
 @patch("mcpymol.server._run_mmseqs2")

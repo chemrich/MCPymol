@@ -1,18 +1,35 @@
-import pytest
 import json
-import socket
 import sys
-from unittest.mock import patch, MagicMock
-from mcpymol.server import (
-    send_request, fetch_structure, load_structure,
-    show, color, select, distance,
-    ligand_view, interface_view, putty_view,
-    hydrophobic_surface_view, electrostatic_view,
-    crosslink_view, pocket_view, pharmacophore_view,
-    mutation_view, textbook_view, cinematic_view, pointillist_view,
-    print_export, _parse_groups, _repair_to_stl
-)
+from unittest.mock import MagicMock, patch
 
+import pytest
+
+from mcpymol.server import (
+    _parse_groups,
+    _repair_to_stl,
+    cinematic_view,
+    color,
+    crosslink_view,
+    electrostatic_view,
+    fetch_structure,
+    hydrophobic_surface_view,
+    interface_view,
+    ligand_view,
+    list_chains,
+    list_ligands,
+    list_objects,
+    load_structure,
+    mutation_view,
+    pharmacophore_view,
+    pocket_view,
+    pointillist_view,
+    print_export,
+    putty_view,
+    select,
+    send_request,
+    show,
+    textbook_view,
+)
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -81,7 +98,7 @@ def test_send_request_timeout():
     """Socket timeout returns a structured error dict."""
     with patch("socket.socket") as mock_cls:
         mock_cls.return_value.__enter__.return_value.connect.side_effect = (
-            socket.timeout("Timed out")
+            TimeoutError("Timed out")
         )
         res = send_request("test")
     assert res["status"] == "error"
@@ -420,6 +437,58 @@ def test_mutation_view_invalid_input(mock_sr):
 
     assert "No valid mutations" in result
     assert mock_sr.call_count == 0
+
+
+# ── Scene introspection ───────────────────────────────────────────────────────
+
+@patch("mcpymol.server.send_request")
+def test_list_objects_with_objects(mock_sr):
+    mock_sr.return_value = {"status": "success", "result": ["1ubq", "lig"]}
+    result = list_objects()
+    assert "1ubq" in result and "lig" in result
+    assert mock_sr.call_args.args[0] == "get_object_list"
+
+
+@patch("mcpymol.server.send_request")
+def test_list_objects_empty(mock_sr):
+    mock_sr.return_value = {"status": "success", "result": []}
+    assert list_objects() == "No objects are loaded."
+
+
+@patch("mcpymol.server.send_request")
+def test_list_chains(mock_sr):
+    mock_sr.return_value = {"status": "success", "result": ["A", "B", "C"]}
+    result = list_chains("1abc")
+    assert "A" in result and "B" in result and "C" in result
+    assert mock_sr.call_args.args[0] == "get_chains"
+    assert mock_sr.call_args.kwargs["args"] == ["1abc"]
+
+
+@patch("mcpymol.server.send_request")
+def test_list_chains_empty(mock_sr):
+    mock_sr.return_value = {"status": "success", "result": []}
+    assert "No chains" in list_chains("empty")
+
+
+@patch("mcpymol.server.send_request")
+def test_list_ligands_parses_pdb(mock_sr):
+    """list_ligands parses HETATM resn columns out of the PDB dump."""
+    pdb = (
+        "HETATM    1  C1  ATP A 200      11.111  22.222  33.333  1.00 20.00           C\n"
+        "HETATM    2  N1  ATP A 200      11.111  22.222  33.333  1.00 20.00           N\n"
+        "HETATM    3  MG  MG  A 201      14.000  25.000  36.000  1.00 20.00          MG\n"
+        "END\n"
+    )
+    mock_sr.return_value = {"status": "success", "result": pdb}
+    result = list_ligands("1atp")
+    assert "ATP" in result and "MG" in result
+    assert "1atp" in result
+
+
+@patch("mcpymol.server.send_request")
+def test_list_ligands_no_organic(mock_sr):
+    mock_sr.return_value = {"status": "success", "result": ""}
+    assert "No organic ligands" in list_ligands("1ubq")
 
 
 # ── print_export ──────────────────────────────────────────────────────────────
