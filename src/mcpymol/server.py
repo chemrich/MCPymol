@@ -2920,6 +2920,78 @@ def _repair_to_stl(
 
 
 @mcp.tool()
+def print_ribbon_view(obj_name: str, spine_radius: float = 0.9) -> str:
+    """
+    Chunky β-arrow ribbons plus a continuous backbone "spine", tuned for
+    rigid, gap-free 3D printing.
+
+    Configures the look developed for FDM printing: thick β-strand arrows
+    and a fat helix on the main object with loop cartoon hidden, plus a
+    separate ``<obj>_spine`` object showing PyMOL's ``cartoon tube`` (which
+    ignores secondary structure) running unbroken through the whole
+    backbone. The spine threads through the strand bodies, so when the two
+    objects are exported together the voxel step fuses them into ONE
+    watertight solid with no strand→loop discontinuity. The spine also acts
+    as internal rebar, reinforcing the thin junctions for print rigidity.
+
+    After calling this, export the fused solid with::
+
+        print_export(obj_name="<obj>",
+                      groups="<obj>=(<obj> or <obj>_spine)",
+                      method="voxel", voxel_pitch=0.2)
+
+    Args:
+        obj_name: PyMOL object name (e.g. "1abc").
+        spine_radius: Radius (A) of the continuous backbone tube. Larger
+                      values give more internal reinforcement. Default 0.9.
+    """
+    spine = f"{obj_name}_spine"
+
+    # Main object: chunky β-arrows + fat helix.
+    send_request("hide", args=["everything", obj_name])
+    send_request("show", args=["cartoon", obj_name])
+    send_request("do", args=[f"cartoon automatic, {obj_name}"])
+    chunky = {
+        "cartoon_loop_radius": "1.3",
+        "cartoon_rect_width": "2.0",
+        "cartoon_rect_length": "2.8",
+        "cartoon_oval_width": "1.3",
+        "cartoon_oval_length": "2.0",
+        "cartoon_helix_radius": "1.3",
+        "cartoon_fancy_sheets": "1",  # keep 3D arrowheads (strand direction)
+        "cartoon_flat_sheets": "1",  # well-defined arrow plane
+        "cartoon_smooth_loops": "1",
+    }
+    for setting, value in chunky.items():
+        send_request("set", args=[setting, value])
+
+    # Loops are represented by the spine only - drop their fat cartoon.
+    send_request("hide", args=["cartoon", f"({obj_name}) and not (ss H or ss S)"])
+
+    # Spine: one continuous tube through the entire backbone (no SS gaps).
+    send_request("delete", args=[spine])
+    send_request("create", args=[spine, obj_name])
+    send_request("hide", args=["everything", spine])
+    send_request("show", args=["cartoon", spine])
+    send_request("do", args=[f"cartoon tube, {spine}"])
+    send_request("set", args=["cartoon_tube_radius", str(spine_radius), spine])
+
+    send_request("do", args=[f"util.chainbow('{obj_name}')"])
+    send_request("do", args=[f"util.chainbow('{spine}')"])
+    send_request("orient", args=[obj_name])
+
+    return (
+        f"Print-ribbon view applied to {obj_name} (spine object '{spine}' "
+        f"created). Chunky β-arrows and helix with a continuous backbone "
+        f"tube; loops are the spine only. Export as one fused, gap-free "
+        f"solid with:\n"
+        f'  print_export(obj_name="{obj_name}", '
+        f'groups="{obj_name}=({obj_name} or {spine})", '
+        f'method="voxel", voxel_pitch=0.2)'
+    )
+
+
+@mcp.tool()
 def print_export(
     obj_name: str,
     groups: str,

@@ -24,6 +24,7 @@ from mcpymol.server import (
     pocket_view,
     pointillist_view,
     print_export,
+    print_ribbon_view,
     putty_view,
     select,
     send_request,
@@ -306,6 +307,24 @@ def test_putty_view(mock_sr):
     assert "hide" in acts
     assert "show" in acts
     assert "set" in acts
+
+
+@patch("mcpymol.server.send_request")
+def test_print_ribbon_view(mock_sr):
+    mock_sr.return_value = {"status": "success", "result": "OK"}
+
+    result = print_ribbon_view(obj_name="1UBQ", spine_radius=1.1)
+
+    assert "Print-ribbon view" in result
+    # Tells the user how to export the fused solid.
+    assert "1UBQ_spine" in result
+    assert "print_export" in result
+    acts = _actions(mock_sr)
+    assert "hide" in acts
+    assert "create" in acts
+    assert "set" in acts
+    do_args = [c.kwargs["args"][0] for c in mock_sr.call_args_list if c.args[0] == "do"]
+    assert any("cartoon tube, 1UBQ_spine" in a for a in do_args)
 
 
 @patch("mcpymol.server.send_request")
