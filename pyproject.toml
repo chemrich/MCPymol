@@ -43,6 +43,16 @@ Repository = "https://github.com/chemrich/MCPymol"
 Issues = "https://github.com/chemrich/MCPymol/issues"
 Changelog = "https://github.com/chemrich/MCPymol/blob/main/CHANGELOG.md"
 
+[project.optional-dependencies]
+# 3D-print export (print_export tool): mesh repair to watertight STL.
+print = [
+    "trimesh>=4.0",
+    "pymeshlab>=2023.12",
+    "scipy>=1.11",
+    "scikit-image>=0.22",
+    "networkx>=3.0",
+]
+
 [project.scripts]
 mcpymol = "mcpymol.server:main"
 

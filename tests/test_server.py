@@ -1,6 +1,7 @@
 import pytest
 import json
 import socket
+import sys
 from unittest.mock import patch, MagicMock
 from mcpymol.server import (
     send_request, fetch_structure, load_structure,
@@ -10,6 +11,7 @@ from mcpymol.server import (
     crosslink_view, pocket_view, pharmacophore_view,
     mutation_view, textbook_view, cinematic_view, pointillist_view,
     list_objects, list_chains, list_ligands,
+    print_export, _parse_groups, _repair_to_stl,
 )
 
 
@@ -471,3 +473,102 @@ def test_list_ligands_parses_pdb(mock_sr):
 def test_list_ligands_no_organic(mock_sr):
     mock_sr.return_value = {"status": "success", "result": ""}
     assert "No organic ligands" in list_ligands("1ubq")
+
+
+# ── print_export ──────────────────────────────────────────────────────────────
+
+def test_parse_groups_valid():
+    pairs = _parse_groups("protein=polymer.protein; nucleic=chain N+R+T")
+    assert pairs == [("protein", "polymer.protein"),
+                     ("nucleic", "chain N+R+T")]
+
+
+def test_parse_groups_trailing_semicolon_and_spaces():
+    assert _parse_groups("  a = chain A ; ") == [("a", "chain A")]
+
+
+@pytest.mark.parametrize("bad", ["", "noequals", "label=", "=selection"])
+def test_parse_groups_invalid(bad):
+    with pytest.raises(ValueError):
+        _parse_groups(bad)
+
+
+@patch("mcpymol.server.send_request")
+def test_print_export_missing_deps(mock_sr):
+    """Without the optional 'print' extra, returns an install hint, no PyMOL calls."""
+    with patch.dict(sys.modules, {"trimesh": None}):
+        result = print_export(obj_name="1MSW", groups="protein=polymer.protein")
+    assert "uv sync --extra print" in result
+    assert mock_sr.call_count == 0
+
+
+@patch("mcpymol.server._repair_to_stl")
+@patch("mcpymol.server.send_request")
+def test_print_export_happy_path(mock_sr, mock_repair, tmp_path):
+    mock_sr.return_value = {"status": "success", "result": "OK"}
+    mock_repair.return_value = {"method": "poisson", "faces": 144290,
+                                "watertight": True}
+
+    with patch.dict(sys.modules, {"trimesh": MagicMock()}):
+        result = print_export(
+            obj_name="1MSW",
+            groups="protein=polymer.protein; nucleic=polymer.nucleic",
+            out_dir=str(tmp_path),
+        )
+
+    assert "1MSW_protein.stl" in result
+    assert "1MSW_nucleic.stl" in result
+    assert "OK" in result  # watertight flag
+    acts = _actions(mock_sr)
+    # Each group is isolated (create) and exported (save), then cleaned up.
+    assert acts.count("create") == 2
+    assert acts.count("save") == 2
+    assert acts.count("delete") >= 2
+    assert mock_repair.call_count == 2
+
+
+@patch("mcpymol.server.send_request")
+def test_print_export_bad_group(mock_sr):
+    with patch.dict(sys.modules, {"trimesh": MagicMock()}):
+        result = print_export(obj_name="1MSW", groups="garbage")
+    assert result.startswith("Error:")
+    assert mock_sr.call_count == 0
+
+
+@patch("mcpymol.server._repair_to_stl")
+@patch("mcpymol.server.send_request")
+def test_print_export_save_error_reported(mock_sr, mock_repair, tmp_path):
+    mock_sr.return_value = {"status": "error", "error": "disk full"}
+    with patch.dict(sys.modules, {"trimesh": MagicMock()}):
+        result = print_export(obj_name="1MSW",
+                               groups="protein=polymer.protein",
+                               out_dir=str(tmp_path))
+    assert "disk full" in result
+    mock_repair.assert_not_called()
+
+
+def test_repair_auto_light_path_when_already_watertight():
+    """auto: an already-watertight export uses light cleanup, not Poisson.
+
+    Regression for the sfGFP finding — Poisson degraded an already-closed
+    compact barrel surface, so auto must skip it when not needed.
+    """
+    fake_tm = MagicMock()
+    shell = MagicMock()
+    shell.faces = list(range(2000))
+    shell.is_watertight = True
+    raw = MagicMock()
+    raw.is_watertight = True
+    raw.split.return_value = [shell]
+    fake_tm.load.return_value = raw
+
+    # pymeshlab set to None so any Poisson attempt would raise ImportError.
+    with patch.dict(sys.modules, {"trimesh": fake_tm, "pymeshlab": None}):
+        info = _repair_to_stl("in.obj", "out.stl", "auto",
+                              voxel_pitch=0.7, poisson_depth=10)
+
+    assert info["method"] == "light (already watertight)"
+    assert info["watertight"] is True
+    assert info["faces"] == 2000
+    shell.export.assert_called_once_with("out.stl")
+    fake_tm.repair.fix_normals.assert_called_once()

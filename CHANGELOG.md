@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `list_objects`, `list_chains(obj_name)`, `list_ligands(obj_name)` introspection tools so models can ground themselves in actual session state instead of guessing object names, chain IDs, or 3-letter ligand codes.
 - `python -m mcpymol` entry point via `__main__.py`.
 - GitHub Actions CI running pytest on Python 3.10–3.13.
+- `print_export` tool — exports a structure as watertight, manifold STL files for multi-colour 3D printing. Per-colour-group isolation works around PyMOL's whole-scene OBJ export. Adaptive mesh repair: `auto` does a light cleanup when the export is already watertight (compact barrels like GFP — keeps the largest body, drops internal cavity shells), otherwise screened-Poisson reconstruction with a voxel-remesh fallback (robust for thin nucleic acids); all groups stay in one coordinate frame for slicer assembly. Optional `print` extra (trimesh, pymeshlab, scipy, scikit-image, networkx); degrades gracefully with an install hint when the libraries are absent.
 
 ### Changed
 - Tool descriptions for `show`, `hide`, `color`, `select`, `remove`, `distance`, `execute_pymol_command` now enumerate valid argument vocabularies (representation names, color names) and include a brief PyMOL selection-syntax primer. Stronger guardrail on `execute_pymol_command` so models reach for it less.
