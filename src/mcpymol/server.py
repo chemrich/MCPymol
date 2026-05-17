@@ -13,7 +13,7 @@ from mcp.server.fastmcp import FastMCP
 # Initialize FastMCP server
 mcp = FastMCP("MCPymol")
 
-HOST = '127.0.0.1'
+HOST = "127.0.0.1"
 # Port can be overridden via environment variable, e.g.: MCPYMOL_PORT=9867 uv run mcpymol
 PORT = int(os.environ.get("MCPYMOL_PORT", 9876))
 
@@ -49,10 +49,12 @@ def _run_mmseqs2(sequence: str, server_url: str | None = None, use_env: bool = T
     mode = "env" if use_env else "all"
 
     # 1. Submit the search job
-    data = urllib.parse.urlencode({
-        "q": f">query\n{sequence}\n",
-        "mode": mode,
-    }).encode()
+    data = urllib.parse.urlencode(
+        {
+            "q": f">query\n{sequence}\n",
+            "mode": mode,
+        }
+    ).encode()
     req = urllib.request.Request(f"{host}/ticket/msa", data=data)
     req.add_header("User-Agent", "mcpymol/1.0.0 (github.com/chemrich/MCPymol)")
 
@@ -64,8 +66,10 @@ def _run_mmseqs2(sequence: str, server_url: str | None = None, use_env: bool = T
             break
         except (urllib.error.URLError, TimeoutError) as e:
             if attempt == max_retries - 1:
-                raise RuntimeError(f"Failed to submit MMseqs2 job after {max_retries} attempts: {e}") from e
-            time.sleep(2 ** attempt)
+                raise RuntimeError(
+                    f"Failed to submit MMseqs2 job after {max_retries} attempts: {e}"
+                ) from e
+            time.sleep(2**attempt)
 
     ticket_id = ticket.get("id")
     if not ticket_id:
@@ -93,6 +97,7 @@ def _run_mmseqs2(sequence: str, server_url: str | None = None, use_env: bool = T
     with urllib.request.urlopen(dl_url, timeout=30) as resp:
         import io
         import tarfile
+
         tar_bytes = resp.read()
 
     # The download is a tar.gz containing .a3m files
@@ -183,6 +188,7 @@ def _compute_shannon_entropy(msa: list[list[str]]) -> list[float]:
 
     return entropies
 
+
 def _apply_ghost_heart(name: str):
     """Applies the ghost heart visualization style to an object.
 
@@ -211,7 +217,6 @@ def _apply_ghost_heart(name: str):
     send_request("color", args=["atomic", f"({name}) and inorganic"])
     send_request("set", args=["sphere_scale", "0.3", f"({name}) and inorganic"])
 
-
     # Nucleic acids (DNA/RNA): brightorange backbone, deepteal ladders
     na_sel = f"({name}) and polymer.nucleic"
     send_request("set", args=["cartoon_nucleic_acid_color", "brightorange", na_sel])
@@ -221,12 +226,15 @@ def _apply_ghost_heart(name: str):
     send_request("center", args=[name])
     send_request("do", args=[f"origin {name}"])
 
+
 # A single recv() chunk size.  We loop until the plugin half-closes, so this
 # is just a memory hint, not a cap on the total response size.
 _RECV_CHUNK = 65536
 
 
-def send_request(action: str, args: list | None = None, kwargs: dict | None = None, timeout: float = 10.0) -> dict:
+def send_request(
+    action: str, args: list | None = None, kwargs: dict | None = None, timeout: float = 10.0
+) -> dict:
     """Send a JSON request to the PyMOL plugin socket server.
 
     The framing is one request per TCP connection: we write the JSON payload,
@@ -283,36 +291,45 @@ def send_request(action: str, args: list | None = None, kwargs: dict | None = No
             "error": f"Socket connection failed: {e}. Is the PyMOL plugin running?",
         }
 
+
 def _apply_multimer_heuristic(name: str, cutoff: float = 5.0):
     """BFS expansion to find all connected chains in a multimer."""
     # 1. Get initial chains
     res = send_request("get_chains", args=[name])
     if res.get("status") != "success" or not res.get("result"):
         return
-    
+
     all_chains = res.get("result")
     kept_chains = {all_chains[0]}
-    
+
     # 2. Expand until stable
     while True:
         chain_sel = "+".join(list(kept_chains))
         # Find chains nearby the current set
-        nearby_res = send_request("get_chains", args=[f"({name} and not chain {chain_sel}) and bychain (({name} and chain {chain_sel}) around {cutoff})"])
-        
+        nearby_res = send_request(
+            "get_chains",
+            args=[
+                f"({name} and not chain {chain_sel}) and bychain (({name} and chain {chain_sel}) around {cutoff})"
+            ],
+        )
+
         if nearby_res.get("status") == "success":
             new_chains = [c for c in nearby_res.get("result", []) if c in all_chains]
             if new_chains and not set(new_chains).issubset(kept_chains):
                 kept_chains.update(new_chains)
                 continue
         break
-        
+
     # 3. Apply the removal
     final_sel = "+".join(list(kept_chains))
     send_request("remove", args=[f"({name}) and not chain {final_sel}"])
     send_request("hide", args=["everything", f"({name}) and solvent"])
 
+
 @mcp.tool()
-def fetch_structure(pdb_code: str, obj_name: str | None = None, multimer_cutoff: float = 8.0) -> str:
+def fetch_structure(
+    pdb_code: str, obj_name: str | None = None, multimer_cutoff: float = 8.0
+) -> str:
     """
     Fetches a protein structure from the PDB.
     By default, it attempts to fetch the first biological assembly (multimer),
@@ -329,18 +346,16 @@ def fetch_structure(pdb_code: str, obj_name: str | None = None, multimer_cutoff:
     send_request("do", args=["reinitialize"])
     send_request("set", args=["mouse_wheel_scale", "0.1"])
     send_request("delete", args=[name])
-    
+
     # Use standard fetch
     res = send_request("fetch", args=[pdb_code, name])
     if res.get("status") == "error":
         return f"Error fetching {pdb_code}: {res.get('error')}"
-        
+
     _apply_multimer_heuristic(name, multimer_cutoff)
     _apply_ghost_heart(name)
     send_request("zoom", args=[name])
     return f"Successfully fetched {pdb_code} as '{name}' with ghost heart style and BFS multimer heuristic (cutoff={multimer_cutoff}A)."
-
-
 
 
 @mcp.tool()
@@ -360,12 +375,11 @@ def load_structure(file_path: str, obj_name: str, multimer_cutoff: float = 8.0) 
     res = send_request("load", args=[file_path, obj_name])
     if res.get("status") == "error":
         return f"Error loading {file_path}: {res.get('error')}"
-        
+
     _apply_multimer_heuristic(obj_name, multimer_cutoff)
     _apply_ghost_heart(obj_name)
     send_request("zoom", args=[obj_name])
     return f"Successfully loaded {file_path} as '{obj_name}' with ghost heart style and BFS multimer heuristic (cutoff={multimer_cutoff}A)."
-
 
 
 # ── Primitive tools ──────────────────────────────────────────────────────────
@@ -382,6 +396,7 @@ def load_structure(file_path: str, obj_name: str, multimer_cutoff: float = 8.0) 
 #   "organic"                  small-molecule cofactors
 #   "byres (a around 5)"       residues with any atom within 5 Å of selection a
 
+
 @mcp.tool()
 def show(representation: str, selection: str = "all") -> str:
     """Shows a graphical representation for a given selection.
@@ -392,8 +407,10 @@ def show(representation: str, selection: str = "all") -> str:
         selection: PyMOL selection string. See module-level note for syntax.
     """
     res = send_request("show", args=[representation, selection])
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return f"Showing {representation} for selection '{selection}'"
+
 
 @mcp.tool()
 def hide(representation: str, selection: str = "all") -> str:
@@ -405,8 +422,10 @@ def hide(representation: str, selection: str = "all") -> str:
         selection: PyMOL selection string.
     """
     res = send_request("hide", args=[representation, selection])
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return f"Hiding {representation} for selection '{selection}'"
+
 
 @mcp.tool()
 def color(color_name: str, selection: str = "all") -> str:
@@ -421,8 +440,10 @@ def color(color_name: str, selection: str = "all") -> str:
         selection: PyMOL selection string.
     """
     res = send_request("color", args=[color_name, selection])
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return f"Colored selection '{selection}' with {color_name}"
+
 
 @mcp.tool()
 def select(name: str, selection: str) -> str:
@@ -433,8 +454,10 @@ def select(name: str, selection: str) -> str:
         selection: PyMOL selection expression to assign to that name.
     """
     res = send_request("select", args=[name, selection])
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return f"Created named selection '{name}' for '{selection}'"
+
 
 @mcp.tool()
 def remove(selection: str) -> str:
@@ -444,8 +467,10 @@ def remove(selection: str) -> str:
     :func:`hide`.
     """
     res = send_request("remove", args=[selection])
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return f"Removed selection '{selection}'"
+
 
 @mcp.tool()
 def distance(name: str, selection1: str, selection2: str) -> str:
@@ -457,8 +482,10 @@ def distance(name: str, selection1: str, selection2: str) -> str:
         selection2: Second selection.
     """
     res = send_request("distance", args=[name, selection1, selection2])
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return f"Measured distance between '{selection1}' and '{selection2}' as '{name}'"
+
 
 @mcp.tool()
 def execute_pymol_command(command: str) -> str:
@@ -473,11 +500,13 @@ def execute_pymol_command(command: str) -> str:
     Note: this accepts the PyMOL ``cmd.do`` mini-language, not Python.
     """
     res = send_request("do", args=[command])
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return f"Executed command: {command}"
 
 
 # ── Scene introspection ──────────────────────────────────────────────────────
+
 
 @mcp.tool()
 def list_objects() -> str:
@@ -574,7 +603,7 @@ def ligand_view(obj_name: str, ligand_resn: str) -> str:
     send_request("set", args=["stick_radius", "0.25", f"({lig_sel}) and organic"])
     send_request("show", args=["spheres", f"({lig_sel}) and inorganic"])
     send_request("set", args=["sphere_scale", "0.3", f"({lig_sel}) and inorganic"])
-    
+
     send_request("do", args=[f"util.cbaw {lig_sel}"])
     send_request("color", args=["yellow", f"({lig_sel}) and organic and elem C"])
     send_request("color", args=["atomic", f"({lig_sel}) and inorganic"])
@@ -595,7 +624,9 @@ def ligand_view(obj_name: str, ligand_resn: str) -> str:
     send_request("zoom", args=[lig_sel, "8"])
     send_request("do", args=[f"origin {lig_sel}"])
 
-    return f"Showing ligand view for {ligand_resn} in {obj_name}. H-bonds stored as 'hbonds' object."
+    return (
+        f"Showing ligand view for {ligand_resn} in {obj_name}. H-bonds stored as 'hbonds' object."
+    )
 
 
 @mcp.tool()
@@ -735,20 +766,22 @@ def conservation_view(
 
     # One do block: zero out, push scores, build resi → score map by walking
     # CAs in selection order, then alter all atoms in one pass.
-    apply_script = "\n".join([
-        f"alter {chain_sel}, b=0",
-        f"stored.cons_scores = {json.dumps(scores)}",
-        "stored.cons_map = {}",
-        "stored.cons_idx = 0",
-        (
-            f"iterate {chain_sel} and name CA, "
-            "stored.cons_map[resi] = stored.cons_scores[stored.cons_idx] "
-            "if stored.cons_idx < len(stored.cons_scores) else 0.0; "
-            "stored.cons_idx = stored.cons_idx + 1"
-        ),
-        f"alter {chain_sel}, b=stored.cons_map.get(resi, 0.0)",
-        f"rebuild {obj_name}",
-    ])
+    apply_script = "\n".join(
+        [
+            f"alter {chain_sel}, b=0",
+            f"stored.cons_scores = {json.dumps(scores)}",
+            "stored.cons_map = {}",
+            "stored.cons_idx = 0",
+            (
+                f"iterate {chain_sel} and name CA, "
+                "stored.cons_map[resi] = stored.cons_scores[stored.cons_idx] "
+                "if stored.cons_idx < len(stored.cons_scores) else 0.0; "
+                "stored.cons_idx = stored.cons_idx + 1"
+            ),
+            f"alter {chain_sel}, b=stored.cons_map.get(resi, 0.0)",
+            f"rebuild {obj_name}",
+        ]
+    )
     send_request("do", args=[apply_script])
 
     # 6. Apply visualization
@@ -756,7 +789,9 @@ def conservation_view(
     send_request("show", args=["cartoon", obj_name])
 
     # Spectrum: magenta (conserved, high b) → white → cyan (variable, low b)
-    send_request("do", args=[f"spectrum b, cyan_white_magenta, {chain_sel}, minimum=0, maximum=100"])
+    send_request(
+        "do", args=[f"spectrum b, cyan_white_magenta, {chain_sel}, minimum=0, maximum=100"]
+    )
 
     # Show other chains as gray ghost for context
     other_chains_sel = f"({obj_name}) and polymer.protein and not chain {chain}"
@@ -849,11 +884,14 @@ def as_tool(representation: str, selection: str | None = "all") -> str:
     Shows one representation while hiding all others for the specified selection
     """
     call_args = []
-    if representation is not None: call_args.append(representation)
-    if selection is not None: call_args.append(selection)
-    
+    if representation is not None:
+        call_args.append(representation)
+    if selection is not None:
+        call_args.append(selection)
+
     res = send_request("as", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed as successfully."
 
 
@@ -914,10 +952,12 @@ def hydrophobic_surface_view(obj_name: str) -> str:
     send_request("do", args=[f"cartoon automatic, {obj_name}"])
 
     # Color surface by residue hydrophobicity
-    send_request("color", args=["orange",  f"({obj_name}) and (resn ILE+VAL+LEU+PHE+MET+ALA+TRP+PRO)"])
-    send_request("color", args=["white",   f"({obj_name}) and (resn SER+THR+CYS+TYR+ASN+GLN+GLY)"])
+    send_request(
+        "color", args=["orange", f"({obj_name}) and (resn ILE+VAL+LEU+PHE+MET+ALA+TRP+PRO)"]
+    )
+    send_request("color", args=["white", f"({obj_name}) and (resn SER+THR+CYS+TYR+ASN+GLN+GLY)"])
     send_request("color", args=["skyblue", f"({obj_name}) and (resn ARG+LYS+HIS)"])
-    send_request("color", args=["salmon",  f"({obj_name}) and (resn ASP+GLU)"])
+    send_request("color", args=["salmon", f"({obj_name}) and (resn ASP+GLU)"])
 
     # White cartoon visible beneath surface
     send_request("set", args=["cartoon_color", "white", obj_name])
@@ -978,7 +1018,12 @@ def electrostatic_view(obj_name: str, mode: str = "atomic") -> str:
         send_request("do", args=[f"alter ({obj_name}) and resn GLU, b=-0.8"])
 
     send_request("rebuild")
-    send_request("do", args=[f"spectrum b, red_white_blue, ({obj_name}) and polymer.protein, minimum=-1, maximum=1"])
+    send_request(
+        "do",
+        args=[
+            f"spectrum b, red_white_blue, ({obj_name}) and polymer.protein, minimum=-1, maximum=1"
+        ],
+    )
 
     # White cartoon visible beneath surface
     send_request("set", args=["cartoon_color", "white", obj_name])
@@ -1018,26 +1063,30 @@ def poisson_boltzmann_view(obj_name: str) -> str:
     with tempfile.TemporaryDirectory() as tmpdir:
         pdb_path = os.path.join(tmpdir, f"{obj_name}.pdb")
         pqr_path = os.path.join(tmpdir, f"{obj_name}.pqr")
-        apbs_in  = os.path.join(tmpdir, f"{obj_name}.in")
-        dx_path  = pqr_path + ".dx"
+        apbs_in = os.path.join(tmpdir, f"{obj_name}.in")
+        dx_path = pqr_path + ".dx"
 
         # Save protein from PyMOL
         send_request("do", args=[f"save {pdb_path}, ({obj_name}) and polymer.protein"])
 
         # PDB2PQR: assign charges/radii
         result = subprocess.run(
-            ["pdb2pqr", "--ff=AMBER", f"--apbs-input={apbs_in}", "--with-ph=7.0",
-             pdb_path, pqr_path],
-            capture_output=True, text=True
+            [
+                "pdb2pqr",
+                "--ff=AMBER",
+                f"--apbs-input={apbs_in}",
+                "--with-ph=7.0",
+                pdb_path,
+                pqr_path,
+            ],
+            capture_output=True,
+            text=True,
         )
         if result.returncode != 0:
             return f"PDB2PQR failed: {result.stderr[-500:]}"
 
         # APBS: compute electrostatic potential
-        result = subprocess.run(
-            ["apbs", apbs_in],
-            capture_output=True, text=True, cwd=tmpdir
-        )
+        result = subprocess.run(["apbs", apbs_in], capture_output=True, text=True, cwd=tmpdir)
         if result.returncode != 0:
             return f"APBS failed: {result.stderr[-500:]}"
 
@@ -1046,7 +1095,12 @@ def poisson_boltzmann_view(obj_name: str) -> str:
 
         # Load map and apply to surface
         send_request("do", args=[f"load {dx_path}, {obj_name}_esp_map"])
-        send_request("do", args=[f"ramp_new {obj_name}_esp_ramp, {obj_name}_esp_map, [-20, 0, 20], [red, white, blue]"])
+        send_request(
+            "do",
+            args=[
+                f"ramp_new {obj_name}_esp_ramp, {obj_name}_esp_map, [-20, 0, 20], [red, white, blue]"
+            ],
+        )
 
         send_request("hide", args=["everything", obj_name])
         send_request("show", args=["cartoon", f"({obj_name}) and polymer.protein"])
@@ -1098,10 +1152,13 @@ def crosslink_view(obj_name: str) -> str:
 
     # Disulfide bonds: SG–SG distances ≤ 2.5 Å
     send_request("do", args=[f"delete {obj_name}_disulfides"])
-    send_request("do", args=[
-        f"distance {obj_name}_disulfides, ({obj_name}) and resn CYS and name SG, "
-        f"({obj_name}) and resn CYS and name SG, 2.5"
-    ])
+    send_request(
+        "do",
+        args=[
+            f"distance {obj_name}_disulfides, ({obj_name}) and resn CYS and name SG, "
+            f"({obj_name}) and resn CYS and name SG, 2.5"
+        ],
+    )
     send_request("color", args=["yellow", f"{obj_name}_disulfides"])
     send_request("hide", args=["labels", f"{obj_name}_disulfides"])
     send_request("set", args=["dash_width", "4", f"{obj_name}_disulfides"])
@@ -1114,10 +1171,13 @@ def crosslink_view(obj_name: str) -> str:
 
     # Metal coordination bonds
     send_request("do", args=[f"delete {obj_name}_metalcoord"])
-    send_request("do", args=[
-        f"distance {obj_name}_metalcoord, ({obj_name}) and metals, "
-        f"({obj_name}) and polymer.protein and (name N+O+S), 2.8"
-    ])
+    send_request(
+        "do",
+        args=[
+            f"distance {obj_name}_metalcoord, ({obj_name}) and metals, "
+            f"({obj_name}) and polymer.protein and (name N+O+S), 2.8"
+        ],
+    )
     send_request("color", args=["orange", f"{obj_name}_metalcoord"])
     send_request("hide", args=["labels", f"{obj_name}_metalcoord"])
     send_request("set", args=["dash_width", "3", f"{obj_name}_metalcoord"])
@@ -1157,13 +1217,13 @@ def pocket_view(obj_name: str, resn: str) -> str:
     # Pocket cavity surface colored by chemical character
     send_request("show", args=["surface", pocket_sel])
     _hydrophobic = "ALA+VAL+LEU+ILE+MET+PHE+TRP+PRO"
-    _polar       = "GLY+SER+THR+TYR+CYS+ASN+GLN"
-    _positive    = "LYS+ARG+HIS"
-    _negative    = "ASP+GLU"
+    _polar = "GLY+SER+THR+TYR+CYS+ASN+GLN"
+    _positive = "LYS+ARG+HIS"
+    _negative = "ASP+GLU"
     send_request("color", args=["orange", f"({pocket_sel}) and resn {_hydrophobic}"])
-    send_request("color", args=["white",   f"({pocket_sel}) and resn {_polar}"])
+    send_request("color", args=["white", f"({pocket_sel}) and resn {_polar}"])
     send_request("color", args=["skyblue", f"({pocket_sel}) and resn {_positive}"])
-    send_request("color", args=["salmon",  f"({pocket_sel}) and resn {_negative}"])
+    send_request("color", args=["salmon", f"({pocket_sel}) and resn {_negative}"])
     send_request("set", args=["transparency", "0.25", obj_name])
 
     # Pocket residue sidechains as sticks (element coloring)
@@ -1171,9 +1231,9 @@ def pocket_view(obj_name: str, resn: str) -> str:
     send_request("do", args=[f"util.cbaw ({pocket_sel})"])
     # Re-apply surface colors after util.cbaw recolored atoms
     send_request("color", args=["orange", f"({pocket_sel}) and resn {_hydrophobic}"])
-    send_request("color", args=["white",   f"({pocket_sel}) and resn {_polar}"])
+    send_request("color", args=["white", f"({pocket_sel}) and resn {_polar}"])
     send_request("color", args=["skyblue", f"({pocket_sel}) and resn {_positive}"])
-    send_request("color", args=["salmon",  f"({pocket_sel}) and resn {_negative}"])
+    send_request("color", args=["salmon", f"({pocket_sel}) and resn {_negative}"])
 
     # Labels at CA
     send_request("label", args=[f"({pocket_sel}) and name CA", '"%s%s" % (resn, resi)'])
@@ -1187,10 +1247,13 @@ def pocket_view(obj_name: str, resn: str) -> str:
 
     # H-bonds between ligand and pocket
     send_request("do", args=[f"delete {obj_name}_pocket_hbonds"])
-    send_request("do", args=[
-        f"distance {obj_name}_pocket_hbonds, ({lig}) and (elem N or elem O), "
-        f"({pocket_sel}) and (elem N or elem O), 3.5"
-    ])
+    send_request(
+        "do",
+        args=[
+            f"distance {obj_name}_pocket_hbonds, ({lig}) and (elem N or elem O), "
+            f"({pocket_sel}) and (elem N or elem O), 3.5"
+        ],
+    )
     send_request("color", args=["cyan", f"{obj_name}_pocket_hbonds"])
     send_request("hide", args=["labels", f"{obj_name}_pocket_hbonds"])
     send_request("set", args=["dash_width", "2.5", f"{obj_name}_pocket_hbonds"])
@@ -1255,19 +1318,24 @@ def pharmacophore_view(obj_name: str, resn: str) -> str:
 
     # Color by pharmacophore feature type
     # inring catches all ring carbons (PyMOL's 'aromatic' misses some due to bond-order perception)
-    send_request("color", args=["violet",    f"{lig} and elem C and inring"])        # ring/aromatic
-    send_request("color", args=["yellow",    f"{lig} and elem C and not inring"])    # aliphatic
-    send_request("color", args=["skyblue",   f"{lig} and elem N"])                   # H-bond donor/acceptor
-    send_request("color", args=["salmon",    f"{lig} and elem O"])                   # H-bond acceptor
-    send_request("color", args=["gold",      f"{lig} and elem S"])                   # sulfur
-    send_request("color", args=["palegreen", f"{lig} and (elem F or elem Cl or elem Br or elem I)"])  # halogen
+    send_request("color", args=["violet", f"{lig} and elem C and inring"])  # ring/aromatic
+    send_request("color", args=["yellow", f"{lig} and elem C and not inring"])  # aliphatic
+    send_request("color", args=["skyblue", f"{lig} and elem N"])  # H-bond donor/acceptor
+    send_request("color", args=["salmon", f"{lig} and elem O"])  # H-bond acceptor
+    send_request("color", args=["gold", f"{lig} and elem S"])  # sulfur
+    send_request(
+        "color", args=["palegreen", f"{lig} and (elem F or elem Cl or elem Br or elem I)"]
+    )  # halogen
 
     # H-bonds to protein
     send_request("do", args=[f"delete {obj_name}_pharm_hbonds"])
-    send_request("do", args=[
-        f"distance {obj_name}_pharm_hbonds, ({lig}) and (elem N or elem O or elem F), "
-        f"({pocket_sel}) and (elem N or elem O), 3.5"
-    ])
+    send_request(
+        "do",
+        args=[
+            f"distance {obj_name}_pharm_hbonds, ({lig}) and (elem N or elem O or elem F), "
+            f"({pocket_sel}) and (elem N or elem O), 3.5"
+        ],
+    )
     send_request("color", args=["cyan", f"{obj_name}_pharm_hbonds"])
     send_request("hide", args=["labels", f"{obj_name}_pharm_hbonds"])
     send_request("set", args=["dash_width", "2.5", f"{obj_name}_pharm_hbonds"])
@@ -1305,7 +1373,7 @@ def mutation_view(obj_name: str, mutations: str) -> str:
     resi_list = []
     parsed = []
     for m in mut_list:
-        match = re.search(r'(\d+)', m)
+        match = re.search(r"(\d+)", m)
         if match:
             resi_list.append(match.group(1))
             parsed.append(m)
@@ -1364,33 +1432,33 @@ def textbook_view(obj_name: str) -> str:
         obj_name: PyMOL object name (e.g. "1abc")
     """
     send_request("hide", args=["everything", obj_name])
-    
+
     # White background for print/textbook style
     send_request("do", args=["bg_color white"])
-    
+
     # Show main structure as white cartoon and surface
     send_request("show", args=["cartoon", f"({obj_name}) and polymer.protein"])
     send_request("show", args=["surface", f"({obj_name}) and polymer.protein"])
     send_request("color", args=["white", f"({obj_name}) and polymer.protein"])
-    
+
     # Ligands as thick white sticks
     org_sel = f"({obj_name}) and organic"
     send_request("show", args=["sticks", org_sel])
     send_request("color", args=["white", org_sel])
     send_request("set", args=["stick_radius", "0.3", org_sel])
-    
+
     # The "cel shading" effect
-    send_request("set", args=["ray_trace_mode", "3"])      # 3 = comic-book style coloring
-    send_request("set", args=["ray_trace_depth_factor", "0.4"]) 
+    send_request("set", args=["ray_trace_mode", "3"])  # 3 = comic-book style coloring
+    send_request("set", args=["ray_trace_depth_factor", "0.4"])
     send_request("set", args=["ray_trace_disco_factor", "1.0"])
-    
+
     # Heavy contour lines
     send_request("set", args=["antialias", "2"])
-    
+
     # Improve surface appearance for cel shading
     send_request("set", args=["transparency", "0.0", obj_name])
     send_request("set", args=["surface_quality", "1", obj_name])
-    
+
     send_request("orient", args=[obj_name])
     return f"Textbook Illustration view applied to {obj_name}. Note: the full cel-shaded outline effect requires rendering (use the 'ray' command)."
 
@@ -1411,26 +1479,26 @@ def cinematic_view(obj_name: str) -> str:
     # Restore basic representation if not present
     send_request("show", args=["cartoon", f"({obj_name}) and polymer.protein"])
     send_request("show", args=["surface", f"({obj_name}) and polymer.protein"])
-    
+
     # Dramatic deep black background
     send_request("do", args=["bg_color black"])
-    
+
     # Enable fog and depth cueing
     send_request("set", args=["depth_cue", "1"])
     send_request("set", args=["fog", "1"])
-    send_request("set", args=["fog_start", "0.45"])   # Fog starts mid-structure
+    send_request("set", args=["fog_start", "0.45"])  # Fog starts mid-structure
     send_request("set", args=["fog_color", "black"])
-    
+
     # Cinematic lighting and shadows
     send_request("set", args=["light_count", "2"])
-    send_request("set", args=["spec_reflect", "0.3"]) # Slightly glossy
+    send_request("set", args=["spec_reflect", "0.3"])  # Slightly glossy
     send_request("set", args=["ray_shadows", "1"])
     send_request("set", args=["ray_shadow_decay_factor", "0.1"])
     send_request("set", args=["ray_shadow_decay_range", "3"])
-    
+
     # Enhance the surface material
     send_request("set", args=["transparency", "0.0", obj_name])
-    
+
     return f"Cinematic view applied to {obj_name}. Fog and depth-cueing enabled. Use the 'ray' command to see the full dramatic shadow effect."
 
 
@@ -1449,28 +1517,29 @@ def pointillist_view(obj_name: str) -> str:
     """
     send_request("hide", args=["everything", obj_name])
     send_request("do", args=["bg_color black"])
-    
+
     # The "Starfield" point cloud
     send_request("show", args=["dots", f"({obj_name}) and polymer.protein"])
-    send_request("do", args=[f"cartoon automatic, {obj_name}"]) # Default color recovery
-    
+    send_request("do", args=[f"cartoon automatic, {obj_name}"])  # Default color recovery
+
     # Increase dot density for the pointillist effect
     send_request("set", args=["dot_density", "4"])
     send_request("set", args=["dot_width", "2"])
-    
-    # Optional: Light outline of the backbone trace 
+
+    # Optional: Light outline of the backbone trace
     send_request("show", args=["ribbon", f"({obj_name}) and polymer.protein"])
     send_request("set", args=["ribbon_width", "0.5"])
     send_request("color", args=["grey30", f"({obj_name}) and polymer.protein and ribbon"])
-    
+
     # Ligands as bright stars
     org_sel = f"({obj_name}) and organic"
     send_request("show", args=["spheres", org_sel])
     send_request("color", args=["yellow", org_sel])
     send_request("set", args=["sphere_scale", "0.4", org_sel])
-    
+
     send_request("orient", args=[obj_name])
     return f"Pointillist/Starfield view applied to {obj_name}."
+
 
 @mcp.tool(name="set")
 def set_setting(setting: str, value: str, selection: str | None = None) -> str:
@@ -1478,12 +1547,16 @@ def set_setting(setting: str, value: str, selection: str | None = None) -> str:
     Sets a PyMOL setting to a specified value
     """
     call_args = []
-    if setting is not None: call_args.append(setting)
-    if value is not None: call_args.append(value)
-    if selection is not None: call_args.append(selection)
-    
+    if setting is not None:
+        call_args.append(setting)
+    if value is not None:
+        call_args.append(value)
+    if selection is not None:
+        call_args.append(selection)
+
     res = send_request("set", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed set successfully."
 
 
@@ -1493,26 +1566,35 @@ def cartoon(item_type: str, selection: str | None = "all") -> str:
     Sets the cartoon type for the specified selection
     """
     call_args = []
-    if item_type is not None: call_args.append(item_type)
-    if selection is not None: call_args.append(selection)
-    
+    if item_type is not None:
+        call_args.append(item_type)
+    if selection is not None:
+        call_args.append(selection)
+
     res = send_request("cartoon", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed cartoon successfully."
 
 
 @mcp.tool()
-def spectrum(expression: str, palette: str | None = "rainbow", selection: str | None = "all") -> str:
+def spectrum(
+    expression: str, palette: str | None = "rainbow", selection: str | None = "all"
+) -> str:
     """
     Colors selection in a spectrum
     """
     call_args = []
-    if expression is not None: call_args.append(expression)
-    if palette is not None: call_args.append(palette)
-    if selection is not None: call_args.append(selection)
-    
+    if expression is not None:
+        call_args.append(expression)
+    if palette is not None:
+        call_args.append(palette)
+    if selection is not None:
+        call_args.append(selection)
+
     res = send_request("spectrum", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed spectrum successfully."
 
 
@@ -1522,44 +1604,69 @@ def label(selection: str, expression: str | None = "name") -> str:
     Adds labels to atoms in the selection
     """
     call_args = []
-    if selection is not None: call_args.append(selection)
-    if expression is not None: call_args.append(expression)
-    
+    if selection is not None:
+        call_args.append(selection)
+    if expression is not None:
+        call_args.append(expression)
+
     res = send_request("label", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed label successfully."
 
 
 @mcp.tool()
-def angle(name: str | None = None, selection1: str | None = "(pk1)", selection2: str | None = "(pk2)", selection3: str | None = "(pk3)") -> str:
+def angle(
+    name: str | None = None,
+    selection1: str | None = "(pk1)",
+    selection2: str | None = "(pk2)",
+    selection3: str | None = "(pk3)",
+) -> str:
     """
     Measures the angle between three selections
     """
     call_args = []
-    if name is not None: call_args.append(name)
-    if selection1 is not None: call_args.append(selection1)
-    if selection2 is not None: call_args.append(selection2)
-    if selection3 is not None: call_args.append(selection3)
-    
+    if name is not None:
+        call_args.append(name)
+    if selection1 is not None:
+        call_args.append(selection1)
+    if selection2 is not None:
+        call_args.append(selection2)
+    if selection3 is not None:
+        call_args.append(selection3)
+
     res = send_request("angle", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed angle successfully."
 
 
 @mcp.tool()
-def dihedral(name: str | None = None, selection1: str | None = "(pk1)", selection2: str | None = "(pk2)", selection3: str | None = "(pk3)", selection4: str | None = "(pk4)") -> str:
+def dihedral(
+    name: str | None = None,
+    selection1: str | None = "(pk1)",
+    selection2: str | None = "(pk2)",
+    selection3: str | None = "(pk3)",
+    selection4: str | None = "(pk4)",
+) -> str:
     """
     Measures the dihedral angle between four selections
     """
     call_args = []
-    if name is not None: call_args.append(name)
-    if selection1 is not None: call_args.append(selection1)
-    if selection2 is not None: call_args.append(selection2)
-    if selection3 is not None: call_args.append(selection3)
-    if selection4 is not None: call_args.append(selection4)
-    
+    if name is not None:
+        call_args.append(name)
+    if selection1 is not None:
+        call_args.append(selection1)
+    if selection2 is not None:
+        call_args.append(selection2)
+    if selection3 is not None:
+        call_args.append(selection3)
+    if selection4 is not None:
+        call_args.append(selection4)
+
     res = send_request("dihedral", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed dihedral successfully."
 
 
@@ -1569,10 +1676,12 @@ def center(selection: str | None = "all") -> str:
     Centers the view on a selection
     """
     call_args = []
-    if selection is not None: call_args.append(selection)
-    
+    if selection is not None:
+        call_args.append(selection)
+
     res = send_request("center", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed center successfully."
 
 
@@ -1582,10 +1691,12 @@ def orient(selection: str | None = "all") -> str:
     Orients the view to align with principal axes of the selection
     """
     call_args = []
-    if selection is not None: call_args.append(selection)
-    
+    if selection is not None:
+        call_args.append(selection)
+
     res = send_request("orient", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed orient successfully."
 
 
@@ -1595,11 +1706,14 @@ def zoom(selection: str | None = "all", buffer: str | None = "5") -> str:
     Zooms the view on a selection
     """
     call_args = []
-    if selection is not None: call_args.append(selection)
-    if buffer is not None: call_args.append(buffer)
-    
+    if selection is not None:
+        call_args.append(selection)
+    if buffer is not None:
+        call_args.append(buffer)
+
     res = send_request("zoom", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed zoom successfully."
 
 
@@ -1609,10 +1723,12 @@ def reset(obj: str | None = None) -> str:
     Resets the view, optionally resetting an object's matrix
     """
     call_args = []
-    if obj is not None: call_args.append(obj)
-    
+    if obj is not None:
+        call_args.append(obj)
+
     res = send_request("reset", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed reset successfully."
 
 
@@ -1622,11 +1738,14 @@ def turn(axis: str, angle: str | None = "90") -> str:
     Rotates the camera around an axis
     """
     call_args = []
-    if axis is not None: call_args.append(axis)
-    if angle is not None: call_args.append(angle)
-    
+    if axis is not None:
+        call_args.append(axis)
+    if angle is not None:
+        call_args.append(angle)
+
     res = send_request("turn", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed turn successfully."
 
 
@@ -1636,11 +1755,14 @@ def move(axis: str, distance: str | None = "1") -> str:
     Moves the camera along an axis
     """
     call_args = []
-    if axis is not None: call_args.append(axis)
-    if distance is not None: call_args.append(distance)
-    
+    if axis is not None:
+        call_args.append(axis)
+    if distance is not None:
+        call_args.append(distance)
+
     res = send_request("move", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed move successfully."
 
 
@@ -1650,11 +1772,14 @@ def clip(mode: str, distance: str | None = "1") -> str:
     Adjusts the clipping planes
     """
     call_args = []
-    if mode is not None: call_args.append(mode)
-    if distance is not None: call_args.append(distance)
-    
+    if mode is not None:
+        call_args.append(mode)
+    if distance is not None:
+        call_args.append(distance)
+
     res = send_request("clip", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed clip successfully."
 
 
@@ -1664,12 +1789,16 @@ def save(filename: str, selection: str | None = "all", state: str | None = "-1")
     Saves data to a file
     """
     call_args = []
-    if filename is not None: call_args.append(filename)
-    if selection is not None: call_args.append(selection)
-    if state is not None: call_args.append(state)
-    
+    if filename is not None:
+        call_args.append(filename)
+    if selection is not None:
+        call_args.append(selection)
+    if state is not None:
+        call_args.append(state)
+
     res = send_request("save", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed save successfully."
 
 
@@ -1679,11 +1808,14 @@ def png(filename: str, options: str | None = None) -> str:
     Saves a PNG image
     """
     call_args = []
-    if filename is not None: call_args.append(filename)
-    if options is not None: call_args.append(options)
-    
+    if filename is not None:
+        call_args.append(filename)
+    if options is not None:
+        call_args.append(options)
+
     res = send_request("png", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed png successfully."
 
 
@@ -1694,9 +1826,9 @@ def deselect() -> str:
     """
     call_args = []
 
-    
     res = send_request("deselect", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed deselect successfully."
 
 
@@ -1706,12 +1838,16 @@ def create(name: str, selection: str | None = "all", source_state: str | None = 
     Creates a new object from a selection
     """
     call_args = []
-    if name is not None: call_args.append(name)
-    if selection is not None: call_args.append(selection)
-    if source_state is not None: call_args.append(source_state)
-    
+    if name is not None:
+        call_args.append(name)
+    if selection is not None:
+        call_args.append(selection)
+    if source_state is not None:
+        call_args.append(source_state)
+
     res = send_request("create", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed create successfully."
 
 
@@ -1721,11 +1857,14 @@ def extract(name: str, selection: str | None = "all") -> str:
     Extracts a selection to a new object
     """
     call_args = []
-    if name is not None: call_args.append(name)
-    if selection is not None: call_args.append(selection)
-    
+    if name is not None:
+        call_args.append(name)
+    if selection is not None:
+        call_args.append(selection)
+
     res = send_request("extract", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed extract successfully."
 
 
@@ -1735,10 +1874,12 @@ def delete(name: str) -> str:
     Deletes objects or selections
     """
     call_args = []
-    if name is not None: call_args.append(name)
-    
+    if name is not None:
+        call_args.append(name)
+
     res = send_request("delete", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed delete successfully."
 
 
@@ -1748,12 +1889,16 @@ def align(mobile: str, target: str | None = "all", options: str | None = None) -
     Aligns one selection to another
     """
     call_args = []
-    if mobile is not None: call_args.append(mobile)
-    if target is not None: call_args.append(target)
-    if options is not None: call_args.append(options)
-    
+    if mobile is not None:
+        call_args.append(mobile)
+    if target is not None:
+        call_args.append(target)
+    if options is not None:
+        call_args.append(options)
+
     res = send_request("align", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed align successfully."
 
 
@@ -1763,12 +1908,16 @@ def super_tool(mobile: str, target: str | None = "all", options: str | None = No
     Superimposes one selection onto another
     """
     call_args = []
-    if mobile is not None: call_args.append(mobile)
-    if target is not None: call_args.append(target)
-    if options is not None: call_args.append(options)
-    
+    if mobile is not None:
+        call_args.append(mobile)
+    if target is not None:
+        call_args.append(target)
+    if options is not None:
+        call_args.append(options)
+
     res = send_request("super", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed super successfully."
 
 
@@ -1778,10 +1927,12 @@ def intra_fit(selection: str) -> str:
     Fits all states within an object
     """
     call_args = []
-    if selection is not None: call_args.append(selection)
-    
+    if selection is not None:
+        call_args.append(selection)
+
     res = send_request("intra_fit", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed intra_fit successfully."
 
 
@@ -1791,10 +1942,12 @@ def intra_rms(selection: str) -> str:
     Calculates RMSD between states within an object
     """
     call_args = []
-    if selection is not None: call_args.append(selection)
-    
+    if selection is not None:
+        call_args.append(selection)
+
     res = send_request("intra_rms", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed intra_rms successfully."
 
 
@@ -1804,11 +1957,14 @@ def alter(selection: str, expression: str) -> str:
     Alters atomic properties in a selection
     """
     call_args = []
-    if selection is not None: call_args.append(selection)
-    if expression is not None: call_args.append(expression)
-    
+    if selection is not None:
+        call_args.append(selection)
+    if expression is not None:
+        call_args.append(expression)
+
     res = send_request("alter", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed alter successfully."
 
 
@@ -1818,12 +1974,16 @@ def alter_state(state: str, selection: str, expression: str) -> str:
     Alters atomic coordinates in a state
     """
     call_args = []
-    if state is not None: call_args.append(state)
-    if selection is not None: call_args.append(selection)
-    if expression is not None: call_args.append(expression)
-    
+    if state is not None:
+        call_args.append(state)
+    if selection is not None:
+        call_args.append(selection)
+    if expression is not None:
+        call_args.append(expression)
+
     res = send_request("alter_state", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed alter_state successfully."
 
 
@@ -1833,10 +1993,12 @@ def h_add(selection: str | None = "all") -> str:
     Adds hydrogens to a selection
     """
     call_args = []
-    if selection is not None: call_args.append(selection)
-    
+    if selection is not None:
+        call_args.append(selection)
+
     res = send_request("h_add", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed h_add successfully."
 
 
@@ -1846,10 +2008,12 @@ def h_fill(selection: str | None = "all") -> str:
     Adds hydrogens and adjusts valences
     """
     call_args = []
-    if selection is not None: call_args.append(selection)
-    
+    if selection is not None:
+        call_args.append(selection)
+
     res = send_request("h_fill", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed h_fill successfully."
 
 
@@ -1859,12 +2023,16 @@ def bond(atom1: str, atom2: str, order: str | None = "1") -> str:
     Creates a bond between two atoms
     """
     call_args = []
-    if atom1 is not None: call_args.append(atom1)
-    if atom2 is not None: call_args.append(atom2)
-    if order is not None: call_args.append(order)
-    
+    if atom1 is not None:
+        call_args.append(atom1)
+    if atom2 is not None:
+        call_args.append(atom2)
+    if order is not None:
+        call_args.append(order)
+
     res = send_request("bond", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed bond successfully."
 
 
@@ -1874,11 +2042,14 @@ def unbond(atom1: str, atom2: str) -> str:
     Removes a bond between two atoms
     """
     call_args = []
-    if atom1 is not None: call_args.append(atom1)
-    if atom2 is not None: call_args.append(atom2)
-    
+    if atom1 is not None:
+        call_args.append(atom1)
+    if atom2 is not None:
+        call_args.append(atom2)
+
     res = send_request("unbond", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed unbond successfully."
 
 
@@ -1888,10 +2059,12 @@ def rebuild(selection: str | None = "all") -> str:
     Regenerates all displayed geometry
     """
     call_args = []
-    if selection is not None: call_args.append(selection)
-    
+    if selection is not None:
+        call_args.append(selection)
+
     res = send_request("rebuild", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed rebuild successfully."
 
 
@@ -1902,9 +2075,9 @@ def refresh() -> str:
     """
     call_args = []
 
-    
     res = send_request("refresh", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed refresh successfully."
 
 
@@ -1914,10 +2087,12 @@ def util_cbc(selection: str | None = "all") -> str:
     Colors by chain (Color By Chain)
     """
     call_args = []
-    if selection is not None: call_args.append(selection)
-    
+    if selection is not None:
+        call_args.append(selection)
+
     res = send_request("util.cbc", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed util.cbc successfully."
 
 
@@ -1927,10 +2102,12 @@ def util_cbaw(selection: str | None = "all") -> str:
     Colors by atom, white carbons (Color By Atom, White)
     """
     call_args = []
-    if selection is not None: call_args.append(selection)
-    
+    if selection is not None:
+        call_args.append(selection)
+
     res = send_request("util.cbaw", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed util.cbaw successfully."
 
 
@@ -1940,10 +2117,12 @@ def util_cbag(selection: str | None = "all") -> str:
     Colors by atom, green carbons (Color By Atom, Green)
     """
     call_args = []
-    if selection is not None: call_args.append(selection)
-    
+    if selection is not None:
+        call_args.append(selection)
+
     res = send_request("util.cbag", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed util.cbag successfully."
 
 
@@ -1953,10 +2132,12 @@ def util_cbac(selection: str | None = "all") -> str:
     Colors by atom, cyan carbons (Color By Atom, Cyan)
     """
     call_args = []
-    if selection is not None: call_args.append(selection)
-    
+    if selection is not None:
+        call_args.append(selection)
+
     res = send_request("util.cbac", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed util.cbac successfully."
 
 
@@ -1966,10 +2147,12 @@ def util_cbam(selection: str | None = "all") -> str:
     Colors by atom, magenta carbons (Color By Atom, Magenta)
     """
     call_args = []
-    if selection is not None: call_args.append(selection)
-    
+    if selection is not None:
+        call_args.append(selection)
+
     res = send_request("util.cbam", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed util.cbam successfully."
 
 
@@ -1979,10 +2162,12 @@ def util_cbay(selection: str | None = "all") -> str:
     Colors by atom, yellow carbons (Color By Atom, Yellow)
     """
     call_args = []
-    if selection is not None: call_args.append(selection)
-    
+    if selection is not None:
+        call_args.append(selection)
+
     res = send_request("util.cbay", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed util.cbay successfully."
 
 
@@ -1992,10 +2177,12 @@ def util_cbas(selection: str | None = "all") -> str:
     Colors by atom, salmon carbons (Color By Atom, Salmon)
     """
     call_args = []
-    if selection is not None: call_args.append(selection)
-    
+    if selection is not None:
+        call_args.append(selection)
+
     res = send_request("util.cbas", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed util.cbas successfully."
 
 
@@ -2005,10 +2192,12 @@ def util_cbab(selection: str | None = "all") -> str:
     Colors by atom, slate carbons (Color By Atom, slateBLue)
     """
     call_args = []
-    if selection is not None: call_args.append(selection)
-    
+    if selection is not None:
+        call_args.append(selection)
+
     res = send_request("util.cbab", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed util.cbab successfully."
 
 
@@ -2018,10 +2207,12 @@ def util_cbao(selection: str | None = "all") -> str:
     Colors by atom, orange carbons (Color By Atom, Orange)
     """
     call_args = []
-    if selection is not None: call_args.append(selection)
-    
+    if selection is not None:
+        call_args.append(selection)
+
     res = send_request("util.cbao", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed util.cbao successfully."
 
 
@@ -2031,10 +2222,12 @@ def util_cbap(selection: str | None = "all") -> str:
     Colors by atom, purple carbons (Color By Atom, Purple)
     """
     call_args = []
-    if selection is not None: call_args.append(selection)
-    
+    if selection is not None:
+        call_args.append(selection)
+
     res = send_request("util.cbap", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed util.cbap successfully."
 
 
@@ -2044,10 +2237,12 @@ def util_cbak(selection: str | None = "all") -> str:
     Colors by atom, pink carbons (Color By Atom, pinK)
     """
     call_args = []
-    if selection is not None: call_args.append(selection)
-    
+    if selection is not None:
+        call_args.append(selection)
+
     res = send_request("util.cbak", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed util.cbak successfully."
 
 
@@ -2057,10 +2252,12 @@ def util_chainbow(selection: str | None = "all") -> str:
     Colors chains in rainbow gradient (CHAINs in rainBOW)
     """
     call_args = []
-    if selection is not None: call_args.append(selection)
-    
+    if selection is not None:
+        call_args.append(selection)
+
     res = send_request("util.chainbow", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed util.chainbow successfully."
 
 
@@ -2070,10 +2267,12 @@ def util_rainbow(selection: str | None = "all") -> str:
     Colors residues in rainbow from N to C terminus
     """
     call_args = []
-    if selection is not None: call_args.append(selection)
-    
+    if selection is not None:
+        call_args.append(selection)
+
     res = send_request("util.rainbow", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed util.rainbow successfully."
 
 
@@ -2083,10 +2282,12 @@ def util_ss(selection: str | None = "all") -> str:
     Colors by secondary structure
     """
     call_args = []
-    if selection is not None: call_args.append(selection)
-    
+    if selection is not None:
+        call_args.append(selection)
+
     res = send_request("util.ss", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed util.ss successfully."
 
 
@@ -2096,10 +2297,12 @@ def util_color_by_element(selection: str | None = "all") -> str:
     Colors atoms by their element
     """
     call_args = []
-    if selection is not None: call_args.append(selection)
-    
+    if selection is not None:
+        call_args.append(selection)
+
     res = send_request("util.color_by_element", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed util.color_by_element successfully."
 
 
@@ -2109,10 +2312,12 @@ def util_color_secondary(selection: str | None = "all") -> str:
     Colors secondary structure elements
     """
     call_args = []
-    if selection is not None: call_args.append(selection)
-    
+    if selection is not None:
+        call_args.append(selection)
+
     res = send_request("util.color_secondary", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed util.color_secondary successfully."
 
 
@@ -2122,10 +2327,12 @@ def spheroid(selection: str | None = "all") -> str:
     Displays atoms as smooth spheres
     """
     call_args = []
-    if selection is not None: call_args.append(selection)
-    
+    if selection is not None:
+        call_args.append(selection)
+
     res = send_request("spheroid", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed spheroid successfully."
 
 
@@ -2135,13 +2342,18 @@ def isomesh(name: str, map_object: str, level: str, selection: str | None = "all
     Creates a mesh isosurface
     """
     call_args = []
-    if name is not None: call_args.append(name)
-    if map_object is not None: call_args.append(map_object)
-    if level is not None: call_args.append(level)
-    if selection is not None: call_args.append(selection)
-    
+    if name is not None:
+        call_args.append(name)
+    if map_object is not None:
+        call_args.append(map_object)
+    if level is not None:
+        call_args.append(level)
+    if selection is not None:
+        call_args.append(selection)
+
     res = send_request("isomesh", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed isomesh successfully."
 
 
@@ -2151,13 +2363,18 @@ def isosurface(name: str, map_object: str, level: str, selection: str | None = "
     Creates a solid isosurface
     """
     call_args = []
-    if name is not None: call_args.append(name)
-    if map_object is not None: call_args.append(map_object)
-    if level is not None: call_args.append(level)
-    if selection is not None: call_args.append(selection)
-    
+    if name is not None:
+        call_args.append(name)
+    if map_object is not None:
+        call_args.append(map_object)
+    if level is not None:
+        call_args.append(level)
+    if selection is not None:
+        call_args.append(selection)
+
     res = send_request("isosurface", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed isosurface successfully."
 
 
@@ -2167,10 +2384,12 @@ def sculpt_activate(obj: str) -> str:
     Activates sculpting mode for an object
     """
     call_args = []
-    if obj is not None: call_args.append(obj)
-    
+    if obj is not None:
+        call_args.append(obj)
+
     res = send_request("sculpt_activate", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed sculpt_activate successfully."
 
 
@@ -2180,10 +2399,12 @@ def sculpt_deactivate(obj: str) -> str:
     Deactivates sculpting mode for an object
     """
     call_args = []
-    if obj is not None: call_args.append(obj)
-    
+    if obj is not None:
+        call_args.append(obj)
+
     res = send_request("sculpt_deactivate", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed sculpt_deactivate successfully."
 
 
@@ -2193,11 +2414,14 @@ def sculpt_iterate(iterations: str, obj: str | None = "all") -> str:
     Performs sculpting iterations
     """
     call_args = []
-    if iterations is not None: call_args.append(iterations)
-    if obj is not None: call_args.append(obj)
-    
+    if iterations is not None:
+        call_args.append(iterations)
+    if obj is not None:
+        call_args.append(obj)
+
     res = send_request("sculpt_iterate", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed sculpt_iterate successfully."
 
 
@@ -2207,11 +2431,14 @@ def scene(key: str, action: str | None = "recall") -> str:
     Manages scenes for later recall
     """
     call_args = []
-    if key is not None: call_args.append(key)
-    if action is not None: call_args.append(action)
-    
+    if key is not None:
+        call_args.append(key)
+    if action is not None:
+        call_args.append(action)
+
     res = send_request("scene", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed scene successfully."
 
 
@@ -2221,10 +2448,12 @@ def scene_order(scene_list: str) -> str:
     Sets the order of scenes
     """
     call_args = []
-    if scene_list is not None: call_args.append(scene_list)
-    
+    if scene_list is not None:
+        call_args.append(scene_list)
+
     res = send_request("scene_order", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed scene_order successfully."
 
 
@@ -2234,10 +2463,12 @@ def mset(specification: str) -> str:
     Defines a sequence of states for movie playback
     """
     call_args = []
-    if specification is not None: call_args.append(specification)
-    
+    if specification is not None:
+        call_args.append(specification)
+
     res = send_request("mset", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed mset successfully."
 
 
@@ -2248,9 +2479,9 @@ def mplay() -> str:
     """
     call_args = []
 
-    
     res = send_request("mplay", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed mplay successfully."
 
 
@@ -2261,9 +2492,9 @@ def mstop() -> str:
     """
     call_args = []
 
-    
     res = send_request("mstop", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed mstop successfully."
 
 
@@ -2273,10 +2504,12 @@ def frame(frame_number: str | None = None) -> str:
     Sets or queries the current frame
     """
     call_args = []
-    if frame_number is not None: call_args.append(frame_number)
-    
+    if frame_number is not None:
+        call_args.append(frame_number)
+
     res = send_request("frame", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed frame successfully."
 
 
@@ -2287,9 +2520,9 @@ def forward() -> str:
     """
     call_args = []
 
-    
     res = send_request("forward", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed forward successfully."
 
 
@@ -2300,9 +2533,9 @@ def backward() -> str:
     """
     call_args = []
 
-    
     res = send_request("backward", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed backward successfully."
 
 
@@ -2313,9 +2546,9 @@ def rock() -> str:
     """
     call_args = []
 
-    
     res = send_request("rock", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed rock successfully."
 
 
@@ -2325,11 +2558,14 @@ def ray(width: str | None = None, height: str | None = None) -> str:
     Performs ray-tracing
     """
     call_args = []
-    if width is not None: call_args.append(width)
-    if height is not None: call_args.append(height)
-    
+    if width is not None:
+        call_args.append(width)
+    if height is not None:
+        call_args.append(height)
+
     res = send_request("ray", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed ray successfully."
 
 
@@ -2339,11 +2575,14 @@ def draw(width: str | None = None, height: str | None = None) -> str:
     Uses OpenGL renderer (faster but lower quality)
     """
     call_args = []
-    if width is not None: call_args.append(width)
-    if height is not None: call_args.append(height)
-    
+    if width is not None:
+        call_args.append(width)
+    if height is not None:
+        call_args.append(height)
+
     res = send_request("draw", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed draw successfully."
 
 
@@ -2353,10 +2592,12 @@ def mpng(prefix: str) -> str:
     Saves a series of PNG images for movie frames
     """
     call_args = []
-    if prefix is not None: call_args.append(prefix)
-    
+    if prefix is not None:
+        call_args.append(prefix)
+
     res = send_request("mpng", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed mpng successfully."
 
 
@@ -2366,13 +2607,18 @@ def symexp(prefix: str, selection: str, cutoff: str | None = "20", segi: str | N
     Generates symmetry-related copies
     """
     call_args = []
-    if prefix is not None: call_args.append(prefix)
-    if selection is not None: call_args.append(selection)
-    if cutoff is not None: call_args.append(cutoff)
-    if segi is not None: call_args.append(segi)
-    
+    if prefix is not None:
+        call_args.append(prefix)
+    if selection is not None:
+        call_args.append(selection)
+    if cutoff is not None:
+        call_args.append(cutoff)
+    if segi is not None:
+        call_args.append(segi)
+
     res = send_request("symexp", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed symexp successfully."
 
 
@@ -2382,16 +2628,24 @@ def set_symmetry(selection: str, a: str, b: str, c: str, alpha: str, beta: str, 
     Sets symmetry parameters for an object
     """
     call_args = []
-    if selection is not None: call_args.append(selection)
-    if a is not None: call_args.append(a)
-    if b is not None: call_args.append(b)
-    if c is not None: call_args.append(c)
-    if alpha is not None: call_args.append(alpha)
-    if beta is not None: call_args.append(beta)
-    if gamma is not None: call_args.append(gamma)
-    
+    if selection is not None:
+        call_args.append(selection)
+    if a is not None:
+        call_args.append(a)
+    if b is not None:
+        call_args.append(b)
+    if c is not None:
+        call_args.append(c)
+    if alpha is not None:
+        call_args.append(alpha)
+    if beta is not None:
+        call_args.append(beta)
+    if gamma is not None:
+        call_args.append(gamma)
+
     res = send_request("set_symmetry", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed set_symmetry successfully."
 
 
@@ -2401,11 +2655,14 @@ def fab(sequence: str, options: str | None = None) -> str:
     Creates a peptide chain from a sequence
     """
     call_args = []
-    if sequence is not None: call_args.append(sequence)
-    if options is not None: call_args.append(options)
-    
+    if sequence is not None:
+        call_args.append(sequence)
+    if options is not None:
+        call_args.append(options)
+
     res = send_request("fab", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed fab successfully."
 
 
@@ -2415,10 +2672,12 @@ def fragment(name: str) -> str:
     Loads a molecular fragment
     """
     call_args = []
-    if name is not None: call_args.append(name)
-    
+    if name is not None:
+        call_args.append(name)
+
     res = send_request("fragment", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed fragment successfully."
 
 
@@ -2429,9 +2688,9 @@ def full_screen() -> str:
     """
     call_args = []
 
-    
     res = send_request("full_screen", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed full_screen successfully."
 
 
@@ -2441,11 +2700,14 @@ def viewport(width: str, height: str) -> str:
     Sets the viewport size
     """
     call_args = []
-    if width is not None: call_args.append(width)
-    if height is not None: call_args.append(height)
-    
+    if width is not None:
+        call_args.append(width)
+    if height is not None:
+        call_args.append(height)
+
     res = send_request("viewport", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed viewport successfully."
 
 
@@ -2455,10 +2717,12 @@ def cd(path: str) -> str:
     Changes the current directory
     """
     call_args = []
-    if path is not None: call_args.append(path)
-    
+    if path is not None:
+        call_args.append(path)
+
     res = send_request("cd", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed cd successfully."
 
 
@@ -2469,9 +2733,9 @@ def pwd() -> str:
     """
     call_args = []
 
-    
     res = send_request("pwd", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed pwd successfully."
 
 
@@ -2481,10 +2745,12 @@ def ls(path: str | None = None) -> str:
     Lists files in the current directory
     """
     call_args = []
-    if path is not None: call_args.append(path)
-    
+    if path is not None:
+        call_args.append(path)
+
     res = send_request("ls", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed ls successfully."
 
 
@@ -2494,10 +2760,12 @@ def system(command: str) -> str:
     Executes a system command
     """
     call_args = []
-    if command is not None: call_args.append(command)
-    
+    if command is not None:
+        call_args.append(command)
+
     res = send_request("system", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed system successfully."
 
 
@@ -2507,10 +2775,12 @@ def help(command: str | None = None) -> str:
     Shows help for a command
     """
     call_args = []
-    if command is not None: call_args.append(command)
-    
+    if command is not None:
+        call_args.append(command)
+
     res = send_request("help", args=call_args)
-    if res.get("status") == "error": return res.get("error")
+    if res.get("status") == "error":
+        return res.get("error")
     return "Executed help successfully."
 
 
@@ -2540,8 +2810,7 @@ def _parse_groups(groups: str) -> "list[tuple[str, str]]":
         if not chunk:
             continue
         if "=" not in chunk:
-            raise ValueError(
-                f"bad group spec {chunk!r}; expected 'label=selection'")
+            raise ValueError(f"bad group spec {chunk!r}; expected 'label=selection'")
         label, sel = chunk.split("=", 1)
         label, sel = label.strip(), sel.strip()
         if not label or not sel:
@@ -2552,8 +2821,9 @@ def _parse_groups(groups: str) -> "list[tuple[str, str]]":
     return pairs
 
 
-def _repair_to_stl(src_obj: str, dst_stl: str, method: str,
-                   voxel_pitch: float, poisson_depth: int) -> dict:
+def _repair_to_stl(
+    src_obj: str, dst_stl: str, method: str, voxel_pitch: float, poisson_depth: int
+) -> dict:
     """Rebuild a PyMOL surface OBJ into a watertight, manifold STL.
 
     ``method``: ``poisson`` keeps surface detail (good for bulky chains);
@@ -2568,8 +2838,7 @@ def _repair_to_stl(src_obj: str, dst_stl: str, method: str,
     def _light(mesh, dst):
         # Already-watertight export: drop tiny internal shells (buried cavities
         # print as useless floating geometry), keep the largest body, tidy up.
-        bodies = sorted(mesh.split(only_watertight=False),
-                        key=lambda b: len(b.faces), reverse=True)
+        bodies = sorted(mesh.split(only_watertight=False), key=lambda b: len(b.faces), reverse=True)
         shell = bodies[0] if bodies else mesh
         shell.merge_vertices()
         shell.update_faces(shell.unique_faces())
@@ -2606,17 +2875,19 @@ def _repair_to_stl(src_obj: str, dst_stl: str, method: str,
 
         ms = pymeshlab.MeshSet()
         ms.load_new_mesh(src)
-        apply_first(ms, ["meshing_remove_duplicate_vertices",
-                         "remove_duplicate_vertices"])
-        apply_first(ms, ["meshing_remove_null_faces",
-                         "remove_zero_area_faces"])
-        apply_first(ms, ["meshing_remove_unreferenced_vertices",
-                         "remove_unreferenced_vertices"])
-        apply_first(ms, ["compute_normal_per_vertex",
-                         "re_orient_all_faces_coherently"])
-        apply_first(ms, ["generate_surface_reconstruction_screened_poisson",
-                         "surface_reconstruction_screened_poisson"],
-                    depth=depth, preclean=True)
+        apply_first(ms, ["meshing_remove_duplicate_vertices", "remove_duplicate_vertices"])
+        apply_first(ms, ["meshing_remove_null_faces", "remove_zero_area_faces"])
+        apply_first(ms, ["meshing_remove_unreferenced_vertices", "remove_unreferenced_vertices"])
+        apply_first(ms, ["compute_normal_per_vertex", "re_orient_all_faces_coherently"])
+        apply_first(
+            ms,
+            [
+                "generate_surface_reconstruction_screened_poisson",
+                "surface_reconstruction_screened_poisson",
+            ],
+            depth=depth,
+            preclean=True,
+        )
         ms.save_current_mesh(dst, binary=True)
         return trimesh.load(dst, force="mesh")
 
@@ -2717,8 +2988,7 @@ def print_export(
                 return f"Error exporting group '{label}': {res.get('error')}"
 
             try:
-                info = _repair_to_stl(obj_path, stl_path, method,
-                                      voxel_pitch, poisson_depth)
+                info = _repair_to_stl(obj_path, stl_path, method, voxel_pitch, poisson_depth)
             except ImportError:
                 return _PRINT_DEPS_HINT
             results.append((label, sel, stl_path, info))
@@ -2732,16 +3002,19 @@ def print_export(
         flag = "OK" if info["watertight"] else "NOT watertight - check mesh"
         lines.append(
             f"  {label} ({sel}) -> {os.path.basename(stl_path)}  "
-            f"[{info['method']}, {info['faces']:,} faces, {flag}]")
+            f"[{info['method']}, {info['faces']:,} faces, {flag}]"
+        )
     lines.append(
         "All groups share one coordinate frame. In your slicer, load the first "
         "STL then add the others as parts (don't re-centre) and assign a "
-        "filament per part.")
+        "filament per part."
+    )
     return "\n".join(lines)
 
 
 def main():
     mcp.run()
+
 
 if __name__ == "__main__":
     main()

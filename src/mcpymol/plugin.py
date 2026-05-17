@@ -15,6 +15,7 @@ The listening port defaults to 9876 and can be overridden with the
 exposes ``start_mcp`` / ``stop_mcp`` PyMOL commands so you can toggle the
 bridge at runtime.
 """
+
 from __future__ import annotations
 
 import json
@@ -32,6 +33,7 @@ RECV_CHUNK = 65536
 
 try:
     from pymol import cmd
+
     try:
         # Optional: gives us access to ``util.cbc``, ``util.chainbow`` etc.
         from pymol import util as pymol_util
@@ -129,7 +131,10 @@ class PyMOLSocketServer:
 
             if action == "fetch":
                 cmd.fetch(*args, **kwargs)
-                return {"status": "success", "result": f"Fetched {args[0] if args else 'structure'}"}
+                return {
+                    "status": "success",
+                    "result": f"Fetched {args[0] if args else 'structure'}",
+                }
 
             if action == "load":
                 cmd.load(*args, **kwargs)
@@ -148,7 +153,10 @@ class PyMOLSocketServer:
                     "result": rv if rv is not None else f"Executed '{action}' successfully.",
                 }
 
-            return {"status": "error", "error": f"Unknown action or method not found on cmd: {action}"}
+            return {
+                "status": "error",
+                "error": f"Unknown action or method not found on cmd: {action}",
+            }
 
         except Exception as e:
             err_msg = str(e)

@@ -25,10 +25,7 @@ jobs:
       - run: uv sync --locked --all-groups
       - name: ruff check
         run: uv run ruff check --output-format=github .
-      # Formatting is advisory for now: applying `ruff format` touches most
-      # files, so it is not yet a hard gate. Revisit in a cleanup pass.
-      - name: ruff format (advisory)
-        continue-on-error: true
+      - name: ruff format
         run: uv run ruff format --check --diff .
 
   typecheck:
