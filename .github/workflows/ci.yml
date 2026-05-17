@@ -34,17 +34,18 @@ jobs:
   typecheck:
     name: Type check (mypy, advisory)
     runs-on: ubuntu-latest
-    # Advisory until the existing type debt is paid down — reports errors in
-    # the run log without failing the build. Flip off continue-on-error once
-    # `uv run mypy` is clean.
-    continue-on-error: true
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
         with:
           enable-cache: true
       - run: uv sync --locked --all-groups
+      # Advisory until the existing type debt is paid down: step-level
+      # continue-on-error keeps the job green (errors are still in the log)
+      # so the PR check is not a misleading red ✗. Remove this line once
+      # `uv run mypy` is clean to make type checking a hard gate.
       - run: uv run mypy
+        continue-on-error: true
 
   test:
     name: Tests (py${{ matrix.python-version }})
@@ -100,14 +101,15 @@ jobs:
   security:
     name: Dependency audit (advisory)
     runs-on: ubuntu-latest
-    # Advisory: a CVE in a transitive dep should be visible but should not
-    # block unrelated PRs. Triage via the run log / Dependabot alerts.
-    continue-on-error: true
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
         with:
           enable-cache: true
       - run: uv sync --locked --all-groups
+      # Advisory: a CVE in a transitive dep should be visible but should not
+      # block unrelated PRs. Step-level continue-on-error keeps the check
+      # green; triage via the run log / Dependabot alerts.
       - name: pip-audit
         run: uv run --with pip-audit pip-audit
+        continue-on-error: true
