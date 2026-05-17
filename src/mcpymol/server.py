@@ -127,8 +127,8 @@ def _parse_a3m(a3m_text: str) -> list[list[str]]:
         List of sequences, each a list of single-character residues
         aligned to the query. The first entry is the query itself.
     """
-    sequences = []
-    current = []
+    sequences: list[list[str]] = []
+    current: list[str] = []
     for line in a3m_text.splitlines():
         if line.startswith(">"):
             if current:
@@ -299,7 +299,7 @@ def _apply_multimer_heuristic(name: str, cutoff: float = 5.0):
     if res.get("status") != "success" or not res.get("result"):
         return
 
-    all_chains = res.get("result")
+    all_chains = res.get("result", [])  # guard above guarantees this is populated
     kept_chains = {all_chains[0]}
 
     # 2. Expand until stable
@@ -408,7 +408,7 @@ def show(representation: str, selection: str = "all") -> str:
     """
     res = send_request("show", args=[representation, selection])
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return f"Showing {representation} for selection '{selection}'"
 
 
@@ -423,7 +423,7 @@ def hide(representation: str, selection: str = "all") -> str:
     """
     res = send_request("hide", args=[representation, selection])
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return f"Hiding {representation} for selection '{selection}'"
 
 
@@ -441,7 +441,7 @@ def color(color_name: str, selection: str = "all") -> str:
     """
     res = send_request("color", args=[color_name, selection])
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return f"Colored selection '{selection}' with {color_name}"
 
 
@@ -455,7 +455,7 @@ def select(name: str, selection: str) -> str:
     """
     res = send_request("select", args=[name, selection])
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return f"Created named selection '{name}' for '{selection}'"
 
 
@@ -468,7 +468,7 @@ def remove(selection: str) -> str:
     """
     res = send_request("remove", args=[selection])
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return f"Removed selection '{selection}'"
 
 
@@ -483,7 +483,7 @@ def distance(name: str, selection1: str, selection2: str) -> str:
     """
     res = send_request("distance", args=[name, selection1, selection2])
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return f"Measured distance between '{selection1}' and '{selection2}' as '{name}'"
 
 
@@ -501,7 +501,7 @@ def execute_pymol_command(command: str) -> str:
     """
     res = send_request("do", args=[command])
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return f"Executed command: {command}"
 
 
@@ -518,7 +518,7 @@ def list_objects() -> str:
     """
     res = send_request("get_object_list", args=["all"])
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     objs = res.get("result") or []
     if not objs:
         return "No objects are loaded."
@@ -534,7 +534,7 @@ def list_chains(obj_name: str = "all") -> str:
     """
     res = send_request("get_chains", args=[obj_name])
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     chains = res.get("result") or []
     if not chains:
         return f"No chains found in '{obj_name}'."
@@ -555,7 +555,7 @@ def list_ligands(obj_name: str) -> str:
     # dump the organic atoms as PDB text and parse the resn column.
     fetch = send_request("get_pdbstr", args=[f"({obj_name}) and organic"])
     if fetch.get("status") == "error":
-        return fetch.get("error")
+        return fetch.get("error", "Unknown error")
     pdb = fetch.get("result") or ""
     ligs: set[str] = set()
     for line in pdb.splitlines():
@@ -883,7 +883,7 @@ def as_tool(representation: str, selection: str | None = "all") -> str:
     """
     Shows one representation while hiding all others for the specified selection
     """
-    call_args = []
+    call_args: list = []
     if representation is not None:
         call_args.append(representation)
     if selection is not None:
@@ -891,7 +891,7 @@ def as_tool(representation: str, selection: str | None = "all") -> str:
 
     res = send_request("as", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed as successfully."
 
 
@@ -1546,7 +1546,7 @@ def set_setting(setting: str, value: str, selection: str | None = None) -> str:
     """
     Sets a PyMOL setting to a specified value
     """
-    call_args = []
+    call_args: list = []
     if setting is not None:
         call_args.append(setting)
     if value is not None:
@@ -1556,7 +1556,7 @@ def set_setting(setting: str, value: str, selection: str | None = None) -> str:
 
     res = send_request("set", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed set successfully."
 
 
@@ -1565,7 +1565,7 @@ def cartoon(item_type: str, selection: str | None = "all") -> str:
     """
     Sets the cartoon type for the specified selection
     """
-    call_args = []
+    call_args: list = []
     if item_type is not None:
         call_args.append(item_type)
     if selection is not None:
@@ -1573,7 +1573,7 @@ def cartoon(item_type: str, selection: str | None = "all") -> str:
 
     res = send_request("cartoon", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed cartoon successfully."
 
 
@@ -1584,7 +1584,7 @@ def spectrum(
     """
     Colors selection in a spectrum
     """
-    call_args = []
+    call_args: list = []
     if expression is not None:
         call_args.append(expression)
     if palette is not None:
@@ -1594,7 +1594,7 @@ def spectrum(
 
     res = send_request("spectrum", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed spectrum successfully."
 
 
@@ -1603,7 +1603,7 @@ def label(selection: str, expression: str | None = "name") -> str:
     """
     Adds labels to atoms in the selection
     """
-    call_args = []
+    call_args: list = []
     if selection is not None:
         call_args.append(selection)
     if expression is not None:
@@ -1611,7 +1611,7 @@ def label(selection: str, expression: str | None = "name") -> str:
 
     res = send_request("label", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed label successfully."
 
 
@@ -1625,7 +1625,7 @@ def angle(
     """
     Measures the angle between three selections
     """
-    call_args = []
+    call_args: list = []
     if name is not None:
         call_args.append(name)
     if selection1 is not None:
@@ -1637,7 +1637,7 @@ def angle(
 
     res = send_request("angle", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed angle successfully."
 
 
@@ -1652,7 +1652,7 @@ def dihedral(
     """
     Measures the dihedral angle between four selections
     """
-    call_args = []
+    call_args: list = []
     if name is not None:
         call_args.append(name)
     if selection1 is not None:
@@ -1666,7 +1666,7 @@ def dihedral(
 
     res = send_request("dihedral", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed dihedral successfully."
 
 
@@ -1675,13 +1675,13 @@ def center(selection: str | None = "all") -> str:
     """
     Centers the view on a selection
     """
-    call_args = []
+    call_args: list = []
     if selection is not None:
         call_args.append(selection)
 
     res = send_request("center", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed center successfully."
 
 
@@ -1690,13 +1690,13 @@ def orient(selection: str | None = "all") -> str:
     """
     Orients the view to align with principal axes of the selection
     """
-    call_args = []
+    call_args: list = []
     if selection is not None:
         call_args.append(selection)
 
     res = send_request("orient", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed orient successfully."
 
 
@@ -1705,7 +1705,7 @@ def zoom(selection: str | None = "all", buffer: str | None = "5") -> str:
     """
     Zooms the view on a selection
     """
-    call_args = []
+    call_args: list = []
     if selection is not None:
         call_args.append(selection)
     if buffer is not None:
@@ -1713,7 +1713,7 @@ def zoom(selection: str | None = "all", buffer: str | None = "5") -> str:
 
     res = send_request("zoom", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed zoom successfully."
 
 
@@ -1722,13 +1722,13 @@ def reset(obj: str | None = None) -> str:
     """
     Resets the view, optionally resetting an object's matrix
     """
-    call_args = []
+    call_args: list = []
     if obj is not None:
         call_args.append(obj)
 
     res = send_request("reset", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed reset successfully."
 
 
@@ -1737,7 +1737,7 @@ def turn(axis: str, angle: str | None = "90") -> str:
     """
     Rotates the camera around an axis
     """
-    call_args = []
+    call_args: list = []
     if axis is not None:
         call_args.append(axis)
     if angle is not None:
@@ -1745,7 +1745,7 @@ def turn(axis: str, angle: str | None = "90") -> str:
 
     res = send_request("turn", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed turn successfully."
 
 
@@ -1754,7 +1754,7 @@ def move(axis: str, distance: str | None = "1") -> str:
     """
     Moves the camera along an axis
     """
-    call_args = []
+    call_args: list = []
     if axis is not None:
         call_args.append(axis)
     if distance is not None:
@@ -1762,7 +1762,7 @@ def move(axis: str, distance: str | None = "1") -> str:
 
     res = send_request("move", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed move successfully."
 
 
@@ -1771,7 +1771,7 @@ def clip(mode: str, distance: str | None = "1") -> str:
     """
     Adjusts the clipping planes
     """
-    call_args = []
+    call_args: list = []
     if mode is not None:
         call_args.append(mode)
     if distance is not None:
@@ -1779,7 +1779,7 @@ def clip(mode: str, distance: str | None = "1") -> str:
 
     res = send_request("clip", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed clip successfully."
 
 
@@ -1788,7 +1788,7 @@ def save(filename: str, selection: str | None = "all", state: str | None = "-1")
     """
     Saves data to a file
     """
-    call_args = []
+    call_args: list = []
     if filename is not None:
         call_args.append(filename)
     if selection is not None:
@@ -1798,7 +1798,7 @@ def save(filename: str, selection: str | None = "all", state: str | None = "-1")
 
     res = send_request("save", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed save successfully."
 
 
@@ -1807,7 +1807,7 @@ def png(filename: str, options: str | None = None) -> str:
     """
     Saves a PNG image
     """
-    call_args = []
+    call_args: list = []
     if filename is not None:
         call_args.append(filename)
     if options is not None:
@@ -1815,7 +1815,7 @@ def png(filename: str, options: str | None = None) -> str:
 
     res = send_request("png", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed png successfully."
 
 
@@ -1824,11 +1824,11 @@ def deselect() -> str:
     """
     Clears the current selection
     """
-    call_args = []
+    call_args: list = []
 
     res = send_request("deselect", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed deselect successfully."
 
 
@@ -1837,7 +1837,7 @@ def create(name: str, selection: str | None = "all", source_state: str | None = 
     """
     Creates a new object from a selection
     """
-    call_args = []
+    call_args: list = []
     if name is not None:
         call_args.append(name)
     if selection is not None:
@@ -1847,7 +1847,7 @@ def create(name: str, selection: str | None = "all", source_state: str | None = 
 
     res = send_request("create", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed create successfully."
 
 
@@ -1856,7 +1856,7 @@ def extract(name: str, selection: str | None = "all") -> str:
     """
     Extracts a selection to a new object
     """
-    call_args = []
+    call_args: list = []
     if name is not None:
         call_args.append(name)
     if selection is not None:
@@ -1864,7 +1864,7 @@ def extract(name: str, selection: str | None = "all") -> str:
 
     res = send_request("extract", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed extract successfully."
 
 
@@ -1873,13 +1873,13 @@ def delete(name: str) -> str:
     """
     Deletes objects or selections
     """
-    call_args = []
+    call_args: list = []
     if name is not None:
         call_args.append(name)
 
     res = send_request("delete", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed delete successfully."
 
 
@@ -1888,7 +1888,7 @@ def align(mobile: str, target: str | None = "all", options: str | None = None) -
     """
     Aligns one selection to another
     """
-    call_args = []
+    call_args: list = []
     if mobile is not None:
         call_args.append(mobile)
     if target is not None:
@@ -1898,7 +1898,7 @@ def align(mobile: str, target: str | None = "all", options: str | None = None) -
 
     res = send_request("align", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed align successfully."
 
 
@@ -1907,7 +1907,7 @@ def super_tool(mobile: str, target: str | None = "all", options: str | None = No
     """
     Superimposes one selection onto another
     """
-    call_args = []
+    call_args: list = []
     if mobile is not None:
         call_args.append(mobile)
     if target is not None:
@@ -1917,7 +1917,7 @@ def super_tool(mobile: str, target: str | None = "all", options: str | None = No
 
     res = send_request("super", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed super successfully."
 
 
@@ -1926,13 +1926,13 @@ def intra_fit(selection: str) -> str:
     """
     Fits all states within an object
     """
-    call_args = []
+    call_args: list = []
     if selection is not None:
         call_args.append(selection)
 
     res = send_request("intra_fit", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed intra_fit successfully."
 
 
@@ -1941,13 +1941,13 @@ def intra_rms(selection: str) -> str:
     """
     Calculates RMSD between states within an object
     """
-    call_args = []
+    call_args: list = []
     if selection is not None:
         call_args.append(selection)
 
     res = send_request("intra_rms", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed intra_rms successfully."
 
 
@@ -1956,7 +1956,7 @@ def alter(selection: str, expression: str) -> str:
     """
     Alters atomic properties in a selection
     """
-    call_args = []
+    call_args: list = []
     if selection is not None:
         call_args.append(selection)
     if expression is not None:
@@ -1964,7 +1964,7 @@ def alter(selection: str, expression: str) -> str:
 
     res = send_request("alter", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed alter successfully."
 
 
@@ -1973,7 +1973,7 @@ def alter_state(state: str, selection: str, expression: str) -> str:
     """
     Alters atomic coordinates in a state
     """
-    call_args = []
+    call_args: list = []
     if state is not None:
         call_args.append(state)
     if selection is not None:
@@ -1983,7 +1983,7 @@ def alter_state(state: str, selection: str, expression: str) -> str:
 
     res = send_request("alter_state", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed alter_state successfully."
 
 
@@ -1992,13 +1992,13 @@ def h_add(selection: str | None = "all") -> str:
     """
     Adds hydrogens to a selection
     """
-    call_args = []
+    call_args: list = []
     if selection is not None:
         call_args.append(selection)
 
     res = send_request("h_add", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed h_add successfully."
 
 
@@ -2007,13 +2007,13 @@ def h_fill(selection: str | None = "all") -> str:
     """
     Adds hydrogens and adjusts valences
     """
-    call_args = []
+    call_args: list = []
     if selection is not None:
         call_args.append(selection)
 
     res = send_request("h_fill", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed h_fill successfully."
 
 
@@ -2022,7 +2022,7 @@ def bond(atom1: str, atom2: str, order: str | None = "1") -> str:
     """
     Creates a bond between two atoms
     """
-    call_args = []
+    call_args: list = []
     if atom1 is not None:
         call_args.append(atom1)
     if atom2 is not None:
@@ -2032,7 +2032,7 @@ def bond(atom1: str, atom2: str, order: str | None = "1") -> str:
 
     res = send_request("bond", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed bond successfully."
 
 
@@ -2041,7 +2041,7 @@ def unbond(atom1: str, atom2: str) -> str:
     """
     Removes a bond between two atoms
     """
-    call_args = []
+    call_args: list = []
     if atom1 is not None:
         call_args.append(atom1)
     if atom2 is not None:
@@ -2049,7 +2049,7 @@ def unbond(atom1: str, atom2: str) -> str:
 
     res = send_request("unbond", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed unbond successfully."
 
 
@@ -2058,13 +2058,13 @@ def rebuild(selection: str | None = "all") -> str:
     """
     Regenerates all displayed geometry
     """
-    call_args = []
+    call_args: list = []
     if selection is not None:
         call_args.append(selection)
 
     res = send_request("rebuild", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed rebuild successfully."
 
 
@@ -2073,11 +2073,11 @@ def refresh() -> str:
     """
     Refreshes the display
     """
-    call_args = []
+    call_args: list = []
 
     res = send_request("refresh", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed refresh successfully."
 
 
@@ -2086,13 +2086,13 @@ def util_cbc(selection: str | None = "all") -> str:
     """
     Colors by chain (Color By Chain)
     """
-    call_args = []
+    call_args: list = []
     if selection is not None:
         call_args.append(selection)
 
     res = send_request("util.cbc", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed util.cbc successfully."
 
 
@@ -2101,13 +2101,13 @@ def util_cbaw(selection: str | None = "all") -> str:
     """
     Colors by atom, white carbons (Color By Atom, White)
     """
-    call_args = []
+    call_args: list = []
     if selection is not None:
         call_args.append(selection)
 
     res = send_request("util.cbaw", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed util.cbaw successfully."
 
 
@@ -2116,13 +2116,13 @@ def util_cbag(selection: str | None = "all") -> str:
     """
     Colors by atom, green carbons (Color By Atom, Green)
     """
-    call_args = []
+    call_args: list = []
     if selection is not None:
         call_args.append(selection)
 
     res = send_request("util.cbag", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed util.cbag successfully."
 
 
@@ -2131,13 +2131,13 @@ def util_cbac(selection: str | None = "all") -> str:
     """
     Colors by atom, cyan carbons (Color By Atom, Cyan)
     """
-    call_args = []
+    call_args: list = []
     if selection is not None:
         call_args.append(selection)
 
     res = send_request("util.cbac", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed util.cbac successfully."
 
 
@@ -2146,13 +2146,13 @@ def util_cbam(selection: str | None = "all") -> str:
     """
     Colors by atom, magenta carbons (Color By Atom, Magenta)
     """
-    call_args = []
+    call_args: list = []
     if selection is not None:
         call_args.append(selection)
 
     res = send_request("util.cbam", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed util.cbam successfully."
 
 
@@ -2161,13 +2161,13 @@ def util_cbay(selection: str | None = "all") -> str:
     """
     Colors by atom, yellow carbons (Color By Atom, Yellow)
     """
-    call_args = []
+    call_args: list = []
     if selection is not None:
         call_args.append(selection)
 
     res = send_request("util.cbay", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed util.cbay successfully."
 
 
@@ -2176,13 +2176,13 @@ def util_cbas(selection: str | None = "all") -> str:
     """
     Colors by atom, salmon carbons (Color By Atom, Salmon)
     """
-    call_args = []
+    call_args: list = []
     if selection is not None:
         call_args.append(selection)
 
     res = send_request("util.cbas", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed util.cbas successfully."
 
 
@@ -2191,13 +2191,13 @@ def util_cbab(selection: str | None = "all") -> str:
     """
     Colors by atom, slate carbons (Color By Atom, slateBLue)
     """
-    call_args = []
+    call_args: list = []
     if selection is not None:
         call_args.append(selection)
 
     res = send_request("util.cbab", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed util.cbab successfully."
 
 
@@ -2206,13 +2206,13 @@ def util_cbao(selection: str | None = "all") -> str:
     """
     Colors by atom, orange carbons (Color By Atom, Orange)
     """
-    call_args = []
+    call_args: list = []
     if selection is not None:
         call_args.append(selection)
 
     res = send_request("util.cbao", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed util.cbao successfully."
 
 
@@ -2221,13 +2221,13 @@ def util_cbap(selection: str | None = "all") -> str:
     """
     Colors by atom, purple carbons (Color By Atom, Purple)
     """
-    call_args = []
+    call_args: list = []
     if selection is not None:
         call_args.append(selection)
 
     res = send_request("util.cbap", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed util.cbap successfully."
 
 
@@ -2236,13 +2236,13 @@ def util_cbak(selection: str | None = "all") -> str:
     """
     Colors by atom, pink carbons (Color By Atom, pinK)
     """
-    call_args = []
+    call_args: list = []
     if selection is not None:
         call_args.append(selection)
 
     res = send_request("util.cbak", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed util.cbak successfully."
 
 
@@ -2251,13 +2251,13 @@ def util_chainbow(selection: str | None = "all") -> str:
     """
     Colors chains in rainbow gradient (CHAINs in rainBOW)
     """
-    call_args = []
+    call_args: list = []
     if selection is not None:
         call_args.append(selection)
 
     res = send_request("util.chainbow", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed util.chainbow successfully."
 
 
@@ -2266,13 +2266,13 @@ def util_rainbow(selection: str | None = "all") -> str:
     """
     Colors residues in rainbow from N to C terminus
     """
-    call_args = []
+    call_args: list = []
     if selection is not None:
         call_args.append(selection)
 
     res = send_request("util.rainbow", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed util.rainbow successfully."
 
 
@@ -2281,13 +2281,13 @@ def util_ss(selection: str | None = "all") -> str:
     """
     Colors by secondary structure
     """
-    call_args = []
+    call_args: list = []
     if selection is not None:
         call_args.append(selection)
 
     res = send_request("util.ss", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed util.ss successfully."
 
 
@@ -2296,13 +2296,13 @@ def util_color_by_element(selection: str | None = "all") -> str:
     """
     Colors atoms by their element
     """
-    call_args = []
+    call_args: list = []
     if selection is not None:
         call_args.append(selection)
 
     res = send_request("util.color_by_element", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed util.color_by_element successfully."
 
 
@@ -2311,13 +2311,13 @@ def util_color_secondary(selection: str | None = "all") -> str:
     """
     Colors secondary structure elements
     """
-    call_args = []
+    call_args: list = []
     if selection is not None:
         call_args.append(selection)
 
     res = send_request("util.color_secondary", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed util.color_secondary successfully."
 
 
@@ -2326,13 +2326,13 @@ def spheroid(selection: str | None = "all") -> str:
     """
     Displays atoms as smooth spheres
     """
-    call_args = []
+    call_args: list = []
     if selection is not None:
         call_args.append(selection)
 
     res = send_request("spheroid", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed spheroid successfully."
 
 
@@ -2341,7 +2341,7 @@ def isomesh(name: str, map_object: str, level: str, selection: str | None = "all
     """
     Creates a mesh isosurface
     """
-    call_args = []
+    call_args: list = []
     if name is not None:
         call_args.append(name)
     if map_object is not None:
@@ -2353,7 +2353,7 @@ def isomesh(name: str, map_object: str, level: str, selection: str | None = "all
 
     res = send_request("isomesh", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed isomesh successfully."
 
 
@@ -2362,7 +2362,7 @@ def isosurface(name: str, map_object: str, level: str, selection: str | None = "
     """
     Creates a solid isosurface
     """
-    call_args = []
+    call_args: list = []
     if name is not None:
         call_args.append(name)
     if map_object is not None:
@@ -2374,7 +2374,7 @@ def isosurface(name: str, map_object: str, level: str, selection: str | None = "
 
     res = send_request("isosurface", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed isosurface successfully."
 
 
@@ -2383,13 +2383,13 @@ def sculpt_activate(obj: str) -> str:
     """
     Activates sculpting mode for an object
     """
-    call_args = []
+    call_args: list = []
     if obj is not None:
         call_args.append(obj)
 
     res = send_request("sculpt_activate", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed sculpt_activate successfully."
 
 
@@ -2398,13 +2398,13 @@ def sculpt_deactivate(obj: str) -> str:
     """
     Deactivates sculpting mode for an object
     """
-    call_args = []
+    call_args: list = []
     if obj is not None:
         call_args.append(obj)
 
     res = send_request("sculpt_deactivate", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed sculpt_deactivate successfully."
 
 
@@ -2413,7 +2413,7 @@ def sculpt_iterate(iterations: str, obj: str | None = "all") -> str:
     """
     Performs sculpting iterations
     """
-    call_args = []
+    call_args: list = []
     if iterations is not None:
         call_args.append(iterations)
     if obj is not None:
@@ -2421,7 +2421,7 @@ def sculpt_iterate(iterations: str, obj: str | None = "all") -> str:
 
     res = send_request("sculpt_iterate", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed sculpt_iterate successfully."
 
 
@@ -2430,7 +2430,7 @@ def scene(key: str, action: str | None = "recall") -> str:
     """
     Manages scenes for later recall
     """
-    call_args = []
+    call_args: list = []
     if key is not None:
         call_args.append(key)
     if action is not None:
@@ -2438,7 +2438,7 @@ def scene(key: str, action: str | None = "recall") -> str:
 
     res = send_request("scene", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed scene successfully."
 
 
@@ -2447,13 +2447,13 @@ def scene_order(scene_list: str) -> str:
     """
     Sets the order of scenes
     """
-    call_args = []
+    call_args: list = []
     if scene_list is not None:
         call_args.append(scene_list)
 
     res = send_request("scene_order", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed scene_order successfully."
 
 
@@ -2462,13 +2462,13 @@ def mset(specification: str) -> str:
     """
     Defines a sequence of states for movie playback
     """
-    call_args = []
+    call_args: list = []
     if specification is not None:
         call_args.append(specification)
 
     res = send_request("mset", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed mset successfully."
 
 
@@ -2477,11 +2477,11 @@ def mplay() -> str:
     """
     Starts playing the movie
     """
-    call_args = []
+    call_args: list = []
 
     res = send_request("mplay", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed mplay successfully."
 
 
@@ -2490,11 +2490,11 @@ def mstop() -> str:
     """
     Stops the movie
     """
-    call_args = []
+    call_args: list = []
 
     res = send_request("mstop", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed mstop successfully."
 
 
@@ -2503,13 +2503,13 @@ def frame(frame_number: str | None = None) -> str:
     """
     Sets or queries the current frame
     """
-    call_args = []
+    call_args: list = []
     if frame_number is not None:
         call_args.append(frame_number)
 
     res = send_request("frame", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed frame successfully."
 
 
@@ -2518,11 +2518,11 @@ def forward() -> str:
     """
     Advances one frame
     """
-    call_args = []
+    call_args: list = []
 
     res = send_request("forward", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed forward successfully."
 
 
@@ -2531,11 +2531,11 @@ def backward() -> str:
     """
     Goes back one frame
     """
-    call_args = []
+    call_args: list = []
 
     res = send_request("backward", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed backward successfully."
 
 
@@ -2544,11 +2544,11 @@ def rock() -> str:
     """
     Toggles a rocking animation
     """
-    call_args = []
+    call_args: list = []
 
     res = send_request("rock", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed rock successfully."
 
 
@@ -2557,7 +2557,7 @@ def ray(width: str | None = None, height: str | None = None) -> str:
     """
     Performs ray-tracing
     """
-    call_args = []
+    call_args: list = []
     if width is not None:
         call_args.append(width)
     if height is not None:
@@ -2565,7 +2565,7 @@ def ray(width: str | None = None, height: str | None = None) -> str:
 
     res = send_request("ray", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed ray successfully."
 
 
@@ -2574,7 +2574,7 @@ def draw(width: str | None = None, height: str | None = None) -> str:
     """
     Uses OpenGL renderer (faster but lower quality)
     """
-    call_args = []
+    call_args: list = []
     if width is not None:
         call_args.append(width)
     if height is not None:
@@ -2582,7 +2582,7 @@ def draw(width: str | None = None, height: str | None = None) -> str:
 
     res = send_request("draw", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed draw successfully."
 
 
@@ -2591,13 +2591,13 @@ def mpng(prefix: str) -> str:
     """
     Saves a series of PNG images for movie frames
     """
-    call_args = []
+    call_args: list = []
     if prefix is not None:
         call_args.append(prefix)
 
     res = send_request("mpng", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed mpng successfully."
 
 
@@ -2606,7 +2606,7 @@ def symexp(prefix: str, selection: str, cutoff: str | None = "20", segi: str | N
     """
     Generates symmetry-related copies
     """
-    call_args = []
+    call_args: list = []
     if prefix is not None:
         call_args.append(prefix)
     if selection is not None:
@@ -2618,7 +2618,7 @@ def symexp(prefix: str, selection: str, cutoff: str | None = "20", segi: str | N
 
     res = send_request("symexp", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed symexp successfully."
 
 
@@ -2627,7 +2627,7 @@ def set_symmetry(selection: str, a: str, b: str, c: str, alpha: str, beta: str, 
     """
     Sets symmetry parameters for an object
     """
-    call_args = []
+    call_args: list = []
     if selection is not None:
         call_args.append(selection)
     if a is not None:
@@ -2645,7 +2645,7 @@ def set_symmetry(selection: str, a: str, b: str, c: str, alpha: str, beta: str, 
 
     res = send_request("set_symmetry", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed set_symmetry successfully."
 
 
@@ -2654,7 +2654,7 @@ def fab(sequence: str, options: str | None = None) -> str:
     """
     Creates a peptide chain from a sequence
     """
-    call_args = []
+    call_args: list = []
     if sequence is not None:
         call_args.append(sequence)
     if options is not None:
@@ -2662,7 +2662,7 @@ def fab(sequence: str, options: str | None = None) -> str:
 
     res = send_request("fab", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed fab successfully."
 
 
@@ -2671,13 +2671,13 @@ def fragment(name: str) -> str:
     """
     Loads a molecular fragment
     """
-    call_args = []
+    call_args: list = []
     if name is not None:
         call_args.append(name)
 
     res = send_request("fragment", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed fragment successfully."
 
 
@@ -2686,11 +2686,11 @@ def full_screen() -> str:
     """
     Toggles fullscreen mode
     """
-    call_args = []
+    call_args: list = []
 
     res = send_request("full_screen", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed full_screen successfully."
 
 
@@ -2699,7 +2699,7 @@ def viewport(width: str, height: str) -> str:
     """
     Sets the viewport size
     """
-    call_args = []
+    call_args: list = []
     if width is not None:
         call_args.append(width)
     if height is not None:
@@ -2707,7 +2707,7 @@ def viewport(width: str, height: str) -> str:
 
     res = send_request("viewport", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed viewport successfully."
 
 
@@ -2716,13 +2716,13 @@ def cd(path: str) -> str:
     """
     Changes the current directory
     """
-    call_args = []
+    call_args: list = []
     if path is not None:
         call_args.append(path)
 
     res = send_request("cd", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed cd successfully."
 
 
@@ -2731,11 +2731,11 @@ def pwd() -> str:
     """
     Prints the current directory
     """
-    call_args = []
+    call_args: list = []
 
     res = send_request("pwd", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed pwd successfully."
 
 
@@ -2744,13 +2744,13 @@ def ls(path: str | None = None) -> str:
     """
     Lists files in the current directory
     """
-    call_args = []
+    call_args: list = []
     if path is not None:
         call_args.append(path)
 
     res = send_request("ls", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed ls successfully."
 
 
@@ -2759,13 +2759,13 @@ def system(command: str) -> str:
     """
     Executes a system command
     """
-    call_args = []
+    call_args: list = []
     if command is not None:
         call_args.append(command)
 
     res = send_request("system", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed system successfully."
 
 
@@ -2774,13 +2774,13 @@ def help(command: str | None = None) -> str:
     """
     Shows help for a command
     """
-    call_args = []
+    call_args: list = []
     if command is not None:
         call_args.append(command)
 
     res = send_request("help", args=call_args)
     if res.get("status") == "error":
-        return res.get("error")
+        return res.get("error", "Unknown error")
     return "Executed help successfully."
 
 
