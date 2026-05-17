@@ -8,7 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- `print_ribbon_view` tool — a 3D-print preset that pairs chunky β-strand arrows (and a fat helix) with a continuous backbone "spine" object (`<obj>_spine`, PyMOL `cartoon tube`). Because the tube ignores secondary structure, it runs unbroken through every strand→loop junction; exported together with the chunky cartoon via `print_export(method="voxel", voxel_pitch=0.2)` the voxel step fuses them into one watertight solid with no junction discontinuity, and the spine doubles as internal rebar for print rigidity. Configurable `spine_radius`.
+- `print_ribbon_view` tool — a 3D-print preset that pairs chunky β-strand arrows (and a fat helix) with a continuous backbone "spine" object (`<obj>_spine`, PyMOL `cartoon tube`). Because the tube ignores secondary structure, it runs unbroken through every strand→loop junction; exported together with the chunky cartoon via `print_export(representation="cartoon", method="voxel", voxel_pitch=0.2)` the voxel step fuses them into one watertight solid with no junction discontinuity, and the spine doubles as internal rebar for print rigidity. Configurable `spine_radius`.
+- `print_export` `representation` parameter. `"surface"` (default) is the existing behaviour, unchanged. `"cartoon"` exports the *currently displayed* cartoon geometry of the real objects — preserving per-residue rep flags (hidden loops) and per-object cartoon type (the `cartoon tube` spine) — instead of recreating a temp object and forcing a molecular surface. Groups are isolated by toggling object visibility (one colour per object).
+
+### Fixed
+- `print_export` always exported the molecular **surface**, even when the scene was set up as a cartoon (e.g. by `print_ribbon_view`): it hid all reps on a throwaway temp object and forced `show surface`. The new `representation="cartoon"` path exports the actual displayed ribbon/tube geometry, so `print_ribbon_view` now produces a ribbon STL rather than a surface blob.
 
 ## [1.1.1] - 2026-05-15
 

@@ -316,9 +316,10 @@ def test_print_ribbon_view(mock_sr):
     result = print_ribbon_view(obj_name="1UBQ", spine_radius=1.1)
 
     assert "Print-ribbon view" in result
-    # Tells the user how to export the fused solid.
+    # Tells the user how to export the fused solid, in cartoon mode.
     assert "1UBQ_spine" in result
     assert "print_export" in result
+    assert 'representation="cartoon"' in result
     acts = _actions(mock_sr)
     assert "hide" in acts
     assert "create" in acts
@@ -572,6 +573,69 @@ def test_print_export_happy_path(mock_sr, mock_repair, tmp_path):
     assert acts.count("save") == 2
     assert acts.count("delete") >= 2
     assert mock_repair.call_count == 2
+
+
+@patch("mcpymol.server._repair_to_stl")
+@patch("mcpymol.server.send_request")
+def test_print_export_surface_mode_shows_surface(mock_sr, mock_repair, tmp_path):
+    """Regression: default surface mode must actually show a surface."""
+    mock_sr.return_value = {"status": "success", "result": "OK"}
+    mock_repair.return_value = {"method": "voxel", "faces": 1000, "watertight": True}
+
+    with patch.dict(sys.modules, {"trimesh": MagicMock()}):
+        print_export(obj_name="1MSW", groups="protein=polymer.protein", out_dir=str(tmp_path))
+
+    show_args = [c.kwargs["args"] for c in mock_sr.call_args_list if c.args[0] == "show"]
+    assert any(a[0] == "surface" for a in show_args)
+
+
+@patch("mcpymol.server._repair_to_stl")
+@patch("mcpymol.server.send_request")
+def test_print_export_cartoon_mode(mock_sr, mock_repair, tmp_path):
+    """Cartoon mode exports the displayed cartoon of the real objects:
+
+    no temp object (create), no forced surface; isolate via get_object_list
+    + enable, then save.
+    """
+
+    def _sr(action, args=None, **kw):
+        if action == "get_object_list":
+            return {"status": "success", "result": ["1ema", "1ema_spine"]}
+        return {"status": "success", "result": "OK"}
+
+    mock_sr.side_effect = _sr
+    mock_repair.return_value = {"method": "voxel", "faces": 634188, "watertight": True}
+
+    with patch.dict(sys.modules, {"trimesh": MagicMock()}):
+        result = print_export(
+            obj_name="1ema",
+            groups="1ema=(1ema or 1ema_spine)",
+            out_dir=str(tmp_path),
+            representation="cartoon",
+            method="voxel",
+            voxel_pitch=0.2,
+        )
+
+    assert "1ema_1ema.stl" in result
+    assert "OK" in result
+    acts = _actions(mock_sr)
+    assert "get_object_list" in acts
+    assert "save" in acts
+    assert "enable" in acts
+    # The bug being fixed: cartoon mode must NOT force a surface or build
+    # a throwaway temp object.
+    assert "create" not in acts
+    show_args = [c.kwargs["args"] for c in mock_sr.call_args_list if c.args[0] == "show"]
+    assert not any(a and a[0] == "surface" for a in show_args)
+    mock_repair.assert_called_once()
+
+
+@patch("mcpymol.server.send_request")
+def test_print_export_bad_representation(mock_sr):
+    with patch.dict(sys.modules, {"trimesh": MagicMock()}):
+        result = print_export(obj_name="1ema", groups="x=1ema", representation="ribbon")
+    assert result.startswith("Error:")
+    assert "surface" in result and "cartoon" in result
 
 
 @patch("mcpymol.server.send_request")
