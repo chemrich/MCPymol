@@ -5,6 +5,14 @@ All notable changes to MCPymol will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- `print_export` tool — exports a structure as watertight, manifold STL files for multi-colour 3D printing
+- Per-colour-group isolation works around PyMOL's whole-scene OBJ export
+- Adaptive mesh repair: `auto` does a light cleanup when the export is already watertight (compact barrels like GFP — keeps the largest body, drops internal cavity shells), otherwise screened-Poisson reconstruction (detail-preserving) with a voxel-remesh fallback (robust for thin nucleic acids); all groups stay in one coordinate frame for slicer assembly
+- Optional `print` extra (trimesh, pymeshlab, scipy, scikit-image); the tool degrades gracefully with an install hint when the libraries are absent
+
 ## [1.1.0] - 2026-03-31
 
 ### Added
