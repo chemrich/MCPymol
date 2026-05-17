@@ -310,3 +310,37 @@ Highlight mutations E6V, K16E, and V67F in hemoglobin (4HHB)
 ```
 
 ![Mutation view of hemoglobin (4HHB) showing E6V, K16E, V67F](assets/mutation_view.png)
+
+## 🖨️ 3D Printing Export
+
+The `print_export` tool turns a structure into watertight STL files ready for
+multi-colour 3D printing. PyMOL's open-source build can't write STL and its OBJ
+exporter dumps the whole visible scene as non-manifold surface soup —
+`print_export` works around all of that: it isolates each colour group, exports
+it, and rebuilds a single watertight, manifold solid per group. Every group
+stays in the same coordinate frame, so a slicer can load them as aligned
+multi-material parts.
+
+This tool needs the optional `print` extra (trimesh, pymeshlab, scipy,
+scikit-image):
+
+```bash
+uv sync --extra print          # from a MCPymol checkout
+uv pip install 'mcpymol[print]' # standalone
+```
+
+```
+Export T7 RNA polymerase (1MSW) for 3D printing with the protein and the
+nucleic acid as separate colours
+```
+
+This produces one STL per group (e.g. `1MSW_protein.stl`,
+`1MSW_nucleic.stl`). `method="auto"` (default) picks the cheapest path that
+works: compact structures (e.g. a GFP barrel) often export already-watertight,
+so it does a light cleanup — keeping the largest body and dropping tiny
+internal cavity shells — rather than Poisson, which can *degrade* an
+already-closed surface. Otherwise it falls back to Poisson, then voxel.
+`method="poisson"` forces detail-preserving reconstruction (best for bulky
+chains); `method="voxel"` is robust for thin nucleic acids and slightly
+thickens fragile features for printability. In your slicer, load the first STL,
+then add the others as *parts* (don't re-centre) and assign a filament per part.
