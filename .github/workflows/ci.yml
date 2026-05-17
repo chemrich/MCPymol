@@ -29,7 +29,7 @@ jobs:
         run: uv run ruff format --check --diff .
 
   typecheck:
-    name: Type check (mypy, advisory)
+    name: Type check (mypy)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -37,12 +37,7 @@ jobs:
         with:
           enable-cache: true
       - run: uv sync --locked --all-groups
-      # Advisory until the existing type debt is paid down: step-level
-      # continue-on-error keeps the job green (errors are still in the log)
-      # so the PR check is not a misleading red ✗. Remove this line once
-      # `uv run mypy` is clean to make type checking a hard gate.
       - run: uv run mypy
-        continue-on-error: true
 
   test:
     name: Tests (py${{ matrix.python-version }})
