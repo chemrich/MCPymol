@@ -170,7 +170,7 @@ class PyMOLSocketServer:
             while self.running:
                 try:
                     client, _addr = self.server_socket.accept()
-                except socket.timeout:
+                except TimeoutError:
                     continue
                 except OSError:  # socket closed during shutdown
                     break
@@ -222,7 +222,7 @@ class PyMOLSocketServer:
 # ── Auto-start singleton (idempotent across `run plugin.py` re-runs) ────
 try:
     if "mcp_bridge_plugin" in globals():
-        mcp_bridge_plugin.stop()  # type: ignore[name-defined]
+        mcp_bridge_plugin.stop()  # type: ignore[name-defined]  # noqa: F821  (set by a prior `run plugin.py`)
     mcp_bridge_plugin = PyMOLSocketServer()
     mcp_bridge_plugin.start()
     if cmd is not None:

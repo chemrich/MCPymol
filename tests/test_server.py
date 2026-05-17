@@ -1,19 +1,35 @@
-import pytest
 import json
-import socket
 import sys
-from unittest.mock import patch, MagicMock
-from mcpymol.server import (
-    send_request, fetch_structure, load_structure,
-    show, color, select, distance,
-    ligand_view, interface_view, putty_view,
-    hydrophobic_surface_view, electrostatic_view,
-    crosslink_view, pocket_view, pharmacophore_view,
-    mutation_view, textbook_view, cinematic_view, pointillist_view,
-    list_objects, list_chains, list_ligands,
-    print_export, _parse_groups, _repair_to_stl,
-)
+from unittest.mock import MagicMock, patch
 
+import pytest
+
+from mcpymol.server import (
+    _parse_groups,
+    _repair_to_stl,
+    cinematic_view,
+    color,
+    crosslink_view,
+    electrostatic_view,
+    fetch_structure,
+    hydrophobic_surface_view,
+    interface_view,
+    ligand_view,
+    list_chains,
+    list_ligands,
+    list_objects,
+    load_structure,
+    mutation_view,
+    pharmacophore_view,
+    pocket_view,
+    pointillist_view,
+    print_export,
+    putty_view,
+    select,
+    send_request,
+    show,
+    textbook_view,
+)
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -82,7 +98,7 @@ def test_send_request_timeout():
     """Socket timeout returns a structured error dict."""
     with patch("socket.socket") as mock_cls:
         mock_cls.return_value.__enter__.return_value.connect.side_effect = (
-            socket.timeout("Timed out")
+            TimeoutError("Timed out")
         )
         res = send_request("test")
     assert res["status"] == "error"

@@ -2,18 +2,18 @@
 
 import json
 import math
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
 
 import mcpymol.server as server_module
 from mcpymol.server import (
-    _parse_a3m,
+    _AA_ALPHABET,
     _compute_shannon_entropy,
+    _parse_a3m,
     _run_mmseqs2,
     conservation_view,
-    _AA_ALPHABET,
 )
-
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
