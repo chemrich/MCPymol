@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - `print_export` always exported the molecular **surface**, even when the scene was set up as a cartoon (e.g. by `print_ribbon_view`): it hid all reps on a throwaway temp object and forced `show surface`. The new `representation="cartoon"` path exports the actual displayed ribbon/tube geometry, so `print_ribbon_view` now produces a ribbon STL rather than a surface blob.
+- `_repair_to_stl` voxel method produced fragmented, **non-watertight** output (e.g. a cartoon export came out as 19 loose shells) because it never consolidated the marching-cubes result. It now keeps the largest body and fills holes — the same consolidation the `light` path already does — yielding one watertight, printable solid. Mesh volume is unchanged (no inflation of fine features).
 
 ## [1.1.1] - 2026-05-15
 

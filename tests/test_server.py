@@ -682,3 +682,33 @@ def test_repair_auto_light_path_when_already_watertight():
     assert info["faces"] == 2000
     shell.export.assert_called_once_with("out.stl")
     fake_tm.repair.fix_normals.assert_called_once()
+
+
+def test_repair_voxel_consolidates_to_single_body():
+    """voxel: fragmented marching-cubes output is reduced to the largest
+    watertight body and hole-filled (regression for the cartoon export
+    coming out as 19 loose, non-watertight shells)."""
+    fake_tm = MagicMock()
+    m = MagicMock()
+    fake_tm.load.return_value = m
+    vox = MagicMock()
+    m.voxelized.return_value.fill.return_value = vox
+
+    out = MagicMock()
+    vox.marching_cubes = out
+    small = MagicMock()
+    small.faces = list(range(10))
+    big = MagicMock()
+    big.faces = list(range(900))
+    big.is_watertight = True
+    out.split.return_value = [small, big]
+
+    with patch.dict(sys.modules, {"trimesh": fake_tm}):
+        info = _repair_to_stl("in.obj", "out.stl", "voxel", voxel_pitch=0.2, poisson_depth=10)
+
+    # Largest body kept, closed, and exported — not the raw soup.
+    assert info["method"] == "voxel"
+    assert info["watertight"] is True
+    assert info["faces"] == 900
+    big.export.assert_called_once_with("out.stl")
+    fake_tm.repair.fill_holes.assert_called_once_with(big)

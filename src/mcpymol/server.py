@@ -2855,8 +2855,23 @@ def _repair_to_stl(
         out = vox.marching_cubes
         # marching_cubes is in voxel-index space; map back to world coords.
         out.apply_transform(vox.transform)
+        # Fragmented/open input (e.g. a PyMOL cartoon triangle-soup of
+        # separate arrow and tube segments) marching-cubes into many loose,
+        # non-watertight shells. Consolidate to the single largest solid and
+        # close it — same philosophy as _light — so the result is one
+        # watertight, printable body.
+        bodies = sorted(
+            out.split(only_watertight=False),
+            key=lambda b: len(b.faces),
+            reverse=True,
+        )
+        out = bodies[0] if bodies else out
         out.merge_vertices()
+        out.update_faces(out.unique_faces())
+        out.update_faces(out.nondegenerate_faces())
+        out.remove_unreferenced_vertices()
         trimesh.repair.fix_normals(out)
+        trimesh.repair.fill_holes(out)
         out.export(dst)
         return out
 
