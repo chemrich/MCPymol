@@ -2855,8 +2855,23 @@ def _repair_to_stl(
         out = vox.marching_cubes
         # marching_cubes is in voxel-index space; map back to world coords.
         out.apply_transform(vox.transform)
+        # Fragmented/open input (e.g. a PyMOL cartoon triangle-soup of
+        # separate arrow and tube segments) marching-cubes into many loose,
+        # non-watertight shells. Consolidate to the single largest solid and
+        # close it — same philosophy as _light — so the result is one
+        # watertight, printable body.
+        bodies = sorted(
+            out.split(only_watertight=False),
+            key=lambda b: len(b.faces),
+            reverse=True,
+        )
+        out = bodies[0] if bodies else out
         out.merge_vertices()
+        out.update_faces(out.unique_faces())
+        out.update_faces(out.nondegenerate_faces())
+        out.remove_unreferenced_vertices()
         trimesh.repair.fix_normals(out)
+        trimesh.repair.fill_holes(out)
         out.export(dst)
         return out
 
@@ -2938,6 +2953,7 @@ def print_ribbon_view(obj_name: str, spine_radius: float = 0.9) -> str:
 
         print_export(obj_name="<obj>",
                       groups="<obj>=(<obj> or <obj>_spine)",
+                      representation="cartoon",
                       method="voxel", voxel_pitch=0.2)
 
     Args:
@@ -2987,7 +3003,7 @@ def print_ribbon_view(obj_name: str, spine_radius: float = 0.9) -> str:
         f"solid with:\n"
         f'  print_export(obj_name="{obj_name}", '
         f'groups="{obj_name}=({obj_name} or {spine})", '
-        f'method="voxel", voxel_pitch=0.2)'
+        f'representation="cartoon", method="voxel", voxel_pitch=0.2)'
     )
 
 
@@ -2999,6 +3015,7 @@ def print_export(
     method: str = "auto",
     voxel_pitch: float = 0.7,
     poisson_depth: int = 10,
+    representation: str = "surface",
 ) -> str:
     """
     Exports a structure as watertight STL files ready for multi-colour 3D printing.
@@ -3024,6 +3041,17 @@ def print_export(
         voxel_pitch: Voxel size in Angstrom for the voxel method. Smaller keeps
                      more detail; 0.7 keeps a ~10 A helix intact.
         poisson_depth: Screened-Poisson octree depth; higher = more detail.
+        representation: What geometry to export. "surface" (default,
+                        unchanged) isolates each group as its own temp
+                        object and exports its molecular surface. "cartoon"
+                        exports the *currently displayed* cartoon geometry of
+                        the real objects, preserving per-residue rep flags
+                        and per-object cartoon type (e.g. a `cartoon tube`
+                        spine from :func:`print_ribbon_view`). In cartoon
+                        mode each group must name whole object(s) — one
+                        colour per object (e.g. "1abc or 1abc_spine") — and
+                        groups are isolated by toggling object visibility, no
+                        temp objects.
     """
     try:
         import trimesh  # noqa: F401
@@ -3035,35 +3063,73 @@ def print_export(
     except ValueError as e:
         return f"Error: {e}"
 
+    representation = representation.lower()
+    if representation not in ("surface", "cartoon"):
+        return f"Error: representation must be 'surface' or 'cartoon', got {representation!r}"
+
     os.makedirs(out_dir, exist_ok=True)
     tmp_objs = []
     results = []
     try:
-        # Build an isolated temp object per group up front.
-        for label, sel in pairs:
-            tmp = f"_print_{label}"
-            send_request("delete", args=[tmp])
-            send_request("create", args=[tmp, f"({obj_name}) and ({sel})"])
-            tmp_objs.append((label, sel, tmp))
+        if representation == "surface":
+            # Build an isolated temp object per group up front.
+            for label, sel in pairs:
+                tmp = f"_print_{label}"
+                send_request("delete", args=[tmp])
+                send_request("create", args=[tmp, f"({obj_name}) and ({sel})"])
+                tmp_objs.append((label, sel, tmp))
 
-        for label, sel, tmp in tmp_objs:
-            # Isolate: only this temp object visible, only as a surface.
-            send_request("do", args=["disable all"])
-            send_request("enable", args=[tmp])
-            send_request("hide", args=["everything", tmp])
-            send_request("show", args=["surface", tmp])
+            for label, sel, tmp in tmp_objs:
+                # Isolate: only this temp object visible, only as a surface.
+                send_request("do", args=["disable all"])
+                send_request("enable", args=[tmp])
+                send_request("hide", args=["everything", tmp])
+                send_request("show", args=["surface", tmp])
 
-            obj_path = os.path.join(out_dir, f"{obj_name}_{label}.obj")
-            stl_path = os.path.join(out_dir, f"{obj_name}_{label}.stl")
-            res = send_request("save", args=[obj_path, tmp], timeout=180.0)
-            if res.get("status") == "error":
-                return f"Error exporting group '{label}': {res.get('error')}"
+                obj_path = os.path.join(out_dir, f"{obj_name}_{label}.obj")
+                stl_path = os.path.join(out_dir, f"{obj_name}_{label}.stl")
+                res = send_request("save", args=[obj_path, tmp], timeout=180.0)
+                if res.get("status") == "error":
+                    return f"Error exporting group '{label}': {res.get('error')}"
 
-            try:
-                info = _repair_to_stl(obj_path, stl_path, method, voxel_pitch, poisson_depth)
-            except ImportError:
-                return _PRINT_DEPS_HINT
-            results.append((label, sel, stl_path, info))
+                try:
+                    info = _repair_to_stl(obj_path, stl_path, method, voxel_pitch, poisson_depth)
+                except ImportError:
+                    return _PRINT_DEPS_HINT
+                results.append((label, sel, stl_path, info))
+        else:
+            # Cartoon mode: export the displayed cartoon of the real objects,
+            # so per-residue rep flags (hidden loops) and per-object cartoon
+            # type (a `cartoon tube` spine) are preserved exactly. PyMOL's
+            # OBJ exporter dumps the whole visible scene, so isolate a group
+            # by enabling only its objects. One colour per object.
+            for label, sel in pairs:
+                res = send_request("get_object_list", args=[sel])
+                if res.get("status") == "error":
+                    return f"Error resolving group '{label}': {res.get('error')}"
+                objs = res.get("result") or []
+                if not objs:
+                    return (
+                        f"Error: cartoon-mode group '{label}' selection "
+                        f"'{sel}' matched no objects. Each group must name "
+                        f"whole object(s), e.g. '1abc or 1abc_spine'."
+                    )
+
+                send_request("do", args=["disable all"])
+                for obj in objs:
+                    send_request("enable", args=[obj])
+
+                obj_path = os.path.join(out_dir, f"{obj_name}_{label}.obj")
+                stl_path = os.path.join(out_dir, f"{obj_name}_{label}.stl")
+                res = send_request("save", args=[obj_path, sel], timeout=180.0)
+                if res.get("status") == "error":
+                    return f"Error exporting group '{label}': {res.get('error')}"
+
+                try:
+                    info = _repair_to_stl(obj_path, stl_path, method, voxel_pitch, poisson_depth)
+                except ImportError:
+                    return _PRINT_DEPS_HINT
+                results.append((label, sel, stl_path, info))
     finally:
         for _, _, tmp in tmp_objs:
             send_request("delete", args=[tmp])
