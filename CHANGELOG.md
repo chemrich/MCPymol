@@ -5,7 +5,7 @@ All notable changes to MCPymol will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.2.0] - 2026-05-18
 
 ### Added
 - `print_ribbon_view` tool — a 3D-print preset that pairs chunky β-strand arrows (and a fat helix) with a continuous backbone "spine" object (`<obj>_spine`, PyMOL `cartoon tube`). Because the tube ignores secondary structure, it runs unbroken through every strand→loop junction; exported together with the chunky cartoon via `print_export(representation="cartoon", method="voxel", voxel_pitch=0.2)` the voxel step fuses them into one watertight solid with no junction discontinuity, and the spine doubles as internal rebar for print rigidity. Configurable `spine_radius`.
