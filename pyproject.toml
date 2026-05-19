@@ -1,6 +1,6 @@
 [project]
 name = "mcpymol"
-version = "1.2.0"
+version = "1.2.1"
 description = "A conversational MCP server interface for PyMOL protein visualization"
 readme = "README.md"
 requires-python = ">=3.10"
