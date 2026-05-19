@@ -8,7 +8,13 @@ Thanks for the interest! This is a small, opinionated tool; PRs are welcome.
 git clone https://github.com/chemrich/MCPymol.git
 cd MCPymol
 uv sync --all-groups
+pre-commit install   # enables the local uv.lock-sync hook
 ```
+
+The pre-commit hook runs `uv lock --locked` so a lockfile that has drifted
+from `pyproject.toml` is caught before you push. CI enforces the same check
+(the "Lockfile in sync" job), so it covers Dependabot and anyone without the
+hook too. If a commit is blocked, run `uv lock` and re-stage `uv.lock`.
 
 ## Run the tests
 
