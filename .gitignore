@@ -16,7 +16,8 @@ refresh/
 .DS_Store
 .idea/
 .vscode/
-.claude/
+.claude/*
+!.claude/skills/
 .gemini/
 
 # Build artifacts

@@ -5,6 +5,14 @@ All notable changes to MCPymol will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.1] - 2026-05-18
+
+### Added
+- `.claude/skills/mcpymol-guide/SKILL.md` — a committed Claude Code skill documenting how to drive the mcpymol MCP server: structure prep and the multimer heuristic, the `*_view` preset catalogue, PyMOL selection syntax, rendering, and the 3D-print STL workflow (including the `representation="cartoon"` vs surface trap, verifying the STL with trimesh rather than the viewport, and the `/mcp` reconnect requirement after `server.py` edits). `.gitignore` now tracks `.claude/skills/` while the rest of `.claude/` stays local.
+
+### Fixed
+- `uv.lock` was not regenerated when the version was bumped to 1.2.0, so CI's `uv sync --locked` failed on every branch. The lockfile is back in sync with `pyproject.toml`.
+
 ## [1.2.0] - 2026-05-18
 
 ### Added
