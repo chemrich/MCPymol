@@ -1,0 +1,13 @@
+# Run `pre-commit install` once after cloning to enable these hooks.
+# See CONTRIBUTING.md.
+repos:
+  - repo: local
+    hooks:
+      - id: uv-lock-check
+        name: uv.lock in sync with pyproject.toml
+        # Mirrors the CI "Lockfile in sync" job: blocks the commit if the
+        # lockfile is stale so it never reaches a push / the test matrix.
+        entry: uv lock --locked
+        language: system
+        files: ^(pyproject\.toml|uv\.lock)$
+        pass_filenames: false
