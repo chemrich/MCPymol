@@ -33,7 +33,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Visualization",
 ]
 dependencies = [
-    "fastmcp>=3.3.1",
+    "fastmcp>=3.4.5",
     "mcp>=1.27.1",
 ]
 
@@ -58,11 +58,11 @@ mcpymol = "mcpymol.server:main"
 
 [dependency-groups]
 dev = [
-    "pytest>=9.0.3",
+    "pytest>=9.1.1",
     "pytest-mock>=3.15.1",
     "pytest-cov>=6.0",
-    "ruff>=0.15.14",
-    "mypy>=1.13",
+    "ruff>=0.16.1",
+    "mypy>=2.3.0",
 ]
 
 [build-system]
