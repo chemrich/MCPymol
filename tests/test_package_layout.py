@@ -18,6 +18,7 @@ TOOL_MODULES = [
     "mcpymol.conservation",
     "mcpymol.primitives",
     "mcpymol.printing",
+    "mcpymol.rendering",
     "mcpymol.structures",
     "mcpymol.views",
 ]
