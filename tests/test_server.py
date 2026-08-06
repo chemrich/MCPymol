@@ -168,7 +168,7 @@ def test_tool_error_propagation(mock_socket):
 # ── fetch_structure ───────────────────────────────────────────────────────────
 
 
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.structures.send_request")
 def test_fetch_structure_multimer(mock_sr):
     """Chains A/B/C → remove non-proximal chains and apply ghost heart."""
     mock_sr.side_effect = _sr_mock(get_chains=["A", "B", "C"])
@@ -184,7 +184,7 @@ def test_fetch_structure_multimer(mock_sr):
     assert "hide" in acts  # solvent hidden
 
 
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.structures.send_request")
 def test_fetch_structure_single_chain(mock_sr):
     """Single chain still applies the keep-selection + ghost heart."""
     mock_sr.side_effect = _sr_mock(get_chains=["A"])
@@ -197,7 +197,7 @@ def test_fetch_structure_single_chain(mock_sr):
     assert "hide" in acts
 
 
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.structures.send_request")
 def test_fetch_structure_no_chains(mock_sr):
     """Empty chain list falls through to the fallback return message."""
     mock_sr.side_effect = _sr_mock(get_chains=[])
@@ -210,7 +210,7 @@ def test_fetch_structure_no_chains(mock_sr):
     assert "remove" not in acts  # no cleanup attempted
 
 
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.structures.send_request")
 def test_fetch_structure_error(mock_sr):
     """Fetch failure is propagated as a readable error string."""
 
@@ -227,7 +227,7 @@ def test_fetch_structure_error(mock_sr):
     assert "PDB ID not found" in result
 
 
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.structures.send_request")
 def test_fetch_structure_custom_obj_name(mock_sr):
     """Custom obj_name is threaded through all downstream send_request calls."""
     mock_sr.side_effect = _sr_mock(get_chains=["A"])
@@ -245,7 +245,7 @@ def test_fetch_structure_custom_obj_name(mock_sr):
 # ── load_structure ────────────────────────────────────────────────────────────
 
 
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.structures.send_request")
 def test_load_structure_success(mock_sr):
     mock_sr.side_effect = _sr_mock(get_chains=["A"])
 
@@ -258,7 +258,7 @@ def test_load_structure_success(mock_sr):
     assert "hide" in acts
 
 
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.structures.send_request")
 def test_load_structure_error(mock_sr):
     def fake(action, args=None, kwargs=None):
         if action == "load":
@@ -276,7 +276,7 @@ def test_load_structure_error(mock_sr):
 # ── View functions ────────────────────────────────────────────────────────────
 
 
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.views.send_request")
 def test_ligand_view(mock_sr):
     mock_sr.return_value = {"status": "success", "result": "OK"}
 
@@ -294,7 +294,7 @@ def test_ligand_view(mock_sr):
     assert any("distance" in a for a in do_args)
 
 
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.views.send_request")
 def test_interface_view(mock_sr):
     mock_sr.return_value = {"status": "success", "result": "OK"}
 
@@ -309,7 +309,7 @@ def test_interface_view(mock_sr):
     assert any("distance" in a for a in do_args)
 
 
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.views.send_request")
 def test_putty_view(mock_sr):
     mock_sr.return_value = {"status": "success", "result": "OK"}
 
@@ -322,7 +322,7 @@ def test_putty_view(mock_sr):
     assert "set" in acts
 
 
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.printing.send_request")
 def test_print_ribbon_view(mock_sr):
     mock_sr.return_value = {"status": "success", "result": "OK"}
 
@@ -341,7 +341,7 @@ def test_print_ribbon_view(mock_sr):
     assert any("cartoon tube, 1UBQ_spine" in a for a in do_args)
 
 
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.views.send_request")
 def test_hydrophobic_surface_view(mock_sr):
     mock_sr.return_value = {"status": "success", "result": "OK"}
 
@@ -353,7 +353,7 @@ def test_hydrophobic_surface_view(mock_sr):
     assert "color" in acts
 
 
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.views.send_request")
 def test_electrostatic_view_atomic(mock_sr):
     mock_sr.return_value = {"status": "success", "result": "OK"}
 
@@ -366,7 +366,7 @@ def test_electrostatic_view_atomic(mock_sr):
     assert "show" in acts
 
 
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.views.send_request")
 def test_electrostatic_view_residue(mock_sr):
     mock_sr.return_value = {"status": "success", "result": "OK"}
 
@@ -376,7 +376,7 @@ def test_electrostatic_view_residue(mock_sr):
     assert "Electrostatic" in result
 
 
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.views.send_request")
 def test_crosslink_view(mock_sr):
     mock_sr.return_value = {"status": "success", "result": "OK"}
 
@@ -390,7 +390,7 @@ def test_crosslink_view(mock_sr):
     assert any("distance" in a for a in do_args)
 
 
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.views.send_request")
 def test_pocket_view(mock_sr):
     mock_sr.return_value = {"status": "success", "result": "OK"}
 
@@ -404,7 +404,7 @@ def test_pocket_view(mock_sr):
     assert "zoom" in acts
 
 
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.views.send_request")
 def test_pharmacophore_view(mock_sr):
     mock_sr.return_value = {"status": "success", "result": "OK"}
 
@@ -418,7 +418,7 @@ def test_pharmacophore_view(mock_sr):
     assert "zoom" in acts
 
 
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.views.send_request")
 def test_mutation_view_valid(mock_sr):
     mock_sr.return_value = {"status": "success", "result": "OK"}
 
@@ -433,7 +433,7 @@ def test_mutation_view_valid(mock_sr):
     assert "zoom" in acts
 
 
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.views.send_request")
 def test_textbook_view(mock_sr):
     mock_sr.return_value = {"status": "success", "result": "OK"}
 
@@ -446,7 +446,7 @@ def test_textbook_view(mock_sr):
     assert "set" in acts
 
 
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.views.send_request")
 def test_cinematic_view(mock_sr):
     mock_sr.return_value = {"status": "success", "result": "OK"}
 
@@ -459,7 +459,7 @@ def test_cinematic_view(mock_sr):
     assert "set" in acts
 
 
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.views.send_request")
 def test_pointillist_view(mock_sr):
     mock_sr.return_value = {"status": "success", "result": "OK"}
 
@@ -473,7 +473,7 @@ def test_pointillist_view(mock_sr):
     assert "color" in acts
 
 
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.views.send_request")
 def test_mutation_view_invalid_input(mock_sr):
     """Non-parseable mutation strings return an error before any PyMOL calls."""
     mock_sr.return_value = {"status": "success", "result": "OK"}
@@ -487,7 +487,7 @@ def test_mutation_view_invalid_input(mock_sr):
 # ── Scene introspection ───────────────────────────────────────────────────────
 
 
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.structures.send_request")
 def test_list_objects_with_objects(mock_sr):
     mock_sr.return_value = {"status": "success", "result": ["1ubq", "lig"]}
     result = list_objects()
@@ -495,13 +495,13 @@ def test_list_objects_with_objects(mock_sr):
     assert mock_sr.call_args.args[0] == "get_object_list"
 
 
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.structures.send_request")
 def test_list_objects_empty(mock_sr):
     mock_sr.return_value = {"status": "success", "result": []}
     assert list_objects() == "No objects are loaded."
 
 
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.structures.send_request")
 def test_list_chains(mock_sr):
     mock_sr.return_value = {"status": "success", "result": ["A", "B", "C"]}
     result = list_chains("1abc")
@@ -510,13 +510,13 @@ def test_list_chains(mock_sr):
     assert mock_sr.call_args.kwargs["args"] == ["1abc"]
 
 
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.structures.send_request")
 def test_list_chains_empty(mock_sr):
     mock_sr.return_value = {"status": "success", "result": []}
     assert "No chains" in list_chains("empty")
 
 
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.structures.send_request")
 def test_list_ligands_parses_pdb(mock_sr):
     """list_ligands parses HETATM resn columns out of the PDB dump."""
     pdb = (
@@ -531,7 +531,7 @@ def test_list_ligands_parses_pdb(mock_sr):
     assert "1atp" in result
 
 
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.structures.send_request")
 def test_list_ligands_no_organic(mock_sr):
     mock_sr.return_value = {"status": "success", "result": ""}
     assert "No organic ligands" in list_ligands("1ubq")
@@ -555,7 +555,7 @@ def test_parse_groups_invalid(bad):
         _parse_groups(bad)
 
 
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.printing.send_request")
 def test_print_export_missing_deps(mock_sr):
     """Without the optional 'print' extra, returns an install hint, no PyMOL calls."""
     with patch.dict(sys.modules, {"trimesh": None}):
@@ -564,8 +564,8 @@ def test_print_export_missing_deps(mock_sr):
     assert mock_sr.call_count == 0
 
 
-@patch("mcpymol.server._repair_to_stl")
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.printing._repair_to_stl")
+@patch("mcpymol.printing.send_request")
 def test_print_export_happy_path(mock_sr, mock_repair, tmp_path):
     mock_sr.return_value = {"status": "success", "result": "OK"}
     mock_repair.return_value = {"method": "poisson", "faces": 144290, "watertight": True}
@@ -588,8 +588,8 @@ def test_print_export_happy_path(mock_sr, mock_repair, tmp_path):
     assert mock_repair.call_count == 2
 
 
-@patch("mcpymol.server._repair_to_stl")
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.printing._repair_to_stl")
+@patch("mcpymol.printing.send_request")
 def test_print_export_surface_mode_shows_surface(mock_sr, mock_repair, tmp_path):
     """Regression: default surface mode must actually show a surface."""
     mock_sr.return_value = {"status": "success", "result": "OK"}
@@ -602,8 +602,8 @@ def test_print_export_surface_mode_shows_surface(mock_sr, mock_repair, tmp_path)
     assert any(a[0] == "surface" for a in show_args)
 
 
-@patch("mcpymol.server._repair_to_stl")
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.printing._repair_to_stl")
+@patch("mcpymol.printing.send_request")
 def test_print_export_cartoon_mode(mock_sr, mock_repair, tmp_path):
     """Cartoon mode exports the displayed cartoon of the real objects:
 
@@ -643,7 +643,7 @@ def test_print_export_cartoon_mode(mock_sr, mock_repair, tmp_path):
     mock_repair.assert_called_once()
 
 
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.printing.send_request")
 def test_print_export_bad_representation(mock_sr):
     with patch.dict(sys.modules, {"trimesh": MagicMock()}):
         result = print_export(obj_name="1ema", groups="x=1ema", representation="ribbon")
@@ -651,7 +651,7 @@ def test_print_export_bad_representation(mock_sr):
     assert "surface" in result and "cartoon" in result
 
 
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.printing.send_request")
 def test_print_export_bad_group(mock_sr):
     with patch.dict(sys.modules, {"trimesh": MagicMock()}):
         result = print_export(obj_name="1MSW", groups="garbage")
@@ -659,8 +659,8 @@ def test_print_export_bad_group(mock_sr):
     assert mock_sr.call_count == 0
 
 
-@patch("mcpymol.server._repair_to_stl")
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.printing._repair_to_stl")
+@patch("mcpymol.printing.send_request")
 def test_print_export_save_error_reported(mock_sr, mock_repair, tmp_path):
     mock_sr.return_value = {"status": "error", "error": "disk full"}
     with patch.dict(sys.modules, {"trimesh": MagicMock()}):
@@ -746,7 +746,7 @@ def _pb_send_request(save_status="success"):
 
 
 @patch("subprocess.run")
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.views.send_request")
 def test_pb_view_reports_save_failure(mock_sr, mock_run):
     """A failed save must be reported, not left to surface as a PDB2PQR error
     about a file that was never written."""
@@ -760,7 +760,7 @@ def test_pb_view_reports_save_failure(mock_sr, mock_run):
 
 
 @patch("subprocess.run")
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.views.send_request")
 def test_pb_view_reports_missing_pdb(mock_sr, mock_run):
     """PyMOL claiming success without producing the file means the two halves
     aren't sharing a filesystem — say so instead of running the solver."""
@@ -774,7 +774,7 @@ def test_pb_view_reports_missing_pdb(mock_sr, mock_run):
 
 
 @patch("subprocess.run")
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.views.send_request")
 def test_pb_view_reports_missing_pdb2pqr(mock_sr, mock_run):
     mock_sr.side_effect = _pb_send_request()
     mock_run.side_effect = FileNotFoundError("pdb2pqr")
@@ -786,7 +786,7 @@ def test_pb_view_reports_missing_pdb2pqr(mock_sr, mock_run):
 
 
 @patch("subprocess.run")
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.views.send_request")
 def test_pb_view_reports_pdb2pqr_timeout(mock_sr, mock_run):
     """A wedged solver must not hang the MCP server forever."""
     mock_sr.side_effect = _pb_send_request()
@@ -798,7 +798,7 @@ def test_pb_view_reports_pdb2pqr_timeout(mock_sr, mock_run):
 
 
 @patch("subprocess.run")
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.views.send_request")
 def test_pb_view_reports_missing_apbs(mock_sr, mock_run):
     mock_sr.side_effect = _pb_send_request()
     mock_run.side_effect = [MagicMock(returncode=0, stderr=""), FileNotFoundError("apbs")]
@@ -810,7 +810,7 @@ def test_pb_view_reports_missing_apbs(mock_sr, mock_run):
 
 
 @patch("subprocess.run")
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.views.send_request")
 def test_pb_view_reports_apbs_timeout(mock_sr, mock_run):
     mock_sr.side_effect = _pb_send_request()
     mock_run.side_effect = [
@@ -825,7 +825,7 @@ def test_pb_view_reports_apbs_timeout(mock_sr, mock_run):
 
 
 @patch("subprocess.run")
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.views.send_request")
 def test_pb_view_passes_a_timeout_to_both_solvers(mock_sr, mock_run):
     """Regression: neither subprocess may run unbounded."""
     mock_sr.side_effect = _pb_send_request()
@@ -851,7 +851,7 @@ def test_pb_view_passes_a_timeout_to_both_solvers(mock_sr, mock_run):
         (save, ("out.pdb",), "save"),
     ],
 )
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.bridge.send_request")
 def test_slow_ops_use_the_long_timeout(mock_sr, func, args, action):
     """Ray-tracing a large scene takes minutes; the 10 s default guaranteed a
     spurious 'Socket connection failed' on exactly the calls worth waiting for."""
@@ -997,7 +997,7 @@ def test_multimer_cutoff_default_is_the_documented_constant(func):
     assert inspect.signature(_apply_multimer_heuristic).parameters["cutoff"].default == default
 
 
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.structures.send_request")
 def test_fetch_structure_passes_cutoff_through_to_the_heuristic(mock_sr):
     mock_sr.side_effect = _sr_mock(get_chains=["A"])
 
@@ -1014,7 +1014,7 @@ def test_fetch_structure_passes_cutoff_through_to_the_heuristic(mock_sr):
 # ── _call: the shared body of every primitive wrapper ────────────────────────
 
 
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.bridge.send_request")
 def test_call_forwards_values_in_declaration_order(mock_sr):
     mock_sr.return_value = {"status": "success", "result": "OK"}
 
@@ -1023,7 +1023,7 @@ def test_call_forwards_values_in_declaration_order(mock_sr):
     assert mock_sr.call_args.kwargs["args"] == ["1abc", "5"]
 
 
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.bridge.send_request")
 def test_call_drops_unset_trailing_arguments(mock_sr):
     mock_sr.return_value = {"status": "success", "result": "OK"}
 
@@ -1032,7 +1032,7 @@ def test_call_drops_unset_trailing_arguments(mock_sr):
     assert mock_sr.call_args.kwargs["args"] == ["1920"]
 
 
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.bridge.send_request")
 def test_call_with_no_arguments_sends_none(mock_sr):
     mock_sr.return_value = {"status": "success", "result": "OK"}
 
@@ -1041,7 +1041,7 @@ def test_call_with_no_arguments_sends_none(mock_sr):
     assert mock_sr.call_args.kwargs["args"] == []
 
 
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.bridge.send_request")
 def test_call_rejects_a_gap_instead_of_mislabelling_it(mock_sr):
     """The old wrappers filtered out None anywhere in the list, so a height
     with no width was sent as the *width* — a silently wrong render."""
@@ -1051,7 +1051,7 @@ def test_call_rejects_a_gap_instead_of_mislabelling_it(mock_sr):
     mock_sr.assert_not_called()
 
 
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.bridge.send_request")
 def test_call_names_every_missing_argument(mock_sr):
     result = _call("symexp", prefix=None, selection=None, cutoff="20")
 
@@ -1059,21 +1059,21 @@ def test_call_names_every_missing_argument(mock_sr):
     mock_sr.assert_not_called()
 
 
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.bridge.send_request")
 def test_call_propagates_plugin_errors(mock_sr):
     mock_sr.return_value = {"status": "error", "error": "no such object: nope"}
 
     assert _call("zoom", selection="nope") == "no such object: nope"
 
 
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.bridge.send_request")
 def test_call_falls_back_when_error_field_is_missing(mock_sr):
     mock_sr.return_value = {"status": "error"}
 
     assert _call("zoom", selection="x") == "Unknown error"
 
 
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.bridge.send_request")
 def test_call_uses_the_default_timeout(mock_sr):
     mock_sr.return_value = {"status": "success", "result": "OK"}
 
@@ -1082,7 +1082,7 @@ def test_call_uses_the_default_timeout(mock_sr):
     assert mock_sr.call_args.kwargs["timeout"] == _DEFAULT_TIMEOUT
 
 
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.primitives.send_request")
 def test_wrapper_surfaces_the_gap_error(mock_sr):
     """End-to-end through a real tool, not just the helper."""
     assert ray(height="1080").startswith("Error: ray was given 'height' without 'width'")

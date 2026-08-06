@@ -1,2634 +1,302 @@
-import hashlib
-import json
-import math
-import os
-import socket
-import time
-import urllib.error
-import urllib.parse
-import urllib.request
-from typing import cast
-
-from mcp.server.fastmcp import FastMCP
-
-# Initialize FastMCP server
-mcp = FastMCP("MCPymol")
-
-HOST = "127.0.0.1"
-# Port can be overridden via environment variable, e.g.: MCPYMOL_PORT=9867 uv run mcpymol
-PORT = int(os.environ.get("MCPYMOL_PORT", 9876))
-
-# MMseqs2 server for evolutionary conservation (ColabFold public API by default)
-MMSEQS_URL = os.environ.get("MCPYMOL_MMSEQS_URL", "https://api.colabfold.com")
-
-# Wall-clock ceiling for the external APBS/PDB2PQR binaries.  Without one a
-# wedged solver hangs the whole MCP server, since tool calls are synchronous.
-_PB_SUBPROCESS_TIMEOUT = float(os.environ.get("MCPYMOL_PB_TIMEOUT", 600.0))
-
-# Chain–chain contact radius for the BFS multimer heuristic.  8 Å keeps
-# sprawling functional assemblies (CRP pentamer, ferritin cage) whole while
-# still dropping crystallographic neighbours.  Single source of truth: the
-# helper's own default used to be 5.0 while every caller passed 8.0, so the
-# signature disagreed with the documented behaviour.
-DEFAULT_MULTIMER_CUTOFF = 8.0
-
-# Operations that legitimately run for minutes: ray-tracing a large scene,
-# writing a movie frame series, saving a big assembly.  The 10 s default is
-# right for the interactive commands but guarantees a spurious timeout here.
-_SLOW_OP_TIMEOUT = float(os.environ.get("MCPYMOL_SLOW_OP_TIMEOUT", 600.0))
-
-# Ordered green shades used by the ghost heart style
-_GHOST_HEART_GREENS = ["forest", "limegreen", "chartreuse", "palegreen", "lime", "tv_green"]
-
-# Standard amino acid alphabet for Shannon entropy calculation
-_AA_ALPHABET = set("ACDEFGHIKLMNPQRSTVWY")
-
-# In-memory cache: MD5(sequence) → list of per-residue entropy values
-# Avoids repeat MMseqs2 API calls when only the scale is being changed
-_conservation_cache: dict[str, list[float]] = {}
-
-
-def _run_mmseqs2(sequence: str, server_url: str | None = None, use_env: bool = True) -> str:
-    """Submit a protein sequence to the ColabFold MMseqs2 API and return an A3M MSA.
-
-    Uses a submit → poll → download pattern against the ColabFold public API
-    (or a user-specified local server).
-
-    Args:
-        sequence: Amino acid sequence string.
-        server_url: MMseqs2 API base URL. Defaults to MMSEQS_URL env/global.
-        use_env: If True, search environmental databases too (mode "env").
-
-    Returns:
-        A3M-formatted multiple sequence alignment as a string.
-    """
-    host = server_url or MMSEQS_URL
-    mode = "env" if use_env else "all"
-
-    # 1. Submit the search job
-    data = urllib.parse.urlencode(
-        {
-            "q": f">query\n{sequence}\n",
-            "mode": mode,
-        }
-    ).encode()
-    req = urllib.request.Request(f"{host}/ticket/msa", data=data)
-    req.add_header("User-Agent", "mcpymol/1.0.0 (github.com/chemrich/MCPymol)")
-
-    max_retries = 3
-    for attempt in range(max_retries):
-        try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                ticket = json.loads(resp.read().decode())
-            break
-        except (urllib.error.URLError, TimeoutError) as e:
-            if attempt == max_retries - 1:
-                raise RuntimeError(
-                    f"Failed to submit MMseqs2 job after {max_retries} attempts: {e}"
-                ) from e
-            time.sleep(2**attempt)
-
-    ticket_id = ticket.get("id")
-    if not ticket_id:
-        raise RuntimeError(f"MMseqs2 server returned no ticket ID: {ticket}")
-
-    # 2. Poll until complete
-    poll_url = f"{host}/ticket/{ticket_id}"
-    for _ in range(120):  # up to ~10 minutes with 5s intervals
-        time.sleep(5)
-        try:
-            with urllib.request.urlopen(poll_url, timeout=10) as resp:
-                status = json.loads(resp.read().decode())
-        except (urllib.error.URLError, TimeoutError):
-            continue
-
-        if status.get("status") == "COMPLETE":
-            break
-        if status.get("status") == "ERROR":
-            raise RuntimeError(f"MMseqs2 search failed: {status}")
-    else:
-        raise RuntimeError("MMseqs2 search timed out after 10 minutes")
-
-    # 3. Download the result
-    dl_url = f"{host}/result/download/{ticket_id}"
-    with urllib.request.urlopen(dl_url, timeout=30) as resp:
-        import io
-        import tarfile
-
-        tar_bytes = resp.read()
-
-    # The download is a tar.gz containing .a3m files
-    a3m_content = ""
-    tar_buf = io.BytesIO(tar_bytes)
-    with tarfile.open(fileobj=tar_buf, mode="r:gz") as tar:
-        for member in tar.getmembers():
-            if member.name.endswith(".a3m"):
-                f = tar.extractfile(member)
-                if f:
-                    a3m_content += f.read().decode("utf-8")
-
-    if not a3m_content:
-        raise RuntimeError("No A3M alignment found in MMseqs2 results")
-
-    return a3m_content
-
-
-def _parse_a3m(a3m_text: str) -> list[list[str]]:
-    """Parse an A3M-format MSA into a list of aligned sequences.
-
-    A3M uses lowercase letters for insertions (relative to the query).
-    We strip insertions so every sequence aligns column-by-column with
-    the query.
-
-    Returns:
-        List of sequences, each a list of single-character residues
-        aligned to the query. The first entry is the query itself.
-    """
-    sequences: list[list[str]] = []
-    current: list[str] = []
-    for line in a3m_text.splitlines():
-        if line.startswith(">"):
-            if current:
-                # Strip lowercase (insertions) and join
-                seq = [ch for ch in "".join(current) if not ch.islower()]
-                sequences.append(seq)
-            current = []
-        else:
-            current.append(line.strip())
-    if current:
-        seq = [ch for ch in "".join(current) if not ch.islower()]
-        sequences.append(seq)
-    return sequences
-
-
-def _compute_shannon_entropy(msa: list[list[str]]) -> list[float]:
-    """Compute per-position Shannon entropy from an MSA.
-
-    Lower entropy = more conserved.  The result is normalized to [0, 1]
-    where 0 = perfectly conserved, 1 = maximum variability.
-
-    Args:
-        msa: List of aligned sequences (each a list of characters).
-
-    Returns:
-        List of normalized entropy values, one per query residue position.
-    """
-    if not msa:
-        return []
-
-    n_positions = len(msa[0])
-    max_entropy = math.log2(20)  # theoretical max for 20 amino acids
-    entropies = []
-
-    for col in range(n_positions):
-        counts: dict[str, int] = {}
-        total = 0
-        for seq in msa:
-            if col < len(seq):
-                aa = seq[col].upper()
-                if aa in _AA_ALPHABET:
-                    counts[aa] = counts.get(aa, 0) + 1
-                    total += 1
-
-        if total == 0:
-            entropies.append(1.0)
-            continue
-
-        entropy = 0.0
-        for count in counts.values():
-            p = count / total
-            if p > 0:
-                entropy -= p * math.log2(p)
-
-        # Normalize to [0, 1]
-        entropies.append(entropy / max_entropy if max_entropy > 0 else 0.0)
-
-    return entropies
-
-
-def _apply_ghost_heart(name: str):
-    """Applies the ghost heart visualization style to an object.
-
-    Ghost heart = cartoon + semi-transparent surface, chains colored in
-    shades of green, black background.
-    """
-    send_request("show", args=["cartoon", name])
-    send_request("show", args=["surface", name])
-    chains_res = send_request("get_chains", args=[name])
-    if chains_res.get("status") == "success":
-        chains = chains_res.get("result", [])
-        for i, chain in enumerate(chains):
-            green = _GHOST_HEART_GREENS[i % len(_GHOST_HEART_GREENS)]
-            send_request("color", args=[green, f"{name} and chain {chain} and polymer.protein"])
-    send_request("set", args=["transparency", "0.6", name])
-    send_request("do", args=["bg_color black"])
-    send_request("set", args=["opaque_background", "1"])
-
-    # Organic cofactors/ligands: sticks, colored by atom with lightblue carbons
-    send_request("show", args=["sticks", f"({name}) and organic"])
-    send_request("do", args=[f"util.cbaw ({name}) and organic"])
-    send_request("color", args=["lightblue", f"({name}) and organic and elem C"])
-
-    # Inorganic ions and metals: spheres, colored by chemical element
-    send_request("show", args=["spheres", f"({name}) and inorganic"])
-    send_request("color", args=["atomic", f"({name}) and inorganic"])
-    send_request("set", args=["sphere_scale", "0.3", f"({name}) and inorganic"])
-
-    # Nucleic acids (DNA/RNA): brightorange backbone, deepteal ladders
-    na_sel = f"({name}) and polymer.nucleic"
-    send_request("set", args=["cartoon_nucleic_acid_color", "brightorange", na_sel])
-    send_request("set", args=["cartoon_ladder_color", "deepteal", na_sel])
-
-    # Center view and set rotation pivot to structure center
-    send_request("center", args=[name])
-    send_request("do", args=[f"origin {name}"])
-
-
-# A single recv() chunk size.  We loop until the plugin half-closes, so this
-# is just a memory hint, not a cap on the total response size.
-_RECV_CHUNK = 65536
-
-# Default socket budget for an interactive command.  Slow operations override
-# it with _SLOW_OP_TIMEOUT.
-_DEFAULT_TIMEOUT = 10.0
-
-
-def send_request(
-    action: str,
-    args: list | None = None,
-    kwargs: dict | None = None,
-    timeout: float = _DEFAULT_TIMEOUT,
-) -> dict:
-    """Send a JSON request to the PyMOL plugin socket server.
-
-    The framing is one request per TCP connection: we write the JSON payload,
-    half-close our write side so the plugin sees EOF, then drain the response
-    until the plugin half-closes its write side.  This avoids the 8 KB
-    response truncation that bit ``get_fastastr`` on long chains.
-
-    Args:
-        action: The PyMOL command or custom action to execute.
-        args: Positional arguments for the action.
-        kwargs: Keyword arguments for the action.
-        timeout: Socket timeout in seconds. Defaults to 10.0.
-
-    Returns:
-        A dict with at least a ``status`` key (``success`` or ``error``).
-        ``error`` responses always include a human-readable ``error`` field.
-    """
-    payload = {
-        "action": action,
-        "args": args or [],
-        "kwargs": kwargs or {},
-    }
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.settimeout(timeout)
-            s.connect((HOST, PORT))
-            s.sendall(json.dumps(payload).encode("utf-8"))
-            try:
-                s.shutdown(socket.SHUT_WR)
-            except OSError:
-                pass
-            chunks: list[bytes] = []
-            while True:
-                chunk = s.recv(_RECV_CHUNK)
-                if not chunk:
-                    break
-                chunks.append(chunk)
-                # JSON is self-delimiting once we have enough bytes.  Try to
-                # parse after every chunk so we don't depend on the peer
-                # half-closing (handy for test mocks too).
-                try:
-                    return json.loads(b"".join(chunks).decode("utf-8"))
-                except (json.JSONDecodeError, UnicodeDecodeError):
-                    continue
-            if not chunks:
-                return {"status": "error", "error": "Empty response from PyMOL plugin."}
-            try:
-                return json.loads(b"".join(chunks).decode("utf-8"))
-            except (json.JSONDecodeError, UnicodeDecodeError) as e:
-                return {"status": "error", "error": f"Malformed response from PyMOL plugin: {e}"}
-    except Exception as e:
-        return {
-            "status": "error",
-            "error": f"Socket connection failed: {e}. Is the PyMOL plugin running?",
-        }
-
-
-def _call(_action: str, /, *, _timeout: float = _DEFAULT_TIMEOUT, **values: str | None) -> str:
-    """Forward a primitive PyMOL command and report the outcome.
-
-    This is the shared body of every thin ``pymol.cmd`` wrapper below.  Each
-    wrapper is still a real ``def`` — the signature and docstring are what the
-    MCP client sees, and keeping them written out means mypy, ruff and grep all
-    still work — but the mechanical part (drop unset arguments, forward,
-    translate the response) lives here so a fix lands once instead of 77 times.
-
-    ``values`` is an ordered name → value mapping matching the wrapper's
-    parameters.  Unset (``None``) values are dropped from the end, because
-    PyMOL takes these positionally: ``ray(height="600")`` with no width cannot
-    send just the height without PyMOL reading it *as* the width.  The wrappers
-    used to do exactly that, silently.  A gap now returns an error naming the
-    parameters instead of quietly producing a wrong render.
-    """
-    names = list(values)
-    args = [values[n] for n in names]
-
-    while args and args[-1] is None:
-        args.pop()
-        names.pop()
-
-    gaps = [n for n, v in zip(names, args, strict=True) if v is None]
-    if gaps:
-        given = names[-1]
-        return (
-            f"Error: {_action} was given '{given}' without "
-            f"{' and '.join(repr(g) for g in gaps)}. PyMOL takes these arguments "
-            f"positionally, so earlier ones cannot be skipped — pass them all, "
-            f"or drop the later one."
-        )
-
-    res = send_request(_action, args=args, timeout=_timeout)
-    if res.get("status") == "error":
-        return res.get("error", "Unknown error")
-    return f"Executed {_action} successfully."
-
-
-def _apply_multimer_heuristic(name: str, cutoff: float = DEFAULT_MULTIMER_CUTOFF):
-    """BFS expansion to find all connected chains in a multimer."""
-    # 1. Get initial chains
-    res = send_request("get_chains", args=[name])
-    if res.get("status") != "success" or not res.get("result"):
-        return
-
-    all_chains = res.get("result", [])  # guard above guarantees this is populated
-    kept_chains = {all_chains[0]}
-
-    # 2. Expand until stable
-    while True:
-        chain_sel = "+".join(list(kept_chains))
-        # Find chains nearby the current set
-        nearby_res = send_request(
-            "get_chains",
-            args=[
-                f"({name} and not chain {chain_sel}) and bychain (({name} and chain {chain_sel}) around {cutoff})"
-            ],
-        )
-
-        if nearby_res.get("status") == "success":
-            new_chains = [c for c in nearby_res.get("result", []) if c in all_chains]
-            if new_chains and not set(new_chains).issubset(kept_chains):
-                kept_chains.update(new_chains)
-                continue
-        break
-
-    # 3. Apply the removal
-    final_sel = "+".join(list(kept_chains))
-    send_request("remove", args=[f"({name}) and not chain {final_sel}"])
-    send_request("hide", args=["everything", f"({name}) and solvent"])
-
-
-@mcp.tool()
-def fetch_structure(
-    pdb_code: str, obj_name: str | None = None, multimer_cutoff: float = DEFAULT_MULTIMER_CUTOFF
-) -> str:
-    """
-    Fetches a protein structure from the PDB.
-    By default, it attempts to fetch the first biological assembly (multimer),
-    and removes any unrelated chains/states that are not part of the primary multimer.
-
-    Args:
-        pdb_code: 4-letter PDB code (e.g. "1abc")
-        obj_name: Optional custom name for the object in PyMOL
-        multimer_cutoff: Distance (A) between chains to keep them in the same multimer.
-                         Default 8.0A is suitable for most functional assemblies.
-    """
-    name = obj_name if obj_name else pdb_code
-
-    send_request("do", args=["reinitialize"])
-    send_request("set", args=["mouse_wheel_scale", "0.1"])
-    send_request("delete", args=[name])
-
-    # Use standard fetch
-    res = send_request("fetch", args=[pdb_code, name])
-    if res.get("status") == "error":
-        return f"Error fetching {pdb_code}: {res.get('error')}"
-
-    _apply_multimer_heuristic(name, multimer_cutoff)
-    _apply_ghost_heart(name)
-    send_request("zoom", args=[name])
-    return f"Successfully fetched {pdb_code} as '{name}' with ghost heart style and BFS multimer heuristic (cutoff={multimer_cutoff}A)."
-
-
-@mcp.tool()
-def load_structure(
-    file_path: str, obj_name: str, multimer_cutoff: float = DEFAULT_MULTIMER_CUTOFF
-) -> str:
-    """
-    Loads a structure from a local file path and applies the BFS multimer heuristic.
-
-    Args:
-        file_path: Path to the structure file (PDB, MMCIF, etc.)
-        obj_name: Name for the object in PyMOL
-        multimer_cutoff: Distance (A) between chains to keep them in the same multimer.
-                         Default 8.0A is suitable for most functional assemblies.
-    """
-    send_request("do", args=["reinitialize"])
-    send_request("set", args=["mouse_wheel_scale", "0.1"])
-    send_request("delete", args=[obj_name])
-    res = send_request("load", args=[file_path, obj_name])
-    if res.get("status") == "error":
-        return f"Error loading {file_path}: {res.get('error')}"
-
-    _apply_multimer_heuristic(obj_name, multimer_cutoff)
-    _apply_ghost_heart(obj_name)
-    send_request("zoom", args=[obj_name])
-    return f"Successfully loaded {file_path} as '{obj_name}' with ghost heart style and BFS multimer heuristic (cutoff={multimer_cutoff}A)."
-
-
-# ── Primitive tools ──────────────────────────────────────────────────────────
-#
-# A note on PyMOL selection syntax (what to put in ``selection``):
-#   "all"                      every atom in every loaded object
-#   "1abc"                     all atoms of the object named 1abc
-#   "1abc and chain A"         chain A of object 1abc
-#   "1abc and resi 10-20"      residue range
-#   "1abc and resn ATP"        residues with name ATP (e.g. ligands)
-#   "1abc and name CA"         atom names
-#   "1abc and ss H"            secondary-structure helix
-#   "polymer.protein"          protein-only macro
-#   "organic"                  small-molecule cofactors
-#   "byres (a around 5)"       residues with any atom within 5 Å of selection a
-
-
-@mcp.tool()
-def show(representation: str, selection: str = "all") -> str:
-    """Shows a graphical representation for a given selection.
-
-    Args:
-        representation: One of ``cartoon``, ``sticks``, ``spheres``, ``surface``,
-            ``lines``, ``ribbon``, ``dots``, ``mesh``, ``nb_spheres``, ``labels``.
-        selection: PyMOL selection string. See module-level note for syntax.
-    """
-    res = send_request("show", args=[representation, selection])
-    if res.get("status") == "error":
-        return res.get("error", "Unknown error")
-    return f"Showing {representation} for selection '{selection}'"
-
-
-@mcp.tool()
-def hide(representation: str, selection: str = "all") -> str:
-    """Hides a graphical representation for a given selection.
-
-    Args:
-        representation: Same vocabulary as :func:`show`, plus ``everything`` to
-            hide all reps for the selection.
-        selection: PyMOL selection string.
-    """
-    res = send_request("hide", args=[representation, selection])
-    if res.get("status") == "error":
-        return res.get("error", "Unknown error")
-    return f"Hiding {representation} for selection '{selection}'"
-
-
-@mcp.tool()
-def color(color_name: str, selection: str = "all") -> str:
-    """Sets the color for a selection.
-
-    Args:
-        color_name: A PyMOL color. Common names: ``red``, ``blue``, ``green``,
-            ``yellow``, ``magenta``, ``cyan``, ``orange``, ``salmon``, ``marine``,
-            ``forest``, ``palegreen``, ``skyblue``, ``violet``, ``grey50``,
-            ``white``, ``black``. Use ``atomic`` to color non-carbon atoms by
-            element while leaving carbons untouched.
-        selection: PyMOL selection string.
-    """
-    res = send_request("color", args=[color_name, selection])
-    if res.get("status") == "error":
-        return res.get("error", "Unknown error")
-    return f"Colored selection '{selection}' with {color_name}"
-
-
-@mcp.tool()
-def select(name: str, selection: str) -> str:
-    """Creates (or replaces) a named selection for later reuse.
-
-    Args:
-        name: Identifier you'll refer to later (e.g. ``active_site``).
-        selection: PyMOL selection expression to assign to that name.
-    """
-    res = send_request("select", args=[name, selection])
-    if res.get("status") == "error":
-        return res.get("error", "Unknown error")
-    return f"Created named selection '{name}' for '{selection}'"
-
-
-@mcp.tool()
-def remove(selection: str) -> str:
-    """Permanently removes the atoms matching the selection.
-
-    This deletes atoms; it does not just hide them. To hide instead, use
-    :func:`hide`.
-    """
-    res = send_request("remove", args=[selection])
-    if res.get("status") == "error":
-        return res.get("error", "Unknown error")
-    return f"Removed selection '{selection}'"
-
-
-@mcp.tool()
-def distance(name: str, selection1: str, selection2: str) -> str:
-    """Measures and draws a distance object between two selections.
-
-    Args:
-        name: Name for the distance object (used to delete/recolor later).
-        selection1: First selection.
-        selection2: Second selection.
-    """
-    res = send_request("distance", args=[name, selection1, selection2])
-    if res.get("status") == "error":
-        return res.get("error", "Unknown error")
-    return f"Measured distance between '{selection1}' and '{selection2}' as '{name}'"
-
-
-@mcp.tool()
-def execute_pymol_command(command: str) -> str:
-    """Executes a raw PyMOL command string (PyMOL CLI syntax).
-
-    PREFER the dedicated tools when one exists — show, color, select, distance,
-    ligand_view, interface_view, etc. They have better defaults, do compound
-    setup in one call, and produce cleaner results.
-
-    Reach for this tool only when no other tool covers what you need (e.g.
-    ``set ray_shadow, 0``, ``bg_color grey20``, multi-statement scripts).
-    Note: this accepts the PyMOL ``cmd.do`` mini-language, not Python.
-    """
-    res = send_request("do", args=[command])
-    if res.get("status") == "error":
-        return res.get("error", "Unknown error")
-    return f"Executed command: {command}"
-
-
-# ── Scene introspection ──────────────────────────────────────────────────────
-
-
-@mcp.tool()
-def list_objects() -> str:
-    """Lists all loaded PyMOL objects.
-
-    Call this when you don't know what's currently in the session — for
-    example before composing a selection or running a view tool that needs
-    an ``obj_name``.
-    """
-    res = send_request("get_object_list", args=["all"])
-    if res.get("status") == "error":
-        return res.get("error", "Unknown error")
-    objs = res.get("result") or []
-    if not objs:
-        return "No objects are loaded."
-    return "Loaded objects: " + ", ".join(objs)
-
-
-@mcp.tool()
-def list_chains(obj_name: str = "all") -> str:
-    """Lists the chain IDs present in an object (or in all objects).
-
-    Useful before calling :func:`interface_view`, :func:`conservation_view`
-    or any tool that needs a specific chain ID.
-    """
-    res = send_request("get_chains", args=[obj_name])
-    if res.get("status") == "error":
-        return res.get("error", "Unknown error")
-    chains = res.get("result") or []
-    if not chains:
-        return f"No chains found in '{obj_name}'."
-    return f"Chains in '{obj_name}': " + ", ".join(chains)
-
-
-@mcp.tool()
-def list_ligands(obj_name: str) -> str:
-    """Lists the small-molecule (organic) ligand residue names in an object.
-
-    Call this before :func:`ligand_view`, :func:`pocket_view`, or
-    :func:`pharmacophore_view` when you don't already know the ligand's
-    3-letter residue name.
-    """
-    # We could use `iterate (...) and organic, stored.ligs.add(resn)` and then
-    # read `stored.ligs` back, but PyMOL doesn't have a built-in "send me a
-    # variable" command, so we'd need a side channel. Cheaper: ask PyMOL to
-    # dump the organic atoms as PDB text and parse the resn column.
-    fetch = send_request("get_pdbstr", args=[f"({obj_name}) and organic"])
-    if fetch.get("status") == "error":
-        return fetch.get("error", "Unknown error")
-    pdb = fetch.get("result") or ""
-    ligs: set[str] = set()
-    for line in pdb.splitlines():
-        if line.startswith(("HETATM", "ATOM  ")):
-            resn = line[17:20].strip()
-            if resn:
-                ligs.add(resn)
-    if not ligs:
-        return f"No organic ligands found in '{obj_name}'."
-    return f"Ligands in '{obj_name}': " + ", ".join(sorted(ligs))
-
-
-@mcp.tool()
-def ligand_view(obj_name: str, ligand_resn: str) -> str:
-    """
-    Shows a binding-site view focused on a ligand.
-
-    Protein rendered as a semi-transparent cartoon. Pocket residues (within 5Å
-    of the ligand) shown as sticks with element coloring and lightblue carbons.
-    Ligand shown as thick sticks with yellow carbons. H-bonds drawn as yellow
-    dashes. Pocket residues labeled. View zooms to the ligand.
-
-    Args:
-        obj_name: PyMOL object name (e.g. "1abc")
-        ligand_resn: 3-letter residue name of the ligand (e.g. "ATP", "HEM", "LIG")
-    """
-    lig_sel = f"({obj_name}) and resn {ligand_resn}"
-    pocket_sel = f"byres (({obj_name}) and polymer.protein and ({lig_sel} around 5))"
-
-    send_request("hide", args=["everything", obj_name])
-    send_request("do", args=["delete hbonds"])
-
-    # Protein as semi-transparent cartoon
-    send_request("show", args=["cartoon", f"({obj_name}) and polymer.protein"])
-    send_request("color", args=["lightblue", f"({obj_name}) and polymer.protein"])
-    send_request("set", args=["cartoon_transparency", "0.5", f"({obj_name}) and polymer.protein"])
-
-    # Pocket residues as sticks, element-colored with lightblue carbons
-    send_request("show", args=["sticks", pocket_sel])
-    send_request("do", args=[f"util.cbaw {pocket_sel}"])
-    send_request("color", args=["lightblue", f"({pocket_sel}) and elem C"])
-
-    # Ligand as thick sticks with yellow carbons (organic) or spheres (inorganic)
-    send_request("show", args=["sticks", f"({lig_sel}) and organic"])
-    send_request("set", args=["stick_radius", "0.25", f"({lig_sel}) and organic"])
-    send_request("show", args=["spheres", f"({lig_sel}) and inorganic"])
-    send_request("set", args=["sphere_scale", "0.3", f"({lig_sel}) and inorganic"])
-
-    send_request("do", args=[f"util.cbaw {lig_sel}"])
-    send_request("color", args=["yellow", f"({lig_sel}) and organic and elem C"])
-    send_request("color", args=["atomic", f"({lig_sel}) and inorganic"])
-
-    # H-bonds between ligand and pocket (mode=2: polar contacts by geometry)
-    send_request("do", args=[f"distance hbonds, ({lig_sel}), ({pocket_sel}), 3.5, 2"])
-    send_request("color", args=["yellow", "hbonds"])
-    send_request("hide", args=["labels", "hbonds"])
-    send_request("set", args=["dash_gap", "0.3", "hbonds"])
-    send_request("set", args=["dash_width", "3", "hbonds"])
-
-    # Label pocket residues at CA (one label per residue)
-    send_request("label", args=[f"({pocket_sel}) and name CA", '"%s%s" % (resn, resi)'])
-    send_request("set", args=["label_color", "white"])
-    send_request("set", args=["label_size", "14"])
-
-    send_request("do", args=["bg_color black"])
-    send_request("zoom", args=[lig_sel, "8"])
-    send_request("do", args=[f"origin {lig_sel}"])
-
-    return (
-        f"Showing ligand view for {ligand_resn} in {obj_name}. H-bonds stored as 'hbonds' object."
-    )
-
-
-@mcp.tool()
-def bfactor_view(obj_name: str) -> str:
-    """
-    Colors the structure by crystallographic B-factor (temperature factor).
-
-    Blue = rigid/ordered (low B), white = intermediate, red = flexible/disordered
-    (high B). Useful for identifying dynamic loops, disordered termini, and
-    rigid structural cores. Shown as cartoon on black background.
-
-    Args:
-        obj_name: PyMOL object name (e.g. "1abc")
-    """
-    send_request("hide", args=["everything", obj_name])
-    send_request("show", args=["cartoon", obj_name])
-    send_request("do", args=[f"spectrum b, blue_white_red, {obj_name}"])
-    send_request("do", args=["bg_color black"])
-    send_request("center", args=[obj_name])
-    send_request("do", args=[f"origin {obj_name}"])
-
-    return f"Showing B-factor view for {obj_name}: blue=rigid, red=flexible."
-
-
-@mcp.tool()
-def conservation_view(
-    obj_name: str,
-    selection: str = "all",
-    server_url: str | None = None,
-    use_env: bool = True,
-    chain: str | None = None,
-    scale: str = "relative",
-    force_refresh: bool = False,
-) -> str:
-    """
-    Colors the structure by evolutionary conservation using Shannon entropy.
-
-    Runs a full pipeline: extracts the protein sequence from the loaded
-    structure, submits it to an MMseqs2 server (ColabFold public API by
-    default) for multiple sequence alignment, computes per-residue Shannon
-    entropy, and maps the conservation scores onto the structure via the
-    B-factor column and spectrum coloring.
-
-    Entropy scores are cached in memory by sequence, so changing the scale
-    or re-running on the same protein does not require a repeat API call.
-
-    Magenta/blue = highly conserved (low entropy), white = moderate,
-    cyan/green = highly variable (high entropy).
-
-    NOTE: The first call makes an external API call and may take 30 seconds
-    to several minutes depending on the server and sequence length.
-    Subsequent calls for the same sequence are instant.
-
-    Args:
-        obj_name: PyMOL object name (e.g. "1ubq")
-        selection: PyMOL selection to analyze (default "all")
-        server_url: Override the MMseqs2 server URL (defaults to ColabFold
-                    public API, or MCPYMOL_MMSEQS_URL env var)
-        use_env: Search environmental databases in addition to UniRef
-                 (default True, gives deeper MSAs)
-        chain: Specific chain ID to analyze. If None, uses the first
-               protein chain found.
-        scale: Color scaling mode. "relative" (default) maps the color
-               gradient to the actual min/max entropy range of this protein,
-               maximizing visual contrast. "absolute" uses the full
-               theoretical entropy range (0 to log2(20)), useful when
-               comparing conservation across different proteins.
-        force_refresh: If True, bypass the cache and re-fetch the MSA from
-                       the MMseqs2 server even if scores are cached.
-    """
-    # 1. Determine which chain to use
-    if chain is None:
-        chains_res = send_request("get_chains", args=[f"({obj_name}) and polymer.protein"])
-        if chains_res.get("status") != "success" or not chains_res.get("result"):
-            return f"Error: could not get protein chains from {obj_name}"
-        chain = chains_res["result"][0]
-
-    chain_sel = f"({obj_name}) and chain {chain} and polymer.protein"
-
-    # 2. Extract the sequence via FASTA
-    fasta_res = send_request("get_fastastr", args=[chain_sel])
-    if fasta_res.get("status") != "success" or not fasta_res.get("result"):
-        return f"Error: could not extract sequence for chain {chain} of {obj_name}"
-
-    fasta_str = fasta_res["result"]
-    # Parse the FASTA: skip header lines, join sequence lines
-    seq_lines = [ln for ln in fasta_str.strip().splitlines() if not ln.startswith(">")]
-    sequence = "".join(seq_lines).strip()
-
-    if len(sequence) < 10:
-        return f"Error: sequence too short ({len(sequence)} residues) for conservation analysis"
-
-    # 3. Check cache; run MMseqs2 only on a miss or force_refresh
-    cache_key = hashlib.md5(sequence.encode()).hexdigest()
-    cache_hit = not force_refresh and cache_key in _conservation_cache
-
-    if cache_hit:
-        entropies = _conservation_cache[cache_key]
-        msa_note = "cached"
-    else:
-        try:
-            a3m_text = _run_mmseqs2(sequence, server_url=server_url, use_env=use_env)
-        except RuntimeError as e:
-            return f"Error running MMseqs2: {e}"
-
-        # 4. Parse the MSA and compute Shannon entropy
-        msa = _parse_a3m(a3m_text)
-        if len(msa) < 2:
-            return f"Warning: MSA contains only {len(msa)} sequence(s). Not enough homologs found for meaningful conservation analysis."
-
-        entropies = _compute_shannon_entropy(msa)
-        _conservation_cache[cache_key] = entropies
-        msa_note = f"{len(msa)} sequences"
-
-    # 5. Map conservation scores onto B-factor column.
-    #
-    # We invert entropy so that high B = conserved (intuitive spectrum coloring).
-    # Both scale modes produce scores in [0, 100]: 100 = most conserved.
-    #
-    # IMPORTANT: structures often have non-contiguous residue numbering (gaps,
-    # insertion codes, modified termini), so we can't just use i+1 → resi.  We
-    # let PyMOL walk the CAs in selection order and map *its* resi → our score
-    # via a stored dict, then apply the mapping in a single alter pass.  This
-    # collapses ~2N socket round-trips into one.
-    n_residues = len(entropies)
-    min_entropy = min(entropies)
-    max_entropy = max(entropies)
-    entropy_range = max_entropy - min_entropy
-
-    scores: list[float] = []
-    for entropy in entropies:
-        if scale == "relative" and entropy_range > 0:
-            score = (1.0 - (entropy - min_entropy) / entropy_range) * 100.0
-        else:
-            score = (1.0 - entropy) * 100.0
-        scores.append(round(score, 2))
-
-    # One do block: zero out, push scores, build resi → score map by walking
-    # CAs in selection order, then alter all atoms in one pass.
-    apply_script = "\n".join(
-        [
-            f"alter {chain_sel}, b=0",
-            f"stored.cons_scores = {json.dumps(scores)}",
-            "stored.cons_map = {}",
-            "stored.cons_idx = 0",
-            (
-                f"iterate {chain_sel} and name CA, "
-                "stored.cons_map[resi] = stored.cons_scores[stored.cons_idx] "
-                "if stored.cons_idx < len(stored.cons_scores) else 0.0; "
-                "stored.cons_idx = stored.cons_idx + 1"
-            ),
-            f"alter {chain_sel}, b=stored.cons_map.get(resi, 0.0)",
-            f"rebuild {obj_name}",
-        ]
-    )
-    send_request("do", args=[apply_script])
-
-    # 6. Apply visualization
-    send_request("hide", args=["everything", obj_name])
-    send_request("show", args=["cartoon", obj_name])
-
-    # Spectrum: magenta (conserved, high b) → white → cyan (variable, low b)
-    send_request(
-        "do", args=[f"spectrum b, cyan_white_magenta, {chain_sel}, minimum=0, maximum=100"]
-    )
-
-    # Show other chains as gray ghost for context
-    other_chains_sel = f"({obj_name}) and polymer.protein and not chain {chain}"
-    send_request("color", args=["gray50", other_chains_sel])
-    send_request("set", args=["cartoon_transparency", "0.5", other_chains_sel])
-
-    send_request("do", args=["bg_color black"])
-    send_request("center", args=[obj_name])
-    send_request("do", args=[f"origin {obj_name}"])
-
-    scale_label = "relative" if scale == "relative" else "absolute"
-    return (
-        f"Showing conservation view for chain {chain} of {obj_name} ({scale_label} scale). "
-        f"Magenta = conserved, white = moderate, cyan = variable. "
-        f"MSA: {msa_note}, {n_residues} residue positions scored. "
-        f"Entropy range: {min_entropy:.3f} – {max_entropy:.3f}."
-    )
-
-
-@mcp.tool()
-def interface_view(obj_name: str, chain_a: str, chain_b: str) -> str:
-    """
-    Highlights the protein-protein binding interface between two chains.
-
-    Chain A shown in marine blue, chain B in salmon. Interface residues (within
-    4Å of the partner chain) shown as a solid surface patch with sticks.
-    H-bonds across the interface drawn as yellow dashes.
-
-    Args:
-        obj_name: PyMOL object name (e.g. "1abc")
-        chain_a: First chain ID (e.g. "A")
-        chain_b: Second chain ID (e.g. "B")
-    """
-    sel_a = f"({obj_name}) and chain {chain_a} and polymer.protein"
-    sel_b = f"({obj_name}) and chain {chain_b} and polymer.protein"
-    iface_a = f"byres ({sel_a} and ({sel_b} around 4))"
-    iface_b = f"byres ({sel_b} and ({sel_a} around 4))"
-
-    send_request("hide", args=["everything", obj_name])
-
-    # Both chains as semi-transparent cartoon
-    send_request("show", args=["cartoon", f"({obj_name}) and polymer.protein"])
-    send_request("color", args=["marine", sel_a])
-    send_request("color", args=["salmon", sel_b])
-    send_request("set", args=["cartoon_transparency", "0.3", f"({obj_name}) and polymer.protein"])
-
-    # Interface surface patches
-    send_request("show", args=["surface", iface_a])
-    send_request("show", args=["surface", iface_b])
-    send_request("color", args=["tv_blue", iface_a])
-    send_request("color", args=["tv_red", iface_b])
-    send_request("set", args=["transparency", "0.1", iface_a])
-    send_request("set", args=["transparency", "0.1", iface_b])
-
-    # Interface residues as sticks — sidechain + CA only (no backbone N, C, O)
-    iface_sticks = f"({iface_a} or {iface_b}) and not name N+C+O"
-    send_request("show", args=["sticks", iface_sticks])
-    send_request("do", args=[f"util.cbaw {iface_a}"])
-    send_request("do", args=[f"util.cbaw {iface_b}"])
-    send_request("color", args=["tv_blue", f"({iface_a}) and elem C"])
-    send_request("color", args=["tv_red", f"({iface_b}) and elem C"])
-
-    # Labels at CA — one per interface residue
-    iface_ca = f"({iface_a} or {iface_b}) and name CA"
-    send_request("label", args=[iface_ca, '"%s%s" % (resn, resi)'])
-    send_request("set", args=["label_color", "white"])
-    send_request("set", args=["label_size", "14"])
-
-    # H-bonds across the interface
-    send_request("do", args=["delete iface_hbonds"])
-    send_request("do", args=[f"distance iface_hbonds, ({sel_a}), ({sel_b}), 3.5, 2"])
-    send_request("color", args=["yellow", "iface_hbonds"])
-    send_request("hide", args=["labels", "iface_hbonds"])
-    send_request("set", args=["dash_gap", "0.3", "iface_hbonds"])
-    send_request("set", args=["dash_width", "3", "iface_hbonds"])
-
-    send_request("do", args=["bg_color black"])
-    send_request("center", args=[obj_name])
-    send_request("do", args=[f"origin {obj_name}"])
-
-    return (
-        f"Showing interface between chain {chain_a} (marine/blue) and chain {chain_b} "
-        f"(salmon/red) in {obj_name}. Cross-chain H-bonds stored as 'iface_hbonds'."
-    )
-
-
-@mcp.tool(name="as")
-def as_tool(representation: str, selection: str | None = "all") -> str:
-    """
-    Shows one representation while hiding all others for the specified selection
-    """
-    return _call("as", representation=representation, selection=selection)
-
-
-@mcp.tool()
-def putty_view(obj_name: str) -> str:
-    """
-    Visualizes protein flexibility using a putty (tube-width) representation.
-
-    The cartoon tube radius scales linearly with crystallographic B-factor:
-    thin/blue = rigid/ordered regions, thick/red = flexible/disordered regions.
-    A 70%-transparent surface is shown, also colored by B-factor.
-    Organic ligands are shown as sticks with yellow carbons. Black background.
-
-    Args:
-        obj_name: PyMOL object name (e.g. "1abc")
-    """
-    send_request("hide", args=["everything", obj_name])
-    send_request("show", args=["cartoon", f"({obj_name}) and polymer.protein"])
-    send_request("do", args=[f"cartoon putty, {obj_name}"])
-    send_request("spectrum", args=["b", "blue_white_red", f"({obj_name}) and polymer.protein"])
-    send_request("set", args=["cartoon_putty_scale_min", "0.3", obj_name])
-    send_request("set", args=["cartoon_putty_scale_max", "3.0", obj_name])
-    send_request("set", args=["cartoon_putty_transform", "0", obj_name])
-
-    # Transparent surface colored by B-factor
-    send_request("show", args=["surface", f"({obj_name}) and polymer.protein"])
-    send_request("spectrum", args=["b", "blue_white_red", f"({obj_name}) and polymer.protein"])
-    send_request("set", args=["transparency", "0.7", obj_name])
-
-    # Organic ligands as sticks with yellow carbons
-    send_request("show", args=["sticks", f"({obj_name}) and organic"])
-    send_request("do", args=[f"util.cbaw ({obj_name}) and organic"])
-    send_request("color", args=["yellow", f"({obj_name}) and organic and elem C"])
-
-    send_request("do", args=["bg_color black"])
-    send_request("orient", args=[obj_name])
-    return f"Putty view applied to {obj_name}. Tube width and color scale with B-factor (blue=rigid, red=flexible)."
-
-
-@mcp.tool()
-def hydrophobic_surface_view(obj_name: str) -> str:
-    """
-    Colors the molecular surface by amino acid hydrophobicity.
-
-    Orange = hydrophobic (ILE, VAL, LEU, PHE, MET, ALA, TRP, PRO),
-    white = polar (SER, THR, CYS, TYR, ASN, GLN, GLY),
-    sky blue = positively charged (ARG, LYS, HIS),
-    salmon = negatively charged (ASP, GLU).
-    A white cartoon is shown beneath a semi-transparent surface.
-    Organic ligands shown as sticks with yellow carbons.
-
-    Args:
-        obj_name: PyMOL object name (e.g. "1abc")
-    """
-    send_request("hide", args=["everything", obj_name])
-    send_request("show", args=["cartoon", f"({obj_name}) and polymer.protein"])
-    send_request("show", args=["surface", f"({obj_name}) and polymer.protein"])
-    send_request("do", args=[f"cartoon automatic, {obj_name}"])
-
-    # Color surface by residue hydrophobicity
-    send_request(
-        "color", args=["orange", f"({obj_name}) and (resn ILE+VAL+LEU+PHE+MET+ALA+TRP+PRO)"]
-    )
-    send_request("color", args=["white", f"({obj_name}) and (resn SER+THR+CYS+TYR+ASN+GLN+GLY)"])
-    send_request("color", args=["skyblue", f"({obj_name}) and (resn ARG+LYS+HIS)"])
-    send_request("color", args=["salmon", f"({obj_name}) and (resn ASP+GLU)"])
-
-    # White cartoon visible beneath surface
-    send_request("set", args=["cartoon_color", "white", obj_name])
-    send_request("set", args=["transparency", "0.15", obj_name])
-
-    # Organic ligands as sticks with yellow carbons
-    send_request("show", args=["sticks", f"({obj_name}) and organic"])
-    send_request("do", args=[f"util.cbaw ({obj_name}) and organic"])
-    send_request("color", args=["yellow", f"({obj_name}) and organic and elem C"])
-
-    send_request("do", args=["bg_color black"])
-    send_request("orient", args=[obj_name])
-    return f"Hydrophobic surface view applied to {obj_name}. Orange=hydrophobic, white=polar, skyblue=positive, salmon=negative."
-
-
-@mcp.tool()
-def electrostatic_view(obj_name: str, mode: str = "atomic") -> str:
-    """
-    Colors the molecular surface by approximate residue-based electrostatics.
-
-    Surface is colored red→white→blue via a B-factor spectrum. A white cartoon
-    is shown beneath a semi-transparent surface. Organic ligands shown as sticks
-    with yellow carbons.
-
-    For a more accurate Poisson-Boltzmann electrostatic surface, use
-    poisson_boltzmann_view (requires APBS and PDB2PQR to be installed).
-
-    Args:
-        obj_name: PyMOL object name (e.g. "1abc")
-        mode: Charge assignment strategy.
-            "atomic" (default) — charges assigned only to terminal charged atoms
-            (e.g. ARG NH1/NH2/NE, LYS NZ, ASP OD1/OD2, GLU OE1/OE2, HIS ND1/NE2).
-            Produces localized color at charge centers with natural falloff to white.
-            "residue" — charges assigned uniformly to all atoms in each charged residue.
-            Produces saturated patches; useful for quickly locating charged regions.
-    """
-    send_request("hide", args=["everything", obj_name])
-    send_request("show", args=["cartoon", f"({obj_name}) and polymer.protein"])
-    send_request("show", args=["surface", f"({obj_name}) and polymer.protein"])
-    send_request("do", args=[f"cartoon automatic, {obj_name}"])
-
-    # Zero out all B-factors first
-    send_request("do", args=[f"alter ({obj_name}) and polymer.protein, b=0.0"])
-
-    if mode == "atomic":
-        # Assign charges only to the terminal charged atoms (actual charge centers)
-        send_request("do", args=[f"alter ({obj_name}) and resn ARG and name NH1+NH2+NE, b=1.0"])
-        send_request("do", args=[f"alter ({obj_name}) and resn LYS and name NZ, b=1.0"])
-        send_request("do", args=[f"alter ({obj_name}) and resn HIS and name ND1+NE2, b=0.3"])
-        send_request("do", args=[f"alter ({obj_name}) and resn ASP and name OD1+OD2, b=-1.0"])
-        send_request("do", args=[f"alter ({obj_name}) and resn GLU and name OE1+OE2, b=-1.0"])
-    else:
-        # Assign charges uniformly to all atoms in each charged residue
-        send_request("do", args=[f"alter ({obj_name}) and resn ARG, b=1.0"])
-        send_request("do", args=[f"alter ({obj_name}) and resn LYS, b=0.9"])
-        send_request("do", args=[f"alter ({obj_name}) and resn HIS, b=0.3"])
-        send_request("do", args=[f"alter ({obj_name}) and resn ASP, b=-0.9"])
-        send_request("do", args=[f"alter ({obj_name}) and resn GLU, b=-0.8"])
-
-    send_request("rebuild")
-    send_request(
-        "do",
-        args=[
-            f"spectrum b, red_white_blue, ({obj_name}) and polymer.protein, minimum=-1, maximum=1"
-        ],
-    )
-
-    # White cartoon visible beneath surface
-    send_request("set", args=["cartoon_color", "white", obj_name])
-    send_request("set", args=["transparency", "0.15", obj_name])
-
-    # Organic ligands as sticks with yellow carbons
-    send_request("show", args=["sticks", f"({obj_name}) and organic"])
-    send_request("do", args=[f"util.cbaw ({obj_name}) and organic"])
-    send_request("color", args=["yellow", f"({obj_name}) and organic and elem C"])
-
-    send_request("do", args=["bg_color black"])
-    send_request("orient", args=[obj_name])
-    return f"Electrostatic view applied to {obj_name} (mode={mode}). Red=negative, white=neutral, blue=positive (pKa-based approximation)."
-
-
-@mcp.tool()
-def poisson_boltzmann_view(obj_name: str) -> str:
-    """
-    Colors the molecular surface by true Poisson-Boltzmann electrostatic potential.
-
-    Runs PDB2PQR (AMBER force field, pH 7.0) then APBS to compute the full
-    electrostatic potential map. Surface is colored red→white→blue over the
-    range ±20 kT/e. A white cartoon is shown beneath a semi-transparent surface.
-    Organic ligands shown as sticks with yellow carbons.
-
-    Requires APBS and PDB2PQR to be installed on the system:
-        brew install brewsci/bio/apbs
-        pip install pdb2pqr
-
-    Args:
-        obj_name: PyMOL object name (e.g. "1abc")
-    """
-    import os
-    import subprocess
-    import tempfile
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        pdb_path = os.path.join(tmpdir, f"{obj_name}.pdb")
-        pqr_path = os.path.join(tmpdir, f"{obj_name}.pqr")
-        apbs_in = os.path.join(tmpdir, f"{obj_name}.in")
-        dx_path = pqr_path + ".dx"
-
-        # Save protein from PyMOL.  Writing a big assembly can outrun the
-        # default socket timeout, so allow longer and check the result — an
-        # unnoticed failure here surfaces as a baffling PDB2PQR error about a
-        # file that was never written.
-        save_res = send_request(
-            "do", args=[f"save {pdb_path}, ({obj_name}) and polymer.protein"], timeout=120.0
-        )
-        if save_res.get("status") == "error":
-            return f"Error saving {obj_name} for electrostatics: {save_res.get('error')}"
-        if not os.path.exists(pdb_path):
-            return (
-                f"PyMOL did not write {pdb_path}. The bridge and PyMOL must run on the "
-                f"same machine for poisson_boltzmann_view to exchange files."
-            )
-
-        # PDB2PQR: assign charges/radii
-        try:
-            result = subprocess.run(
-                [
-                    "pdb2pqr",
-                    "--ff=AMBER",
-                    f"--apbs-input={apbs_in}",
-                    "--with-ph=7.0",
-                    pdb_path,
-                    pqr_path,
-                ],
-                capture_output=True,
-                text=True,
-                timeout=_PB_SUBPROCESS_TIMEOUT,
-            )
-        except FileNotFoundError:
-            return "PDB2PQR not found on PATH. Install it with: pip install pdb2pqr"
-        except subprocess.TimeoutExpired:
-            return f"PDB2PQR timed out after {_PB_SUBPROCESS_TIMEOUT}s."
-        if result.returncode != 0:
-            return f"PDB2PQR failed: {result.stderr[-500:]}"
-
-        # APBS: compute electrostatic potential
-        try:
-            result = subprocess.run(
-                ["apbs", apbs_in],
-                capture_output=True,
-                text=True,
-                cwd=tmpdir,
-                timeout=_PB_SUBPROCESS_TIMEOUT,
-            )
-        except FileNotFoundError:
-            return "APBS not found on PATH. Install it with: brew install brewsci/bio/apbs"
-        except subprocess.TimeoutExpired:
-            return (
-                f"APBS timed out after {_PB_SUBPROCESS_TIMEOUT}s. Large structures can "
-                f"exceed this; raise MCPYMOL_PB_TIMEOUT to allow longer."
-            )
-        if result.returncode != 0:
-            return f"APBS failed: {result.stderr[-500:]}"
-
-        if not os.path.exists(dx_path):
-            return "APBS did not produce a .dx map. Check APBS output."
-
-        # Load map and apply to surface
-        send_request("do", args=[f"load {dx_path}, {obj_name}_esp_map"])
-        send_request(
-            "do",
-            args=[
-                f"ramp_new {obj_name}_esp_ramp, {obj_name}_esp_map, [-20, 0, 20], [red, white, blue]"
-            ],
-        )
-
-        send_request("hide", args=["everything", obj_name])
-        send_request("show", args=["cartoon", f"({obj_name}) and polymer.protein"])
-        send_request("show", args=["surface", f"({obj_name}) and polymer.protein"])
-        send_request("do", args=[f"cartoon automatic, {obj_name}"])
-        send_request("set", args=["cartoon_color", "white", obj_name])
-        send_request("set", args=["surface_color", f"{obj_name}_esp_ramp", obj_name])
-        send_request("set", args=["transparency", "0.15", obj_name])
-
-        # Organic ligands as sticks with yellow carbons
-        send_request("show", args=["sticks", f"({obj_name}) and organic"])
-        send_request("do", args=[f"util.cbaw ({obj_name}) and organic"])
-        send_request("color", args=["yellow", f"({obj_name}) and organic and elem C"])
-
-        send_request("do", args=["bg_color black"])
-        send_request("orient", args=[obj_name])
-
-    return f"Poisson-Boltzmann electrostatic surface applied to {obj_name}. Red=negative, white=neutral, blue=positive (±20 kT/e)."
-
-
-@mcp.tool()
-def crosslink_view(obj_name: str) -> str:
-    """
-    Highlights structural cross-links: disulfide bonds, metals, and their coordination.
-
-    Protein backbone shown as a thin grey cartoon. Cysteine side chains (CA→CB→SG)
-    shown as yellow sticks, labeled by residue. Disulfide bonds drawn as yellow
-    dashes. Metal ions shown as orange spheres. Metal coordination bonds drawn
-    as dashed lines to nearby protein atoms. Black background.
-
-    Args:
-        obj_name: PyMOL object name (e.g. "1abc")
-    """
-    send_request("hide", args=["everything", obj_name])
-    send_request("show", args=["cartoon", f"({obj_name}) and polymer.protein"])
-    send_request("do", args=[f"cartoon automatic, {obj_name}"])
-    send_request("color", args=["grey70", f"({obj_name}) and polymer.protein"])
-    send_request("set", args=["cartoon_tube_radius", "0.2", obj_name])
-
-    # Cysteine side chains: CA→CB→SG as yellow sticks
-    cys_sc = f"({obj_name}) and resn CYS and (name CA+CB+SG)"
-    send_request("show", args=["sticks", cys_sc])
-    send_request("color", args=["yellow", cys_sc])
-
-    # Label each CYS at CA
-    send_request("label", args=[f"({obj_name}) and resn CYS and name CA", '"%s%s" % (resn, resi)'])
-    send_request("set", args=["label_color", "white"])
-    send_request("set", args=["label_size", "14"])
-
-    # Disulfide bonds: SG–SG distances ≤ 2.5 Å
-    send_request("do", args=[f"delete {obj_name}_disulfides"])
-    send_request(
-        "do",
-        args=[
-            f"distance {obj_name}_disulfides, ({obj_name}) and resn CYS and name SG, "
-            f"({obj_name}) and resn CYS and name SG, 2.5"
-        ],
-    )
-    send_request("color", args=["yellow", f"{obj_name}_disulfides"])
-    send_request("hide", args=["labels", f"{obj_name}_disulfides"])
-    send_request("set", args=["dash_width", "4", f"{obj_name}_disulfides"])
-    send_request("set", args=["dash_gap", "0.1", f"{obj_name}_disulfides"])
-
-    # Metal ions as orange spheres
-    send_request("show", args=["spheres", f"({obj_name}) and metals"])
-    send_request("color", args=["orange", f"({obj_name}) and metals"])
-    send_request("set", args=["sphere_scale", "0.5", f"({obj_name}) and metals"])
-
-    # Metal coordination bonds
-    send_request("do", args=[f"delete {obj_name}_metalcoord"])
-    send_request(
-        "do",
-        args=[
-            f"distance {obj_name}_metalcoord, ({obj_name}) and metals, "
-            f"({obj_name}) and polymer.protein and (name N+O+S), 2.8"
-        ],
-    )
-    send_request("color", args=["orange", f"{obj_name}_metalcoord"])
-    send_request("hide", args=["labels", f"{obj_name}_metalcoord"])
-    send_request("set", args=["dash_width", "3", f"{obj_name}_metalcoord"])
-    send_request("set", args=["dash_gap", "0.2", f"{obj_name}_metalcoord"])
-
-    send_request("do", args=["bg_color black"])
-    send_request("orient", args=[obj_name])
-    return f"Crosslink view applied to {obj_name}. Yellow=disulfide bonds (CYS), orange=metal coordination."
-
-
-@mcp.tool()
-def pocket_view(obj_name: str, resn: str) -> str:
-    """
-    Visualizes the binding pocket cavity around a ligand as a colored surface.
-
-    The pocket (all residues within 5 Å of the ligand) is shown as a
-    semi-transparent surface colored by chemical character: orange=hydrophobic,
-    white=polar, skyblue=positive, salmon=negative. Pocket residue sidechains
-    are shown as sticks. The ligand is shown as yellow sticks. H-bonds between
-    the ligand and pocket are drawn as cyan dashes. The protein backbone is
-    shown as a thin grey cartoon for context.
-
-    Args:
-        obj_name: PyMOL object name (e.g. "1abc")
-        resn: Ligand residue name (e.g. "ATP", "LIG", "ANP")
-    """
-    lig = f"({obj_name}) and resn {resn}"
-    pocket_sel = f"({obj_name}) and polymer.protein and byres ({lig} around 5)"
-
-    # Thin grey cartoon for whole protein
-    send_request("hide", args=["everything", obj_name])
-    send_request("show", args=["cartoon", f"({obj_name}) and polymer.protein"])
-    send_request("do", args=[f"cartoon automatic, {obj_name}"])
-    send_request("color", args=["grey60", f"({obj_name}) and polymer.protein"])
-    send_request("set", args=["cartoon_tube_radius", "0.2", obj_name])
-
-    # Pocket cavity surface colored by chemical character
-    send_request("show", args=["surface", pocket_sel])
-    _hydrophobic = "ALA+VAL+LEU+ILE+MET+PHE+TRP+PRO"
-    _polar = "GLY+SER+THR+TYR+CYS+ASN+GLN"
-    _positive = "LYS+ARG+HIS"
-    _negative = "ASP+GLU"
-    send_request("color", args=["orange", f"({pocket_sel}) and resn {_hydrophobic}"])
-    send_request("color", args=["white", f"({pocket_sel}) and resn {_polar}"])
-    send_request("color", args=["skyblue", f"({pocket_sel}) and resn {_positive}"])
-    send_request("color", args=["salmon", f"({pocket_sel}) and resn {_negative}"])
-    send_request("set", args=["transparency", "0.25", obj_name])
-
-    # Pocket residue sidechains as sticks (element coloring)
-    send_request("show", args=["sticks", f"({pocket_sel}) and not name N+C+O"])
-    send_request("do", args=[f"util.cbaw ({pocket_sel})"])
-    # Re-apply surface colors after util.cbaw recolored atoms
-    send_request("color", args=["orange", f"({pocket_sel}) and resn {_hydrophobic}"])
-    send_request("color", args=["white", f"({pocket_sel}) and resn {_polar}"])
-    send_request("color", args=["skyblue", f"({pocket_sel}) and resn {_positive}"])
-    send_request("color", args=["salmon", f"({pocket_sel}) and resn {_negative}"])
-
-    # Labels at CA
-    send_request("label", args=[f"({pocket_sel}) and name CA", '"%s%s" % (resn, resi)'])
-    send_request("set", args=["label_color", "white"])
-    send_request("set", args=["label_size", "12"])
-
-    # Ligand as yellow sticks
-    send_request("show", args=["sticks", lig])
-    send_request("do", args=[f"util.cbaw {lig}"])
-    send_request("color", args=["yellow", f"{lig} and elem C"])
-
-    # H-bonds between ligand and pocket
-    send_request("do", args=[f"delete {obj_name}_pocket_hbonds"])
-    send_request(
-        "do",
-        args=[
-            f"distance {obj_name}_pocket_hbonds, ({lig}) and (elem N or elem O), "
-            f"({pocket_sel}) and (elem N or elem O), 3.5"
-        ],
-    )
-    send_request("color", args=["cyan", f"{obj_name}_pocket_hbonds"])
-    send_request("hide", args=["labels", f"{obj_name}_pocket_hbonds"])
-    send_request("set", args=["dash_width", "2.5", f"{obj_name}_pocket_hbonds"])
-
-    send_request("do", args=["bg_color black"])
-    send_request("zoom", args=[lig, "6"])
-    return (
-        f"Pocket view applied: {resn} binding site in {obj_name}. "
-        f"Orange=hydrophobic, white=polar, skyblue=positive, salmon=negative. "
-        f"Cyan dashes=H-bonds."
-    )
-
-
-@mcp.tool()
-def pharmacophore_view(obj_name: str, resn: str) -> str:
-    """
-    Colors a ligand by pharmacophore feature type.
-
-    The ligand is shown as sticks color-coded by pharmacophore property:
-    violet=ring/aromatic carbon, yellow=aliphatic carbon,
-    skyblue=nitrogen (H-bond donor/acceptor), salmon=oxygen (H-bond acceptor),
-    gold=sulfur, palegreen=halogen (F/Cl/Br/I). H-bonds to protein are shown
-    as cyan dashes. Interacting residue sidechains are shown as element-colored
-    sticks with CA labels. The pocket is shown as a semi-transparent grey
-    surface for cavity context. The protein backbone is shown as a thin grey
-    cartoon.
-
-    Args:
-        obj_name: PyMOL object name (e.g. "1abc")
-        resn: Ligand residue name (e.g. "ATP", "LIG", "ANP")
-    """
-    lig = f"({obj_name}) and resn {resn}"
-    pocket_sel = f"({obj_name}) and polymer.protein and byres ({lig} around 5)"
-
-    # Thin grey cartoon
-    send_request("hide", args=["everything", obj_name])
-    send_request("show", args=["cartoon", f"({obj_name}) and polymer.protein"])
-    send_request("do", args=[f"cartoon automatic, {obj_name}"])
-    send_request("color", args=["grey60", f"({obj_name}) and polymer.protein"])
-    send_request("set", args=["cartoon_tube_radius", "0.2", obj_name])
-
-    # Pocket semi-transparent surface for cavity context
-    send_request("show", args=["surface", pocket_sel])
-    send_request("color", args=["grey50", pocket_sel])
-    send_request("set", args=["transparency", "0.6", obj_name])
-
-    # Pocket sidechain sticks (element coloring, grey surface kept separate)
-    send_request("show", args=["sticks", f"({pocket_sel}) and not name N+C+O"])
-    send_request("do", args=[f"util.cbaw ({pocket_sel})"])
-    send_request("set", args=["stick_radius", "0.15", pocket_sel])
-    # Override surface color to grey after util.cbaw recolored atoms by element
-    send_request("set", args=["surface_color", "grey50", pocket_sel])
-
-    # Labels at CA
-    send_request("label", args=[f"({pocket_sel}) and name CA", '"%s%s" % (resn, resi)'])
-    send_request("set", args=["label_color", "white"])
-    send_request("set", args=["label_size", "12"])
-
-    # Ligand sticks
-    send_request("show", args=["sticks", lig])
-    send_request("set", args=["stick_radius", "0.2", lig])
-
-    # Color by pharmacophore feature type
-    # inring catches all ring carbons (PyMOL's 'aromatic' misses some due to bond-order perception)
-    send_request("color", args=["violet", f"{lig} and elem C and inring"])  # ring/aromatic
-    send_request("color", args=["yellow", f"{lig} and elem C and not inring"])  # aliphatic
-    send_request("color", args=["skyblue", f"{lig} and elem N"])  # H-bond donor/acceptor
-    send_request("color", args=["salmon", f"{lig} and elem O"])  # H-bond acceptor
-    send_request("color", args=["gold", f"{lig} and elem S"])  # sulfur
-    send_request(
-        "color", args=["palegreen", f"{lig} and (elem F or elem Cl or elem Br or elem I)"]
-    )  # halogen
-
-    # H-bonds to protein
-    send_request("do", args=[f"delete {obj_name}_pharm_hbonds"])
-    send_request(
-        "do",
-        args=[
-            f"distance {obj_name}_pharm_hbonds, ({lig}) and (elem N or elem O or elem F), "
-            f"({pocket_sel}) and (elem N or elem O), 3.5"
-        ],
-    )
-    send_request("color", args=["cyan", f"{obj_name}_pharm_hbonds"])
-    send_request("hide", args=["labels", f"{obj_name}_pharm_hbonds"])
-    send_request("set", args=["dash_width", "2.5", f"{obj_name}_pharm_hbonds"])
-
-    send_request("do", args=["bg_color black"])
-    send_request("zoom", args=[lig, "6"])
-    return (
-        f"Pharmacophore view applied to {resn} in {obj_name}. "
-        f"Violet=ring/aromatic, yellow=aliphatic, skyblue=N (donor/acceptor), "
-        f"salmon=O (acceptor), gold=S, palegreen=halogen. Cyan dashes=H-bonds."
-    )
-
-
-@mcp.tool()
-def mutation_view(obj_name: str, mutations: str) -> str:
-    """
-    Highlights mutated residues on the protein structure.
-
-    Given a comma-separated list of mutations in standard notation (e.g.
-    "A123G,V45L,T200S"), the mutated residues are shown as magenta sticks
-    and labeled. Nearby residues (within 4 Å) are shown as thin grey sticks
-    for packing context. The protein backbone is shown as a grey cartoon.
-    Organic ligands are shown as yellow sticks.
-
-    Mutation format: <wildtype_aa><resi><mutant_aa>, e.g. "A123G" (Ala→Gly
-    at position 123). Chain can optionally be prefixed: "A:A123G".
-
-    Args:
-        obj_name: PyMOL object name (e.g. "1abc")
-        mutations: Comma-separated mutation list (e.g. "A123G,V45L,T200S")
-    """
-    import re
-
-    mut_list = [m.strip() for m in mutations.split(",")]
-    resi_list = []
-    parsed = []
-    for m in mut_list:
-        match = re.search(r"(\d+)", m)
-        if match:
-            resi_list.append(match.group(1))
-            parsed.append(m)
-
-    if not resi_list:
-        return f"No valid mutations parsed from: {mutations}. Expected format: A123G,V45L"
-
-    resi_sel = "+".join(resi_list)
-    mut_residues = f"({obj_name}) and polymer.protein and resi {resi_sel}"
-
-    # Grey cartoon for whole protein
-    send_request("hide", args=["everything", obj_name])
-    send_request("show", args=["cartoon", f"({obj_name}) and polymer.protein"])
-    send_request("do", args=[f"cartoon automatic, {obj_name}"])
-    send_request("color", args=["grey70", f"({obj_name}) and polymer.protein"])
-
-    # Mutated residues: magenta sticks (sidechain only)
-    send_request("show", args=["sticks", f"({mut_residues}) and not name N+C+O"])
-    send_request("color", args=["magenta", mut_residues])
-
-    # Labels at CA
-    send_request("label", args=[f"({mut_residues}) and name CA", '"%s%s" % (resn, resi)'])
-    send_request("set", args=["label_color", "white"])
-    send_request("set", args=["label_size", "14"])
-
-    # Context: nearby residues as thin element-colored sticks
-    context_sel = (
-        f"({obj_name}) and polymer.protein and byres ({mut_residues} around 4) "
-        f"and not resi {resi_sel}"
-    )
-    send_request("show", args=["sticks", f"({context_sel}) and not name N+C+O"])
-    send_request("do", args=[f"util.cbaw ({context_sel})"])
-    send_request("set", args=["stick_radius", "0.1", context_sel])
-
-    # Organic ligands as yellow sticks
-    send_request("show", args=["sticks", f"({obj_name}) and organic"])
-    send_request("do", args=[f"util.cbaw ({obj_name}) and organic"])
-    send_request("color", args=["yellow", f"({obj_name}) and organic and elem C"])
-
-    send_request("do", args=["bg_color black"])
-    send_request("zoom", args=[mut_residues, "8"])
-    return f"Mutation view applied to {obj_name}. Magenta = {', '.join(parsed)}."
-
-
-@mcp.tool()
-def textbook_view(obj_name: str) -> str:
-    """
-    Configures PyMOL for a crisp, cel-shaded illustrative look ("Textbook Illustration").
-
-    This view transforms the structure into a bold, 2D illustrative style with sharp
-    black outlines, ideal for presentations or textbook-style diagrams. It hides
-    the interior complexities, showing a solid white cartoon and surface with heavy
-    black edge contours. Ligands are styled similarly as opaque white sticks with outlines.
-
-    Args:
-        obj_name: PyMOL object name (e.g. "1abc")
-    """
-    send_request("hide", args=["everything", obj_name])
-
-    # White background for print/textbook style
-    send_request("do", args=["bg_color white"])
-
-    # Show main structure as white cartoon and surface
-    send_request("show", args=["cartoon", f"({obj_name}) and polymer.protein"])
-    send_request("show", args=["surface", f"({obj_name}) and polymer.protein"])
-    send_request("color", args=["white", f"({obj_name}) and polymer.protein"])
-
-    # Ligands as thick white sticks
-    org_sel = f"({obj_name}) and organic"
-    send_request("show", args=["sticks", org_sel])
-    send_request("color", args=["white", org_sel])
-    send_request("set", args=["stick_radius", "0.3", org_sel])
-
-    # The "cel shading" effect
-    send_request("set", args=["ray_trace_mode", "3"])  # 3 = comic-book style coloring
-    send_request("set", args=["ray_trace_depth_factor", "0.4"])
-    send_request("set", args=["ray_trace_disco_factor", "1.0"])
-
-    # Heavy contour lines
-    send_request("set", args=["antialias", "2"])
-
-    # Improve surface appearance for cel shading
-    send_request("set", args=["transparency", "0.0", obj_name])
-    send_request("set", args=["surface_quality", "1", obj_name])
-
-    send_request("orient", args=[obj_name])
-    return f"Textbook Illustration view applied to {obj_name}. Note: the full cel-shaded outline effect requires rendering (use the 'ray' command)."
-
-
-@mcp.tool()
-def cinematic_view(obj_name: str) -> str:
-    """
-    Configures PyMOL for a depth-cued, cinematic look with dramatic lighting.
-
-    This view emphasizes volume and scale using deep shadows, fog, and depth-cueing.
-    The core of the structure emerges from a dark background, making massive
-    complexes (like ribosomes or viral capsids) look dramatic and imposing.
-    Protein uses standard coloring but with altered material properties.
-
-    Args:
-        obj_name: PyMOL object name (e.g. "1abc")
-    """
-    # Restore basic representation if not present
-    send_request("show", args=["cartoon", f"({obj_name}) and polymer.protein"])
-    send_request("show", args=["surface", f"({obj_name}) and polymer.protein"])
-
-    # Dramatic deep black background
-    send_request("do", args=["bg_color black"])
-
-    # Enable fog and depth cueing
-    send_request("set", args=["depth_cue", "1"])
-    send_request("set", args=["fog", "1"])
-    send_request("set", args=["fog_start", "0.45"])  # Fog starts mid-structure
-    send_request("set", args=["fog_color", "black"])
-
-    # Cinematic lighting and shadows
-    send_request("set", args=["light_count", "2"])
-    send_request("set", args=["spec_reflect", "0.3"])  # Slightly glossy
-    send_request("set", args=["ray_shadows", "1"])
-    send_request("set", args=["ray_shadow_decay_factor", "0.1"])
-    send_request("set", args=["ray_shadow_decay_range", "3"])
-
-    # Enhance the surface material
-    send_request("set", args=["transparency", "0.0", obj_name])
-
-    return f"Cinematic view applied to {obj_name}. Fog and depth-cueing enabled. Use the 'ray' command to see the full dramatic shadow effect."
-
-
-@mcp.tool()
-def pointillist_view(obj_name: str) -> str:
-    """
-    Renders the structure as an artistic, abstract pointillist/starfield cloud.
-
-    The continuous surface is replaced by thousands of individual dots representing
-    the solvent-accessible surface, resembling a galaxy or pointillist painting.
-    The protein backbone is hidden to emphasize the scattered volume. Ligands
-    are shown as bright yellow spheres (stars) embedded in the cloud.
-
-    Args:
-        obj_name: PyMOL object name (e.g. "1abc")
-    """
-    send_request("hide", args=["everything", obj_name])
-    send_request("do", args=["bg_color black"])
-
-    # The "Starfield" point cloud
-    send_request("show", args=["dots", f"({obj_name}) and polymer.protein"])
-    send_request("do", args=[f"cartoon automatic, {obj_name}"])  # Default color recovery
-
-    # Increase dot density for the pointillist effect
-    send_request("set", args=["dot_density", "4"])
-    send_request("set", args=["dot_width", "2"])
-
-    # Optional: Light outline of the backbone trace
-    send_request("show", args=["ribbon", f"({obj_name}) and polymer.protein"])
-    send_request("set", args=["ribbon_width", "0.5"])
-    send_request("color", args=["grey30", f"({obj_name}) and polymer.protein and ribbon"])
-
-    # Ligands as bright stars
-    org_sel = f"({obj_name}) and organic"
-    send_request("show", args=["spheres", org_sel])
-    send_request("color", args=["yellow", org_sel])
-    send_request("set", args=["sphere_scale", "0.4", org_sel])
-
-    send_request("orient", args=[obj_name])
-    return f"Pointillist/Starfield view applied to {obj_name}."
-
-
-@mcp.tool(name="set")
-def set_setting(setting: str, value: str, selection: str | None = None) -> str:
-    """
-    Sets a PyMOL setting to a specified value
-    """
-    return _call("set", setting=setting, value=value, selection=selection)
-
-
-@mcp.tool()
-def cartoon(item_type: str, selection: str | None = "all") -> str:
-    """
-    Sets the cartoon type for the specified selection
-    """
-    return _call("cartoon", item_type=item_type, selection=selection)
-
-
-@mcp.tool()
-def spectrum(
-    expression: str, palette: str | None = "rainbow", selection: str | None = "all"
-) -> str:
-    """
-    Colors selection in a spectrum
-    """
-    return _call("spectrum", expression=expression, palette=palette, selection=selection)
-
-
-@mcp.tool()
-def label(selection: str, expression: str | None = "name") -> str:
-    """
-    Adds labels to atoms in the selection
-    """
-    return _call("label", selection=selection, expression=expression)
-
-
-@mcp.tool()
-def angle(
-    name: str | None = None,
-    selection1: str | None = "(pk1)",
-    selection2: str | None = "(pk2)",
-    selection3: str | None = "(pk3)",
-) -> str:
-    """
-    Measures the angle between three selections
-    """
-    return _call(
-        "angle", name=name, selection1=selection1, selection2=selection2, selection3=selection3
-    )
-
-
-@mcp.tool()
-def dihedral(
-    name: str | None = None,
-    selection1: str | None = "(pk1)",
-    selection2: str | None = "(pk2)",
-    selection3: str | None = "(pk3)",
-    selection4: str | None = "(pk4)",
-) -> str:
-    """
-    Measures the dihedral angle between four selections
-    """
-    return _call(
-        "dihedral",
-        name=name,
-        selection1=selection1,
-        selection2=selection2,
-        selection3=selection3,
-        selection4=selection4,
-    )
-
-
-@mcp.tool()
-def center(selection: str | None = "all") -> str:
-    """
-    Centers the view on a selection
-    """
-    return _call("center", selection=selection)
-
-
-@mcp.tool()
-def orient(selection: str | None = "all") -> str:
-    """
-    Orients the view to align with principal axes of the selection
-    """
-    return _call("orient", selection=selection)
-
-
-@mcp.tool()
-def zoom(selection: str | None = "all", buffer: str | None = "5") -> str:
-    """
-    Zooms the view on a selection
-    """
-    return _call("zoom", selection=selection, buffer=buffer)
-
-
-@mcp.tool()
-def reset(obj: str | None = None) -> str:
-    """
-    Resets the view, optionally resetting an object's matrix
-    """
-    return _call("reset", obj=obj)
-
-
-@mcp.tool()
-def turn(axis: str, angle: str | None = "90") -> str:
-    """
-    Rotates the camera around an axis
-    """
-    return _call("turn", axis=axis, angle=angle)
-
-
-@mcp.tool()
-def move(axis: str, distance: str | None = "1") -> str:
-    """
-    Moves the camera along an axis
-    """
-    return _call("move", axis=axis, distance=distance)
-
-
-@mcp.tool()
-def clip(mode: str, distance: str | None = "1") -> str:
-    """
-    Adjusts the clipping planes
-    """
-    return _call("clip", mode=mode, distance=distance)
-
-
-@mcp.tool()
-def save(filename: str, selection: str | None = "all", state: str | None = "-1") -> str:
-    """
-    Saves data to a file
-    """
-    return _call(
-        "save", _timeout=_SLOW_OP_TIMEOUT, filename=filename, selection=selection, state=state
-    )
-
-
-@mcp.tool()
-def png(filename: str, options: str | None = None) -> str:
-    """
-    Saves a PNG image
-    """
-    return _call("png", _timeout=_SLOW_OP_TIMEOUT, filename=filename, options=options)
-
-
-@mcp.tool()
-def deselect() -> str:
-    """
-    Clears the current selection
-    """
-    return _call("deselect")
-
-
-@mcp.tool()
-def create(name: str, selection: str | None = "all", source_state: str | None = "1") -> str:
-    """
-    Creates a new object from a selection
-    """
-    return _call("create", name=name, selection=selection, source_state=source_state)
-
-
-@mcp.tool()
-def extract(name: str, selection: str | None = "all") -> str:
-    """
-    Extracts a selection to a new object
-    """
-    return _call("extract", name=name, selection=selection)
-
-
-@mcp.tool()
-def delete(name: str) -> str:
-    """
-    Deletes objects or selections
-    """
-    return _call("delete", name=name)
-
-
-@mcp.tool()
-def align(mobile: str, target: str | None = "all", options: str | None = None) -> str:
-    """
-    Aligns one selection to another
-    """
-    return _call("align", mobile=mobile, target=target, options=options)
-
-
-@mcp.tool(name="super")
-def super_tool(mobile: str, target: str | None = "all", options: str | None = None) -> str:
-    """
-    Superimposes one selection onto another
-    """
-    return _call("super", mobile=mobile, target=target, options=options)
-
-
-@mcp.tool()
-def intra_fit(selection: str) -> str:
-    """
-    Fits all states within an object
-    """
-    return _call("intra_fit", selection=selection)
-
-
-@mcp.tool()
-def intra_rms(selection: str) -> str:
-    """
-    Calculates RMSD between states within an object
-    """
-    return _call("intra_rms", selection=selection)
-
-
-@mcp.tool()
-def alter(selection: str, expression: str) -> str:
-    """
-    Alters atomic properties in a selection
-    """
-    return _call("alter", selection=selection, expression=expression)
-
-
-@mcp.tool()
-def alter_state(state: str, selection: str, expression: str) -> str:
-    """
-    Alters atomic coordinates in a state
-    """
-    return _call("alter_state", state=state, selection=selection, expression=expression)
-
-
-@mcp.tool()
-def h_add(selection: str | None = "all") -> str:
-    """
-    Adds hydrogens to a selection
-    """
-    return _call("h_add", selection=selection)
-
-
-@mcp.tool()
-def h_fill(selection: str | None = "all") -> str:
-    """
-    Adds hydrogens and adjusts valences
-    """
-    return _call("h_fill", selection=selection)
-
-
-@mcp.tool()
-def bond(atom1: str, atom2: str, order: str | None = "1") -> str:
-    """
-    Creates a bond between two atoms
-    """
-    return _call("bond", atom1=atom1, atom2=atom2, order=order)
-
-
-@mcp.tool()
-def unbond(atom1: str, atom2: str) -> str:
-    """
-    Removes a bond between two atoms
-    """
-    return _call("unbond", atom1=atom1, atom2=atom2)
-
-
-@mcp.tool()
-def rebuild(selection: str | None = "all") -> str:
-    """
-    Regenerates all displayed geometry
-    """
-    return _call("rebuild", selection=selection)
-
-
-@mcp.tool()
-def refresh() -> str:
-    """
-    Refreshes the display
-    """
-    return _call("refresh")
-
-
-@mcp.tool()
-def util_cbc(selection: str | None = "all") -> str:
-    """
-    Colors by chain (Color By Chain)
-    """
-    return _call("util.cbc", selection=selection)
-
-
-@mcp.tool()
-def util_cbaw(selection: str | None = "all") -> str:
-    """
-    Colors by atom, white carbons (Color By Atom, White)
-    """
-    return _call("util.cbaw", selection=selection)
-
-
-@mcp.tool()
-def util_cbag(selection: str | None = "all") -> str:
-    """
-    Colors by atom, green carbons (Color By Atom, Green)
-    """
-    return _call("util.cbag", selection=selection)
-
-
-@mcp.tool()
-def util_cbac(selection: str | None = "all") -> str:
-    """
-    Colors by atom, cyan carbons (Color By Atom, Cyan)
-    """
-    return _call("util.cbac", selection=selection)
-
-
-@mcp.tool()
-def util_cbam(selection: str | None = "all") -> str:
-    """
-    Colors by atom, magenta carbons (Color By Atom, Magenta)
-    """
-    return _call("util.cbam", selection=selection)
-
-
-@mcp.tool()
-def util_cbay(selection: str | None = "all") -> str:
-    """
-    Colors by atom, yellow carbons (Color By Atom, Yellow)
-    """
-    return _call("util.cbay", selection=selection)
-
-
-@mcp.tool()
-def util_cbas(selection: str | None = "all") -> str:
-    """
-    Colors by atom, salmon carbons (Color By Atom, Salmon)
-    """
-    return _call("util.cbas", selection=selection)
-
-
-@mcp.tool()
-def util_cbab(selection: str | None = "all") -> str:
-    """
-    Colors by atom, slate carbons (Color By Atom, slateBLue)
-    """
-    return _call("util.cbab", selection=selection)
-
-
-@mcp.tool()
-def util_cbao(selection: str | None = "all") -> str:
-    """
-    Colors by atom, orange carbons (Color By Atom, Orange)
-    """
-    return _call("util.cbao", selection=selection)
-
-
-@mcp.tool()
-def util_cbap(selection: str | None = "all") -> str:
-    """
-    Colors by atom, purple carbons (Color By Atom, Purple)
-    """
-    return _call("util.cbap", selection=selection)
-
-
-@mcp.tool()
-def util_cbak(selection: str | None = "all") -> str:
-    """
-    Colors by atom, pink carbons (Color By Atom, pinK)
-    """
-    return _call("util.cbak", selection=selection)
-
-
-@mcp.tool()
-def util_chainbow(selection: str | None = "all") -> str:
-    """
-    Colors chains in rainbow gradient (CHAINs in rainBOW)
-    """
-    return _call("util.chainbow", selection=selection)
-
-
-@mcp.tool()
-def util_rainbow(selection: str | None = "all") -> str:
-    """
-    Colors residues in rainbow from N to C terminus
-    """
-    return _call("util.rainbow", selection=selection)
-
-
-@mcp.tool()
-def util_ss(selection: str | None = "all") -> str:
-    """
-    Colors by secondary structure
-    """
-    return _call("util.ss", selection=selection)
-
-
-@mcp.tool()
-def util_color_by_element(selection: str | None = "all") -> str:
-    """
-    Colors atoms by their element
-    """
-    return _call("util.color_by_element", selection=selection)
-
-
-@mcp.tool()
-def util_color_secondary(selection: str | None = "all") -> str:
-    """
-    Colors secondary structure elements
-    """
-    return _call("util.color_secondary", selection=selection)
-
-
-@mcp.tool()
-def spheroid(selection: str | None = "all") -> str:
-    """
-    Displays atoms as smooth spheres
-    """
-    return _call("spheroid", selection=selection)
-
-
-@mcp.tool()
-def isomesh(name: str, map_object: str, level: str, selection: str | None = "all") -> str:
-    """
-    Creates a mesh isosurface
-    """
-    return _call("isomesh", name=name, map_object=map_object, level=level, selection=selection)
-
-
-@mcp.tool()
-def isosurface(name: str, map_object: str, level: str, selection: str | None = "all") -> str:
-    """
-    Creates a solid isosurface
-    """
-    return _call("isosurface", name=name, map_object=map_object, level=level, selection=selection)
-
-
-@mcp.tool()
-def sculpt_activate(obj: str) -> str:
-    """
-    Activates sculpting mode for an object
-    """
-    return _call("sculpt_activate", obj=obj)
-
-
-@mcp.tool()
-def sculpt_deactivate(obj: str) -> str:
-    """
-    Deactivates sculpting mode for an object
-    """
-    return _call("sculpt_deactivate", obj=obj)
-
-
-@mcp.tool()
-def sculpt_iterate(iterations: str, obj: str | None = "all") -> str:
-    """
-    Performs sculpting iterations
-    """
-    return _call("sculpt_iterate", iterations=iterations, obj=obj)
-
-
-@mcp.tool()
-def scene(key: str, action: str | None = "recall") -> str:
-    """
-    Manages scenes for later recall
-    """
-    return _call("scene", key=key, action=action)
-
-
-@mcp.tool()
-def scene_order(scene_list: str) -> str:
-    """
-    Sets the order of scenes
-    """
-    return _call("scene_order", scene_list=scene_list)
-
-
-@mcp.tool()
-def mset(specification: str) -> str:
-    """
-    Defines a sequence of states for movie playback
-    """
-    return _call("mset", specification=specification)
-
-
-@mcp.tool()
-def mplay() -> str:
-    """
-    Starts playing the movie
-    """
-    return _call("mplay")
-
-
-@mcp.tool()
-def mstop() -> str:
-    """
-    Stops the movie
-    """
-    return _call("mstop")
-
-
-@mcp.tool()
-def frame(frame_number: str | None = None) -> str:
-    """
-    Sets or queries the current frame
-    """
-    return _call("frame", frame_number=frame_number)
-
-
-@mcp.tool()
-def forward() -> str:
-    """
-    Advances one frame
-    """
-    return _call("forward")
-
-
-@mcp.tool()
-def backward() -> str:
-    """
-    Goes back one frame
-    """
-    return _call("backward")
-
-
-@mcp.tool()
-def rock() -> str:
-    """
-    Toggles a rocking animation
-    """
-    return _call("rock")
-
-
-@mcp.tool()
-def ray(width: str | None = None, height: str | None = None) -> str:
-    """
-    Performs ray-tracing
-    """
-    return _call("ray", _timeout=_SLOW_OP_TIMEOUT, width=width, height=height)
-
-
-@mcp.tool()
-def draw(width: str | None = None, height: str | None = None) -> str:
-    """
-    Uses OpenGL renderer (faster but lower quality)
-    """
-    return _call("draw", _timeout=_SLOW_OP_TIMEOUT, width=width, height=height)
-
-
-@mcp.tool()
-def mpng(prefix: str) -> str:
-    """
-    Saves a series of PNG images for movie frames
-    """
-    return _call("mpng", _timeout=_SLOW_OP_TIMEOUT, prefix=prefix)
-
-
-@mcp.tool()
-def symexp(prefix: str, selection: str, cutoff: str | None = "20", segi: str | None = None) -> str:
-    """
-    Generates symmetry-related copies
-    """
-    return _call("symexp", prefix=prefix, selection=selection, cutoff=cutoff, segi=segi)
-
-
-@mcp.tool()
-def set_symmetry(selection: str, a: str, b: str, c: str, alpha: str, beta: str, gamma: str) -> str:
-    """
-    Sets symmetry parameters for an object
-    """
-    return _call(
-        "set_symmetry", selection=selection, a=a, b=b, c=c, alpha=alpha, beta=beta, gamma=gamma
-    )
-
-
-@mcp.tool()
-def fab(sequence: str, options: str | None = None) -> str:
-    """
-    Creates a peptide chain from a sequence
-    """
-    return _call("fab", sequence=sequence, options=options)
-
-
-@mcp.tool()
-def fragment(name: str) -> str:
-    """
-    Loads a molecular fragment
-    """
-    return _call("fragment", name=name)
-
-
-@mcp.tool()
-def full_screen() -> str:
-    """
-    Toggles fullscreen mode
-    """
-    return _call("full_screen")
-
-
-@mcp.tool()
-def viewport(width: str, height: str) -> str:
-    """
-    Sets the viewport size
-    """
-    return _call("viewport", width=width, height=height)
-
-
-@mcp.tool()
-def cd(path: str) -> str:
-    """
-    Changes the current directory
-    """
-    return _call("cd", path=path)
-
-
-@mcp.tool()
-def pwd() -> str:
-    """
-    Prints the current directory
-    """
-    return _call("pwd")
-
-
-@mcp.tool()
-def ls(path: str | None = None) -> str:
-    """
-    Lists files in the current directory
-    """
-    return _call("ls", path=path)
-
-
-@mcp.tool()
-def system(command: str) -> str:
-    """
-    Executes a system command
-    """
-    return _call("system", command=command)
-
-
-@mcp.tool()
-def help(command: str | None = None) -> str:
-    """
-    Shows help for a command
-    """
-    return _call("help", command=command)
-
-
-# ── 3D printing export ───────────────────────────────────────────────────────
-#
-# PyMOL's open-source build cannot write STL, and its OBJ exporter writes the
-# whole *visible* scene (it ignores the selection argument). The mesh it does
-# produce is a non-manifold surface soup — unprintable as-is. This tool works
-# around all three: it isolates each colour group's surface, exports OBJ, then
-# rebuilds a watertight manifold per group while keeping every group in the
-# shared PyMOL coordinate frame so they assemble correctly as multi-material
-# parts in a slicer.
-
-_PRINT_DEPS_HINT = (
-    "3D-print export needs extra libraries. Install them with:\n"
-    "  uv sync --extra print     (from a MCPymol checkout)\n"
-    "  uv pip install 'mcpymol[print]'\n"
-    "Provides: trimesh, pymeshlab, scipy, scikit-image."
+"""The MCPymol bridge server — entry point and public surface.
+
+This module is what the MCP client launches (``mcpymol = mcpymol.server:main``).
+Importing it pulls in every tool module, and importing a tool module is what
+registers its tools on the shared :data:`mcpymol.app.mcp` application, so the
+imports below are load-bearing rather than decorative.
+
+The implementation lives in focused modules:
+
+========================  ====================================================
+``mcpymol.app``           the shared FastMCP application object
+``mcpymol.bridge``        the socket protocol to the in-PyMOL plugin
+``mcpymol.structures``    fetching/loading structures, session introspection
+``mcpymol.primitives``    one thin tool per ``pymol.cmd`` function
+``mcpymol.views``         the high-level ``*_view`` scene presets
+``mcpymol.conservation``  MSA + Shannon entropy + ``conservation_view``
+``mcpymol.printing``      watertight STL export for 3D printing
+========================  ====================================================
+
+Every name is re-exported here so ``from mcpymol.server import ligand_view``
+keeps working. New code should import from the owning module instead — and a
+test patching an internal *must*, because patching a re-export rebinds only
+this module's name, not the one the function actually calls.
+"""
+
+from mcpymol.app import (
+    mcp,
+)
+from mcpymol.bridge import (
+    _DEFAULT_TIMEOUT,
+    _RECV_CHUNK,
+    _SLOW_OP_TIMEOUT,
+    HOST,
+    PORT,
+    _call,
+    send_request,
+)
+from mcpymol.conservation import (
+    _AA_ALPHABET,
+    MMSEQS_URL,
+    _compute_shannon_entropy,
+    _conservation_cache,
+    _parse_a3m,
+    _run_mmseqs2,
+    conservation_view,
+)
+from mcpymol.primitives import (
+    align,
+    alter,
+    alter_state,
+    angle,
+    as_tool,
+    backward,
+    bond,
+    cartoon,
+    cd,
+    center,
+    clip,
+    color,
+    create,
+    delete,
+    deselect,
+    dihedral,
+    distance,
+    draw,
+    execute_pymol_command,
+    extract,
+    fab,
+    forward,
+    fragment,
+    frame,
+    full_screen,
+    h_add,
+    h_fill,
+    help,
+    hide,
+    intra_fit,
+    intra_rms,
+    isomesh,
+    isosurface,
+    label,
+    ls,
+    move,
+    mplay,
+    mpng,
+    mset,
+    mstop,
+    orient,
+    png,
+    pwd,
+    ray,
+    rebuild,
+    refresh,
+    remove,
+    reset,
+    rock,
+    save,
+    scene,
+    scene_order,
+    sculpt_activate,
+    sculpt_deactivate,
+    sculpt_iterate,
+    select,
+    set_setting,
+    set_symmetry,
+    show,
+    spectrum,
+    spheroid,
+    super_tool,
+    symexp,
+    system,
+    turn,
+    unbond,
+    util_cbab,
+    util_cbac,
+    util_cbag,
+    util_cbak,
+    util_cbam,
+    util_cbao,
+    util_cbap,
+    util_cbas,
+    util_cbaw,
+    util_cbay,
+    util_cbc,
+    util_chainbow,
+    util_color_by_element,
+    util_color_secondary,
+    util_rainbow,
+    util_ss,
+    viewport,
+    zoom,
+)
+from mcpymol.printing import (
+    _PRINT_DEPS_HINT,
+    _parse_groups,
+    _repair_to_stl,
+    print_export,
+    print_ribbon_view,
+)
+from mcpymol.structures import (
+    _GHOST_HEART_GREENS,
+    DEFAULT_MULTIMER_CUTOFF,
+    _apply_ghost_heart,
+    _apply_multimer_heuristic,
+    fetch_structure,
+    list_chains,
+    list_ligands,
+    list_objects,
+    load_structure,
+)
+from mcpymol.views import (
+    _PB_SUBPROCESS_TIMEOUT,
+    bfactor_view,
+    cinematic_view,
+    crosslink_view,
+    electrostatic_view,
+    hydrophobic_surface_view,
+    interface_view,
+    ligand_view,
+    mutation_view,
+    pharmacophore_view,
+    pocket_view,
+    pointillist_view,
+    poisson_boltzmann_view,
+    putty_view,
+    textbook_view,
 )
 
-
-def _parse_groups(groups: str) -> "list[tuple[str, str]]":
-    """Parse ``"label=selection; label2=selection2"`` into ordered pairs."""
-    pairs = []
-    for chunk in groups.split(";"):
-        chunk = chunk.strip()
-        if not chunk:
-            continue
-        if "=" not in chunk:
-            raise ValueError(f"bad group spec {chunk!r}; expected 'label=selection'")
-        label, sel = chunk.split("=", 1)
-        label, sel = label.strip(), sel.strip()
-        if not label or not sel:
-            raise ValueError(f"bad group spec {chunk!r}")
-        pairs.append((label, sel))
-    if not pairs:
-        raise ValueError("no groups given")
-    return pairs
-
-
-def _repair_to_stl(
-    src_obj: str, dst_stl: str, method: str, voxel_pitch: float, poisson_depth: int
-) -> dict:
-    """Rebuild a PyMOL surface OBJ into a watertight, manifold STL.
-
-    ``method``: ``poisson`` keeps surface detail (good for bulky chains);
-    ``voxel`` is robust for thin tubular geometry (nucleic acids) and slightly
-    thickens fragile features; ``auto`` uses the cheapest path that works —
-    compact structures (e.g. a GFP barrel) often export already-watertight, so
-    a light cleanup beats Poisson, which can degrade an already-closed surface.
-    Coordinates are preserved so every group stays in one frame.
-    """
-    import trimesh
-
-    def _light(mesh, dst):
-        # Already-watertight export: drop tiny internal shells (buried cavities
-        # print as useless floating geometry), keep the largest body, tidy up.
-        bodies = sorted(mesh.split(only_watertight=False), key=lambda b: len(b.faces), reverse=True)
-        shell = bodies[0] if bodies else mesh
-        shell.merge_vertices()
-        shell.update_faces(shell.unique_faces())
-        shell.update_faces(shell.nondegenerate_faces())
-        shell.remove_unreferenced_vertices()
-        trimesh.repair.fix_normals(shell)
-        trimesh.repair.fill_holes(shell)
-        shell.export(dst)
-        return shell
-
-    def _voxel(src, dst, pitch):
-        # force="mesh" collapses a scene into a single Trimesh, but the
-        # declared return type is the Geometry base class, so narrow it.
-        m = cast("trimesh.Trimesh", trimesh.load(src, force="mesh"))
-        vox = m.voxelized(pitch=pitch).fill()
-        out = vox.marching_cubes
-        # marching_cubes is in voxel-index space; map back to world coords.
-        out.apply_transform(vox.transform)
-        # Fragmented/open input (e.g. a PyMOL cartoon triangle-soup of
-        # separate arrow and tube segments) marching-cubes into many loose,
-        # non-watertight shells. Consolidate to the single largest solid and
-        # close it — same philosophy as _light — so the result is one
-        # watertight, printable body.
-        bodies = sorted(
-            out.split(only_watertight=False),
-            key=lambda b: len(b.faces),
-            reverse=True,
-        )
-        out = bodies[0] if bodies else out
-        out.merge_vertices()
-        out.update_faces(out.unique_faces())
-        out.update_faces(out.nondegenerate_faces())
-        out.remove_unreferenced_vertices()
-        trimesh.repair.fix_normals(out)
-        trimesh.repair.fill_holes(out)
-        out.export(dst)
-        return out
-
-    def _poisson(src, dst, depth):
-        import pymeshlab
-
-        def apply_first(ms, names, **kw):
-            last = None
-            for n in names:
-                try:
-                    ms.apply_filter(n, **kw)
-                    return
-                except Exception as e:
-                    last = e
-            raise RuntimeError(f"none of {names} worked: {last}")
-
-        ms = pymeshlab.MeshSet()
-        ms.load_new_mesh(src)
-        apply_first(ms, ["meshing_remove_duplicate_vertices", "remove_duplicate_vertices"])
-        apply_first(ms, ["meshing_remove_null_faces", "remove_zero_area_faces"])
-        apply_first(ms, ["meshing_remove_unreferenced_vertices", "remove_unreferenced_vertices"])
-        apply_first(ms, ["compute_normal_per_vertex", "re_orient_all_faces_coherently"])
-        apply_first(
-            ms,
-            [
-                "generate_surface_reconstruction_screened_poisson",
-                "surface_reconstruction_screened_poisson",
-            ],
-            depth=depth,
-            preclean=True,
-        )
-        ms.save_current_mesh(dst, binary=True)
-        return trimesh.load(dst, force="mesh")
-
-    used = method
-    if method == "auto":
-        raw = cast("trimesh.Trimesh", trimesh.load(src_obj, force="mesh", process=True))
-        if raw.is_watertight:
-            mesh = _light(raw, dst_stl)
-            used = "light (already watertight)"
-        else:
-            try:
-                mesh = _poisson(src_obj, dst_stl, poisson_depth)
-                used = "poisson"
-            except Exception:
-                mesh = _voxel(src_obj, dst_stl, voxel_pitch)
-                used = "voxel (poisson fallback)"
-    elif method == "poisson":
-        mesh = _poisson(src_obj, dst_stl, poisson_depth)
-        used = "poisson"
-    elif method == "voxel":
-        mesh = _voxel(src_obj, dst_stl, voxel_pitch)
-    else:
-        raise ValueError(f"unknown method {method!r}")
-
-    return {
-        "method": used,
-        "faces": len(mesh.faces),
-        "watertight": bool(mesh.is_watertight),
-    }
-
-
-@mcp.tool()
-def print_ribbon_view(obj_name: str, spine_radius: float = 0.9) -> str:
-    """
-    Chunky β-arrow ribbons plus a continuous backbone "spine", tuned for
-    rigid, gap-free 3D printing.
-
-    Configures the look developed for FDM printing: thick β-strand arrows
-    and a fat helix on the main object with loop cartoon hidden, plus a
-    separate ``<obj>_spine`` object showing PyMOL's ``cartoon tube`` (which
-    ignores secondary structure) running unbroken through the whole
-    backbone. The spine threads through the strand bodies, so when the two
-    objects are exported together the voxel step fuses them into ONE
-    watertight solid with no strand→loop discontinuity. The spine also acts
-    as internal rebar, reinforcing the thin junctions for print rigidity.
-
-    After calling this, export the fused solid with::
-
-        print_export(obj_name="<obj>",
-                      groups="<obj>=(<obj> or <obj>_spine)",
-                      representation="cartoon",
-                      method="voxel", voxel_pitch=0.2)
-
-    Args:
-        obj_name: PyMOL object name (e.g. "1abc").
-        spine_radius: Radius (A) of the continuous backbone tube. Larger
-                      values give more internal reinforcement. Default 0.9.
-    """
-    spine = f"{obj_name}_spine"
-
-    # Main object: chunky β-arrows + fat helix.
-    send_request("hide", args=["everything", obj_name])
-    send_request("show", args=["cartoon", obj_name])
-    send_request("do", args=[f"cartoon automatic, {obj_name}"])
-    chunky = {
-        "cartoon_loop_radius": "1.3",
-        "cartoon_rect_width": "2.0",
-        "cartoon_rect_length": "2.8",
-        "cartoon_oval_width": "1.3",
-        "cartoon_oval_length": "2.0",
-        "cartoon_helix_radius": "1.3",
-        "cartoon_fancy_sheets": "1",  # keep 3D arrowheads (strand direction)
-        "cartoon_flat_sheets": "1",  # well-defined arrow plane
-        "cartoon_smooth_loops": "1",
-    }
-    for setting, value in chunky.items():
-        send_request("set", args=[setting, value])
-
-    # Loops are represented by the spine only - drop their fat cartoon.
-    send_request("hide", args=["cartoon", f"({obj_name}) and not (ss H or ss S)"])
-
-    # Spine: one continuous tube through the entire backbone (no SS gaps).
-    send_request("delete", args=[spine])
-    send_request("create", args=[spine, obj_name])
-    send_request("hide", args=["everything", spine])
-    send_request("show", args=["cartoon", spine])
-    send_request("do", args=[f"cartoon tube, {spine}"])
-    send_request("set", args=["cartoon_tube_radius", str(spine_radius), spine])
-
-    send_request("do", args=[f"util.chainbow('{obj_name}')"])
-    send_request("do", args=[f"util.chainbow('{spine}')"])
-    send_request("orient", args=[obj_name])
-
-    return (
-        f"Print-ribbon view applied to {obj_name} (spine object '{spine}' "
-        f"created). Chunky β-arrows and helix with a continuous backbone "
-        f"tube; loops are the spine only. Export as one fused, gap-free "
-        f"solid with:\n"
-        f'  print_export(obj_name="{obj_name}", '
-        f'groups="{obj_name}=({obj_name} or {spine})", '
-        f'representation="cartoon", method="voxel", voxel_pitch=0.2)'
-    )
-
-
-@mcp.tool()
-def print_export(
-    obj_name: str,
-    groups: str,
-    out_dir: str = ".",
-    method: str = "auto",
-    voxel_pitch: float = 0.7,
-    poisson_depth: int = 10,
-    representation: str = "surface",
-) -> str:
-    """
-    Exports a structure as watertight STL files ready for multi-colour 3D printing.
-
-    Each colour group becomes one STL file. PyMOL's OBJ exporter writes the
-    whole visible scene, so each group is isolated on its own before export,
-    then rebuilt into a single watertight, manifold solid. All groups share the
-    same coordinate frame, so a slicer can load them as aligned multi-material
-    parts (e.g. add the second STL as a "part" of the first in Bambu Studio).
-
-    Requires the optional ``print`` extra (trimesh, pymeshlab); see the install
-    hint returned if the libraries are missing.
-
-    Args:
-        obj_name: PyMOL object to export (e.g. "1abc").
-        groups: Semicolon-separated ``label=selection`` pairs, one per colour.
-                Example: "protein=polymer.protein; nucleic=polymer.nucleic".
-        out_dir: Directory for the STL files (default: current directory).
-        method: "auto" (light cleanup if the export is already watertight,
-                else poisson with voxel fallback), "poisson" (keeps detail,
-                best for bulky chains), or "voxel" (robust for thin nucleic
-                acids).
-        voxel_pitch: Voxel size in Angstrom for the voxel method. Smaller keeps
-                     more detail; 0.7 keeps a ~10 A helix intact.
-        poisson_depth: Screened-Poisson octree depth; higher = more detail.
-        representation: What geometry to export. "surface" (default,
-                        unchanged) isolates each group as its own temp
-                        object and exports its molecular surface. "cartoon"
-                        exports the *currently displayed* cartoon geometry of
-                        the real objects, preserving per-residue rep flags
-                        and per-object cartoon type (e.g. a `cartoon tube`
-                        spine from :func:`print_ribbon_view`). In cartoon
-                        mode each group must name whole object(s) — one
-                        colour per object (e.g. "1abc or 1abc_spine") — and
-                        groups are isolated by toggling object visibility, no
-                        temp objects.
-    """
-    try:
-        import trimesh  # noqa: F401
-    except ImportError:
-        return _PRINT_DEPS_HINT
-
-    try:
-        pairs = _parse_groups(groups)
-    except ValueError as e:
-        return f"Error: {e}"
-
-    representation = representation.lower()
-    if representation not in ("surface", "cartoon"):
-        return f"Error: representation must be 'surface' or 'cartoon', got {representation!r}"
-
-    os.makedirs(out_dir, exist_ok=True)
-    tmp_objs = []
-    results = []
-    try:
-        if representation == "surface":
-            # Build an isolated temp object per group up front.
-            for label, sel in pairs:
-                tmp = f"_print_{label}"
-                send_request("delete", args=[tmp])
-                send_request("create", args=[tmp, f"({obj_name}) and ({sel})"])
-                tmp_objs.append((label, sel, tmp))
-
-            for label, sel, tmp in tmp_objs:
-                # Isolate: only this temp object visible, only as a surface.
-                send_request("do", args=["disable all"])
-                send_request("enable", args=[tmp])
-                send_request("hide", args=["everything", tmp])
-                send_request("show", args=["surface", tmp])
-
-                obj_path = os.path.join(out_dir, f"{obj_name}_{label}.obj")
-                stl_path = os.path.join(out_dir, f"{obj_name}_{label}.stl")
-                res = send_request("save", args=[obj_path, tmp], timeout=180.0)
-                if res.get("status") == "error":
-                    return f"Error exporting group '{label}': {res.get('error')}"
-
-                try:
-                    info = _repair_to_stl(obj_path, stl_path, method, voxel_pitch, poisson_depth)
-                except ImportError:
-                    return _PRINT_DEPS_HINT
-                results.append((label, sel, stl_path, info))
-        else:
-            # Cartoon mode: export the displayed cartoon of the real objects,
-            # so per-residue rep flags (hidden loops) and per-object cartoon
-            # type (a `cartoon tube` spine) are preserved exactly. PyMOL's
-            # OBJ exporter dumps the whole visible scene, so isolate a group
-            # by enabling only its objects. One colour per object.
-            for label, sel in pairs:
-                res = send_request("get_object_list", args=[sel])
-                if res.get("status") == "error":
-                    return f"Error resolving group '{label}': {res.get('error')}"
-                objs = res.get("result") or []
-                if not objs:
-                    return (
-                        f"Error: cartoon-mode group '{label}' selection "
-                        f"'{sel}' matched no objects. Each group must name "
-                        f"whole object(s), e.g. '1abc or 1abc_spine'."
-                    )
-
-                send_request("do", args=["disable all"])
-                for obj in objs:
-                    send_request("enable", args=[obj])
-
-                obj_path = os.path.join(out_dir, f"{obj_name}_{label}.obj")
-                stl_path = os.path.join(out_dir, f"{obj_name}_{label}.stl")
-                res = send_request("save", args=[obj_path, sel], timeout=180.0)
-                if res.get("status") == "error":
-                    return f"Error exporting group '{label}': {res.get('error')}"
-
-                try:
-                    info = _repair_to_stl(obj_path, stl_path, method, voxel_pitch, poisson_depth)
-                except ImportError:
-                    return _PRINT_DEPS_HINT
-                results.append((label, sel, stl_path, info))
-    finally:
-        for _, _, tmp in tmp_objs:
-            send_request("delete", args=[tmp])
-        send_request("do", args=["enable all"])
-
-    lines = [f"Exported {len(results)} group(s) for 3D printing to {out_dir}:"]
-    for label, sel, stl_path, info in results:
-        flag = "OK" if info["watertight"] else "NOT watertight - check mesh"
-        lines.append(
-            f"  {label} ({sel}) -> {os.path.basename(stl_path)}  "
-            f"[{info['method']}, {info['faces']:,} faces, {flag}]"
-        )
-    lines.append(
-        "All groups share one coordinate frame. In your slicer, load the first "
-        "STL then add the others as parts (don't re-centre) and assign a "
-        "filament per part."
-    )
-    return "\n".join(lines)
+__all__ = [
+    "DEFAULT_MULTIMER_CUTOFF",
+    "HOST",
+    "MMSEQS_URL",
+    "PORT",
+    "_AA_ALPHABET",
+    "_DEFAULT_TIMEOUT",
+    "_GHOST_HEART_GREENS",
+    "_PB_SUBPROCESS_TIMEOUT",
+    "_PRINT_DEPS_HINT",
+    "_RECV_CHUNK",
+    "_SLOW_OP_TIMEOUT",
+    "_apply_ghost_heart",
+    "_apply_multimer_heuristic",
+    "_call",
+    "_compute_shannon_entropy",
+    "_conservation_cache",
+    "_parse_a3m",
+    "_parse_groups",
+    "_repair_to_stl",
+    "_run_mmseqs2",
+    "align",
+    "alter",
+    "alter_state",
+    "angle",
+    "as_tool",
+    "backward",
+    "bfactor_view",
+    "bond",
+    "cartoon",
+    "cd",
+    "center",
+    "cinematic_view",
+    "clip",
+    "color",
+    "conservation_view",
+    "create",
+    "crosslink_view",
+    "delete",
+    "deselect",
+    "dihedral",
+    "distance",
+    "draw",
+    "electrostatic_view",
+    "execute_pymol_command",
+    "extract",
+    "fab",
+    "fetch_structure",
+    "forward",
+    "fragment",
+    "frame",
+    "full_screen",
+    "h_add",
+    "h_fill",
+    "help",
+    "hide",
+    "hydrophobic_surface_view",
+    "interface_view",
+    "intra_fit",
+    "intra_rms",
+    "isomesh",
+    "isosurface",
+    "label",
+    "ligand_view",
+    "list_chains",
+    "list_ligands",
+    "list_objects",
+    "load_structure",
+    "ls",
+    "main",
+    "mcp",
+    "move",
+    "mplay",
+    "mpng",
+    "mset",
+    "mstop",
+    "mutation_view",
+    "orient",
+    "pharmacophore_view",
+    "png",
+    "pocket_view",
+    "pointillist_view",
+    "poisson_boltzmann_view",
+    "print_export",
+    "print_ribbon_view",
+    "putty_view",
+    "pwd",
+    "ray",
+    "rebuild",
+    "refresh",
+    "remove",
+    "reset",
+    "rock",
+    "save",
+    "scene",
+    "scene_order",
+    "sculpt_activate",
+    "sculpt_deactivate",
+    "sculpt_iterate",
+    "select",
+    "send_request",
+    "set_setting",
+    "set_symmetry",
+    "show",
+    "spectrum",
+    "spheroid",
+    "super_tool",
+    "symexp",
+    "system",
+    "textbook_view",
+    "turn",
+    "unbond",
+    "util_cbab",
+    "util_cbac",
+    "util_cbag",
+    "util_cbak",
+    "util_cbam",
+    "util_cbao",
+    "util_cbap",
+    "util_cbas",
+    "util_cbaw",
+    "util_cbay",
+    "util_cbc",
+    "util_chainbow",
+    "util_color_by_element",
+    "util_color_secondary",
+    "util_rainbow",
+    "util_ss",
+    "viewport",
+    "zoom",
+]
 
 
 def main():

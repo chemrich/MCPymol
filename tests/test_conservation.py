@@ -174,7 +174,7 @@ def test_entropy_empty_msa():
 # ── _run_mmseqs2 tests ──────────────────────────────────────────────────────
 
 
-@patch("mcpymol.server.urllib.request.urlopen")
+@patch("mcpymol.conservation.urllib.request.urlopen")
 def test_run_mmseqs2_success(mock_urlopen):
     """Successful submit → poll → download cycle."""
     import io
@@ -213,7 +213,7 @@ def test_run_mmseqs2_success(mock_urlopen):
     assert "ACDEF" in result
 
 
-@patch("mcpymol.server.urllib.request.urlopen")
+@patch("mcpymol.conservation.urllib.request.urlopen")
 def test_run_mmseqs2_error_status(mock_urlopen):
     """MMseqs2 returning ERROR status raises RuntimeError."""
     submit_resp = MagicMock()
@@ -237,8 +237,8 @@ def test_run_mmseqs2_error_status(mock_urlopen):
 # ── conservation_view integration tests ─────────────────────────────────────
 
 
-@patch("mcpymol.server._run_mmseqs2")
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.conservation._run_mmseqs2")
+@patch("mcpymol.conservation.send_request")
 def test_conservation_view_success(mock_sr, mock_mmseqs):
     """Full pipeline: get chain → get FASTA → run mmseqs2 → color."""
 
@@ -275,8 +275,8 @@ def test_conservation_view_success(mock_sr, mock_mmseqs):
     assert "do" in acts  # B-factor alteration, spectrum, etc.
 
 
-@patch("mcpymol.server._run_mmseqs2")
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.conservation._run_mmseqs2")
+@patch("mcpymol.conservation.send_request")
 def test_conservation_view_specific_chain(mock_sr, mock_mmseqs):
     """When chain is specified, skip get_chains and use that chain directly."""
 
@@ -297,7 +297,7 @@ def test_conservation_view_specific_chain(mock_sr, mock_mmseqs):
     assert acts[0] != "get_chains"
 
 
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.conservation.send_request")
 def test_conservation_view_no_chains(mock_sr):
     """Error when no protein chains found."""
     mock_sr.side_effect = _sr_mock(get_chains=[])
@@ -308,7 +308,7 @@ def test_conservation_view_no_chains(mock_sr):
     assert "chains" in result.lower()
 
 
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.conservation.send_request")
 def test_conservation_view_short_sequence(mock_sr):
     """Sequence shorter than 10 residues is rejected."""
 
@@ -326,8 +326,8 @@ def test_conservation_view_short_sequence(mock_sr):
     assert "too short" in result.lower()
 
 
-@patch("mcpymol.server._run_mmseqs2")
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.conservation._run_mmseqs2")
+@patch("mcpymol.conservation.send_request")
 def test_conservation_view_mmseqs_error(mock_sr, mock_mmseqs):
     """MMseqs2 failure is propagated as a user-readable error."""
 
@@ -348,8 +348,8 @@ def test_conservation_view_mmseqs_error(mock_sr, mock_mmseqs):
     assert "Server unreachable" in result
 
 
-@patch("mcpymol.server._run_mmseqs2")
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.conservation._run_mmseqs2")
+@patch("mcpymol.conservation.send_request")
 def test_conservation_view_insufficient_msa(mock_sr, mock_mmseqs):
     """MSA with only the query sequence produces a warning."""
 
@@ -380,8 +380,8 @@ def clear_conservation_cache():
     server_module._conservation_cache.clear()
 
 
-@patch("mcpymol.server._run_mmseqs2")
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.conservation._run_mmseqs2")
+@patch("mcpymol.conservation.send_request")
 def test_cache_hit_skips_api(mock_sr, mock_mmseqs):
     """Second call for the same sequence does not call MMseqs2 again."""
     mock_sr.side_effect = _conservation_sr_mock()
@@ -399,8 +399,8 @@ def test_cache_hit_skips_api(mock_sr, mock_mmseqs):
     assert mock_mmseqs.call_count == 1  # still 1, not called again
 
 
-@patch("mcpymol.server._run_mmseqs2")
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.conservation._run_mmseqs2")
+@patch("mcpymol.conservation.send_request")
 def test_cache_hit_reported_in_message(mock_sr, mock_mmseqs):
     """Return message says 'cached' on a cache hit."""
     mock_sr.side_effect = _conservation_sr_mock()
@@ -413,8 +413,8 @@ def test_cache_hit_reported_in_message(mock_sr, mock_mmseqs):
     assert "cached" in result
 
 
-@patch("mcpymol.server._run_mmseqs2")
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.conservation._run_mmseqs2")
+@patch("mcpymol.conservation.send_request")
 def test_force_refresh_bypasses_cache(mock_sr, mock_mmseqs):
     """force_refresh=True re-fetches even when the cache has an entry."""
     mock_sr.side_effect = _conservation_sr_mock()
@@ -428,8 +428,8 @@ def test_force_refresh_bypasses_cache(mock_sr, mock_mmseqs):
     assert mock_mmseqs.call_count == 2  # called again
 
 
-@patch("mcpymol.server._run_mmseqs2")
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.conservation._run_mmseqs2")
+@patch("mcpymol.conservation.send_request")
 def test_cache_keyed_by_sequence_not_name(mock_sr, mock_mmseqs):
     """Same sequence loaded under a different object name hits the cache."""
     mock_sr.side_effect = _conservation_sr_mock()
@@ -443,8 +443,8 @@ def test_cache_keyed_by_sequence_not_name(mock_sr, mock_mmseqs):
     assert mock_mmseqs.call_count == 1  # cache hit
 
 
-@patch("mcpymol.server._run_mmseqs2")
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.conservation._run_mmseqs2")
+@patch("mcpymol.conservation.send_request")
 def test_scale_change_uses_cache(mock_sr, mock_mmseqs):
     """Changing scale from relative to absolute reuses cached entropies."""
     mock_sr.side_effect = _conservation_sr_mock()
@@ -500,8 +500,8 @@ def _extract_cons_scores(mock_sr):
     return None
 
 
-@patch("mcpymol.server._run_mmseqs2")
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.conservation._run_mmseqs2")
+@patch("mcpymol.conservation.send_request")
 def test_conservation_view_relative_scale_b_factors(mock_sr, mock_mmseqs):
     """Relative scaling: most conserved position → 100, most variable → 0."""
     mock_sr.side_effect = _conservation_sr_mock()
@@ -518,8 +518,8 @@ def test_conservation_view_relative_scale_b_factors(mock_sr, mock_mmseqs):
     assert min(scores) == pytest.approx(0.0, abs=0.1)
 
 
-@patch("mcpymol.server._run_mmseqs2")
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.conservation._run_mmseqs2")
+@patch("mcpymol.conservation.send_request")
 def test_conservation_view_absolute_scale_b_factors(mock_sr, mock_mmseqs):
     """Absolute scaling: scores are (1 - entropy) * 100 without rescaling."""
     mock_sr.side_effect = _conservation_sr_mock()
@@ -538,8 +538,8 @@ def test_conservation_view_absolute_scale_b_factors(mock_sr, mock_mmseqs):
     assert min(scores) > 10.0
 
 
-@patch("mcpymol.server._run_mmseqs2")
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.conservation._run_mmseqs2")
+@patch("mcpymol.conservation.send_request")
 def test_conservation_view_default_is_relative(mock_sr, mock_mmseqs):
     """Default scale parameter is relative."""
     mock_sr.side_effect = _conservation_sr_mock()
@@ -551,8 +551,8 @@ def test_conservation_view_default_is_relative(mock_sr, mock_mmseqs):
     assert "relative scale" in result
 
 
-@patch("mcpymol.server._run_mmseqs2")
-@patch("mcpymol.server.send_request")
+@patch("mcpymol.conservation._run_mmseqs2")
+@patch("mcpymol.conservation.send_request")
 def test_conservation_view_uniform_entropy_falls_back(mock_sr, mock_mmseqs):
     """When all positions have identical entropy, relative mode degrades gracefully."""
     mock_sr.side_effect = _conservation_sr_mock()
