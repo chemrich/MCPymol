@@ -7,6 +7,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from typing import cast
 
 from mcp.server.fastmcp import FastMCP
 
@@ -23,6 +24,13 @@ MMSEQS_URL = os.environ.get("MCPYMOL_MMSEQS_URL", "https://api.colabfold.com")
 # Wall-clock ceiling for the external APBS/PDB2PQR binaries.  Without one a
 # wedged solver hangs the whole MCP server, since tool calls are synchronous.
 _PB_SUBPROCESS_TIMEOUT = float(os.environ.get("MCPYMOL_PB_TIMEOUT", 600.0))
+
+# Chain–chain contact radius for the BFS multimer heuristic.  8 Å keeps
+# sprawling functional assemblies (CRP pentamer, ferritin cage) whole while
+# still dropping crystallographic neighbours.  Single source of truth: the
+# helper's own default used to be 5.0 while every caller passed 8.0, so the
+# signature disagreed with the documented behaviour.
+DEFAULT_MULTIMER_CUTOFF = 8.0
 
 # Operations that legitimately run for minutes: ray-tracing a large scene,
 # writing a movie frame series, saving a big assembly.  The 10 s default is
@@ -301,7 +309,7 @@ def send_request(
         }
 
 
-def _apply_multimer_heuristic(name: str, cutoff: float = 5.0):
+def _apply_multimer_heuristic(name: str, cutoff: float = DEFAULT_MULTIMER_CUTOFF):
     """BFS expansion to find all connected chains in a multimer."""
     # 1. Get initial chains
     res = send_request("get_chains", args=[name])
@@ -337,7 +345,7 @@ def _apply_multimer_heuristic(name: str, cutoff: float = 5.0):
 
 @mcp.tool()
 def fetch_structure(
-    pdb_code: str, obj_name: str | None = None, multimer_cutoff: float = 8.0
+    pdb_code: str, obj_name: str | None = None, multimer_cutoff: float = DEFAULT_MULTIMER_CUTOFF
 ) -> str:
     """
     Fetches a protein structure from the PDB.
@@ -368,7 +376,9 @@ def fetch_structure(
 
 
 @mcp.tool()
-def load_structure(file_path: str, obj_name: str, multimer_cutoff: float = 8.0) -> str:
+def load_structure(
+    file_path: str, obj_name: str, multimer_cutoff: float = DEFAULT_MULTIMER_CUTOFF
+) -> str:
     """
     Loads a structure from a local file path and applies the BFS multimer heuristic.
 
@@ -2891,7 +2901,9 @@ def _repair_to_stl(
         return shell
 
     def _voxel(src, dst, pitch):
-        m = trimesh.load(src, force="mesh")
+        # force="mesh" collapses a scene into a single Trimesh, but the
+        # declared return type is the Geometry base class, so narrow it.
+        m = cast("trimesh.Trimesh", trimesh.load(src, force="mesh"))
         vox = m.voxelized(pitch=pitch).fill()
         out = vox.marching_cubes
         # marching_cubes is in voxel-index space; map back to world coords.
@@ -2949,7 +2961,7 @@ def _repair_to_stl(
 
     used = method
     if method == "auto":
-        raw = trimesh.load(src_obj, force="mesh", process=True)
+        raw = cast("trimesh.Trimesh", trimesh.load(src_obj, force="mesh", process=True))
         if raw.is_watertight:
             mesh = _light(raw, dst_stl)
             used = "light (already watertight)"

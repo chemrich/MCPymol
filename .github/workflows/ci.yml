@@ -49,7 +49,10 @@ jobs:
       - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
         with:
           enable-cache: true
-      - run: uv sync --locked --all-groups
+      # The print extra must be installed or trimesh resolves to Any under
+      # ignore_missing_imports, and mypy silently skips the mesh-repair code —
+      # the one place in the tree doing real work against a third-party API.
+      - run: uv sync --locked --all-groups --extra print
       - run: uv run mypy
 
   test:

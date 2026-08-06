@@ -1,17 +1,16 @@
 import json
 import socket
-
-# We need to mock pymol.cmd before we can even import plugin.py
 import sys
 from unittest.mock import MagicMock
 
 import pytest
 
-mock_pymol = MagicMock()
-sys.modules["pymol"] = mock_pymol
-sys.modules["pymol.cmd"] = mock_pymol.cmd
+# conftest installs the pymol mock before any test module is imported; reuse
+# that exact object — a fresh MagicMock here would not be the one the plugin
+# bound at import time, so every assertion on it would silently pass on an
+# object nothing calls.
+mock_pymol = sys.modules["pymol"]
 
-# Now we can import the plugin
 import mcpymol.plugin as plugin_module
 from mcpymol.plugin import (
     MAX_REQUEST_BYTES,

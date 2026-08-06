@@ -44,6 +44,10 @@ RECV_TIMEOUT = float(os.environ.get("MCPYMOL_RECV_TIMEOUT", 30.0))
 MAX_REQUEST_BYTES = int(os.environ.get("MCPYMOL_MAX_REQUEST_BYTES", 8 * 1024 * 1024))
 
 
+# How often the accept loop checks whether it has been asked to stop.
+_ACCEPT_POLL_INTERVAL = 0.25
+
+
 class RequestTooLarge(Exception):
     """Raised when a peer sends more than ``MAX_REQUEST_BYTES`` in one request."""
 
@@ -62,7 +66,7 @@ except ImportError:  # pragma: no cover — only when imported outside PyMOL
     pymol_util = None
 
 
-def _recv_all(sock: socket.socket, max_bytes: int = MAX_REQUEST_BYTES) -> bytes:
+def _recv_all(sock: socket.socket, max_bytes: int | None = None) -> bytes:
     """Read one request from ``sock``.
 
     Returns as soon as the accumulated bytes parse as a JSON document, or when
@@ -71,10 +75,17 @@ def _recv_all(sock: socket.socket, max_bytes: int = MAX_REQUEST_BYTES) -> bytes:
     does neither must not be able to block the accept loop forever, so the
     caller sets a socket timeout and this raises ``TimeoutError`` in that case.
 
+    Args:
+        sock: Connected socket to read one request from.
+        max_bytes: Size cap; defaults to the current ``MAX_REQUEST_BYTES``.
+            Resolved at call time rather than bound as a default argument, so
+            the module constant stays genuinely overridable.
+
     Raises:
         RequestTooLarge: the peer sent more than ``max_bytes``.
         TimeoutError: the socket timeout elapsed mid-request.
     """
+    limit = MAX_REQUEST_BYTES if max_bytes is None else max_bytes
     chunks: list[bytes] = []
     total = 0
     while True:
@@ -83,8 +94,8 @@ def _recv_all(sock: socket.socket, max_bytes: int = MAX_REQUEST_BYTES) -> bytes:
             break
         chunks.append(chunk)
         total += len(chunk)
-        if total > max_bytes:
-            raise RequestTooLarge(f"request exceeded {max_bytes} bytes")
+        if total > limit:
+            raise RequestTooLarge(f"request exceeded {limit} bytes")
         # JSON is self-delimiting once we have the whole document.  Checking
         # after every chunk means a well-formed request is served immediately
         # even if the peer never half-closes (and keeps mock sockets simple).
@@ -291,7 +302,15 @@ class PyMOLSocketServer:
         try:
             self.server_socket.bind((self.host, self.port))
             self.server_socket.listen(5)
-            self.server_socket.settimeout(1.0)
+            # Bounds how long stop() waits: the loop only notices `running` went
+            # false when accept() returns. Closing the socket from the stopping
+            # thread would be faster but does not reliably wake accept() on
+            # Linux, and risks an fd-reuse race — a short poll is simpler and
+            # costs a few no-op wakeups per second on an idle session.
+            self.server_socket.settimeout(_ACCEPT_POLL_INTERVAL)
+            # Report the port actually bound, which differs from self.port when
+            # 0 was requested (ephemeral).
+            self.port = self.server_socket.getsockname()[1]
             print(f"MCPymol Native Plugin listening on {self.host}:{self.port}")
 
             while self.running:
