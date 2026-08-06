@@ -7,9 +7,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from mcpymol.server import (
+    _DEFAULT_TIMEOUT,
     _SLOW_OP_TIMEOUT,
     DEFAULT_MULTIMER_CUTOFF,
     _apply_multimer_heuristic,
+    _call,
     _parse_groups,
     _repair_to_stl,
     cinematic_view,
@@ -1007,3 +1009,123 @@ def test_fetch_structure_passes_cutoff_through_to_the_heuristic(mock_sr):
         if c.args[0] == "get_chains" and "around" in str(c.kwargs.get("args"))
     ]
     assert around and "around 4.5" in around[0]
+
+
+# ── _call: the shared body of every primitive wrapper ────────────────────────
+
+
+@patch("mcpymol.server.send_request")
+def test_call_forwards_values_in_declaration_order(mock_sr):
+    mock_sr.return_value = {"status": "success", "result": "OK"}
+
+    assert _call("zoom", selection="1abc", buffer="5") == "Executed zoom successfully."
+    assert mock_sr.call_args.args[0] == "zoom"
+    assert mock_sr.call_args.kwargs["args"] == ["1abc", "5"]
+
+
+@patch("mcpymol.server.send_request")
+def test_call_drops_unset_trailing_arguments(mock_sr):
+    mock_sr.return_value = {"status": "success", "result": "OK"}
+
+    _call("ray", width="1920", height=None)
+
+    assert mock_sr.call_args.kwargs["args"] == ["1920"]
+
+
+@patch("mcpymol.server.send_request")
+def test_call_with_no_arguments_sends_none(mock_sr):
+    mock_sr.return_value = {"status": "success", "result": "OK"}
+
+    _call("deselect")
+
+    assert mock_sr.call_args.kwargs["args"] == []
+
+
+@patch("mcpymol.server.send_request")
+def test_call_rejects_a_gap_instead_of_mislabelling_it(mock_sr):
+    """The old wrappers filtered out None anywhere in the list, so a height
+    with no width was sent as the *width* — a silently wrong render."""
+    result = _call("ray", width=None, height="1080")
+
+    assert result.startswith("Error: ray was given 'height' without 'width'")
+    mock_sr.assert_not_called()
+
+
+@patch("mcpymol.server.send_request")
+def test_call_names_every_missing_argument(mock_sr):
+    result = _call("symexp", prefix=None, selection=None, cutoff="20")
+
+    assert "'prefix'" in result and "'selection'" in result
+    mock_sr.assert_not_called()
+
+
+@patch("mcpymol.server.send_request")
+def test_call_propagates_plugin_errors(mock_sr):
+    mock_sr.return_value = {"status": "error", "error": "no such object: nope"}
+
+    assert _call("zoom", selection="nope") == "no such object: nope"
+
+
+@patch("mcpymol.server.send_request")
+def test_call_falls_back_when_error_field_is_missing(mock_sr):
+    mock_sr.return_value = {"status": "error"}
+
+    assert _call("zoom", selection="x") == "Unknown error"
+
+
+@patch("mcpymol.server.send_request")
+def test_call_uses_the_default_timeout(mock_sr):
+    mock_sr.return_value = {"status": "success", "result": "OK"}
+
+    _call("zoom", selection="all")
+
+    assert mock_sr.call_args.kwargs["timeout"] == _DEFAULT_TIMEOUT
+
+
+@patch("mcpymol.server.send_request")
+def test_wrapper_surfaces_the_gap_error(mock_sr):
+    """End-to-end through a real tool, not just the helper."""
+    assert ray(height="1080").startswith("Error: ray was given 'height' without 'width'")
+    mock_sr.assert_not_called()
+
+
+# ── tool registry ────────────────────────────────────────────────────────────
+
+
+def _registered_tools():
+    import asyncio
+
+    from mcpymol.server import mcp
+
+    return {t.name: t for t in asyncio.run(mcp.list_tools())}
+
+
+def test_every_tool_has_a_description_and_schema():
+    """Guards the wrapper refactor: the bodies are shared, but each tool must
+    still present its own real signature and docstring to the MCP client."""
+    tools = _registered_tools()
+
+    assert len(tools) > 100
+    for name, tool in tools.items():
+        assert (tool.description or "").strip(), f"{name} has no description"
+        assert tool.inputSchema.get("type") == "object", f"{name} has no object schema"
+
+
+@pytest.mark.parametrize(
+    "name,required,optional",
+    [
+        ("zoom", [], ["selection", "buffer"]),
+        ("symexp", ["prefix", "selection"], ["cutoff", "segi"]),
+        ("util_cbc", [], ["selection"]),
+        ("deselect", [], []),
+        ("set", ["setting", "value"], ["selection"]),  # tool-name override
+        ("as", ["representation"], ["selection"]),
+        ("super", ["mobile"], ["target", "options"]),
+    ],
+)
+def test_wrapper_schemas_match_their_signatures(name, required, optional):
+    """Including the three tools whose MCP name differs from the Python name."""
+    schema = _registered_tools()[name].inputSchema
+
+    assert sorted(schema.get("required", [])) == sorted(required)
+    assert sorted(schema["properties"]) == sorted(required + optional)
