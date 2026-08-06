@@ -1,3 +1,4 @@
+import inspect
 import json
 import subprocess
 import sys
@@ -7,6 +8,8 @@ import pytest
 
 from mcpymol.server import (
     _SLOW_OP_TIMEOUT,
+    DEFAULT_MULTIMER_CUTOFF,
+    _apply_multimer_heuristic,
     _parse_groups,
     _repair_to_stl,
     cinematic_view,
@@ -856,3 +859,151 @@ def test_slow_ops_use_the_long_timeout(mock_sr, func, args, action):
 
     assert mock_sr.call_args.kwargs["timeout"] == _SLOW_OP_TIMEOUT
     assert mock_sr.call_args.args[0] == action
+
+
+# ── _repair_to_stl: Poisson and the auto fallback chain ──────────────────────
+
+
+def _poisson_stack(reconstructed_faces=5000, watertight=True):
+    """Return (fake_trimesh, fake_pymeshlab, reconstructed_mesh)."""
+    fake_tm = MagicMock()
+    mesh = MagicMock()
+    mesh.faces = list(range(reconstructed_faces))
+    mesh.is_watertight = watertight
+    fake_tm.load.return_value = mesh
+
+    fake_ml = MagicMock()
+    return fake_tm, fake_ml, mesh
+
+
+def test_repair_poisson_runs_the_reconstruction_pipeline():
+    fake_tm, fake_ml, _mesh = _poisson_stack()
+
+    with patch.dict(sys.modules, {"trimesh": fake_tm, "pymeshlab": fake_ml}):
+        info = _repair_to_stl("in.obj", "out.stl", "poisson", voxel_pitch=0.7, poisson_depth=9)
+
+    assert info["method"] == "poisson"
+    assert info["faces"] == 5000
+    assert info["watertight"] is True
+
+    ms = fake_ml.MeshSet.return_value
+    ms.load_new_mesh.assert_called_once_with("in.obj")
+    ms.save_current_mesh.assert_called_once_with("out.stl", binary=True)
+
+    # The screened-Poisson filter must receive the requested octree depth.
+    depths = [c.kwargs.get("depth") for c in ms.apply_filter.call_args_list]
+    assert 9 in depths
+
+
+def test_repair_poisson_tries_legacy_filter_names():
+    """pymeshlab renamed its filters between releases; the shim must fall
+    through to the older name instead of failing the whole export."""
+    fake_tm, fake_ml, _ = _poisson_stack()
+    ms = fake_ml.MeshSet.return_value
+
+    # Every modern name raises; only the legacy alias succeeds.
+    modern = {
+        "meshing_remove_duplicate_vertices",
+        "meshing_remove_null_faces",
+        "meshing_remove_unreferenced_vertices",
+        "compute_normal_per_vertex",
+        "generate_surface_reconstruction_screened_poisson",
+    }
+
+    def apply_filter(name, **kw):
+        if name in modern:
+            raise RuntimeError(f"unknown filter {name}")
+
+    ms.apply_filter.side_effect = apply_filter
+
+    with patch.dict(sys.modules, {"trimesh": fake_tm, "pymeshlab": fake_ml}):
+        info = _repair_to_stl("in.obj", "out.stl", "poisson", voxel_pitch=0.7, poisson_depth=10)
+
+    assert info["method"] == "poisson"
+    tried = [c.args[0] for c in ms.apply_filter.call_args_list]
+    assert "surface_reconstruction_screened_poisson" in tried
+
+
+def test_repair_poisson_raises_when_no_filter_name_works():
+    fake_tm, fake_ml, _ = _poisson_stack()
+    fake_ml.MeshSet.return_value.apply_filter.side_effect = RuntimeError("nope")
+
+    with (
+        patch.dict(sys.modules, {"trimesh": fake_tm, "pymeshlab": fake_ml}),
+        pytest.raises(RuntimeError, match="none of"),
+    ):
+        _repair_to_stl("in.obj", "out.stl", "poisson", voxel_pitch=0.7, poisson_depth=10)
+
+
+def test_repair_auto_uses_poisson_when_not_watertight():
+    """auto on an open surface: Poisson, not the light cleanup."""
+    fake_tm, fake_ml, mesh = _poisson_stack()
+    raw = MagicMock()
+    raw.is_watertight = False
+    # First load() is the watertight probe; later loads return the rebuilt mesh.
+    fake_tm.load.side_effect = [raw] + [mesh] * 5
+
+    with patch.dict(sys.modules, {"trimesh": fake_tm, "pymeshlab": fake_ml}):
+        info = _repair_to_stl("in.obj", "out.stl", "auto", voxel_pitch=0.7, poisson_depth=10)
+
+    assert info["method"] == "poisson"
+
+
+def test_repair_auto_falls_back_to_voxel_when_poisson_fails():
+    """Regression: a Poisson blow-up must degrade to voxel, not kill the export."""
+    fake_tm = MagicMock()
+    raw = MagicMock()
+    raw.is_watertight = False
+
+    voxel_body = MagicMock()
+    voxel_body.faces = list(range(777))
+    voxel_body.is_watertight = True
+    voxel_src = MagicMock()
+    voxel_src.voxelized.return_value.fill.return_value.marching_cubes.split.return_value = [
+        voxel_body
+    ]
+    fake_tm.load.side_effect = [raw, voxel_src]
+
+    fake_ml = MagicMock()
+    fake_ml.MeshSet.side_effect = RuntimeError("poisson exploded")
+
+    with patch.dict(sys.modules, {"trimesh": fake_tm, "pymeshlab": fake_ml}):
+        info = _repair_to_stl("in.obj", "out.stl", "auto", voxel_pitch=0.7, poisson_depth=10)
+
+    assert info["method"] == "voxel (poisson fallback)"
+    assert info["faces"] == 777
+    voxel_body.export.assert_called_once_with("out.stl")
+
+
+def test_repair_rejects_unknown_method():
+    with (
+        patch.dict(sys.modules, {"trimesh": MagicMock()}),
+        pytest.raises(ValueError, match="unknown method"),
+    ):
+        _repair_to_stl("in.obj", "out.stl", "sculpt", voxel_pitch=0.7, poisson_depth=10)
+
+
+# ── multimer cutoff: one default, documented ─────────────────────────────────
+
+
+@pytest.mark.parametrize("func", [fetch_structure, load_structure])
+def test_multimer_cutoff_default_is_the_documented_constant(func):
+    """The helper's own default used to be 5.0 while both callers passed 8.0,
+    so the signature contradicted the README."""
+    default = inspect.signature(func).parameters["multimer_cutoff"].default
+    assert default == DEFAULT_MULTIMER_CUTOFF
+    assert inspect.signature(_apply_multimer_heuristic).parameters["cutoff"].default == default
+
+
+@patch("mcpymol.server.send_request")
+def test_fetch_structure_passes_cutoff_through_to_the_heuristic(mock_sr):
+    mock_sr.side_effect = _sr_mock(get_chains=["A"])
+
+    fetch_structure(pdb_code="1abc", multimer_cutoff=4.5)
+
+    around = [
+        c.kwargs["args"][0]
+        for c in mock_sr.call_args_list
+        if c.args[0] == "get_chains" and "around" in str(c.kwargs.get("args"))
+    ]
+    assert around and "around 4.5" in around[0]
