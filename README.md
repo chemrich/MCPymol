@@ -9,7 +9,9 @@ PyMOL is great, but its syntax is famously obscure — and despite the name, it 
 ## What you get
 
 - **A vocabulary the LLM understands.** Tools like `fetch_structure`, `ligand_view`, `interface_view`, `mutation_view`, `conservation_view` do high-level setup in one call: pick the biological assembly, hide solvent, color sensibly, label the right residues, draw the right H-bonds.
+- **Renders the model can see.** `render` ray-traces and hands the image straight back, so the assistant can look at what it made and fix it — rather than writing a PNG it has no way to inspect.
 - **~60 PyMOL primitives** exposed as individual tools (`show`, `hide`, `color`, `select`, `distance`, `align`, `spectrum`, …) so the model can compose finer motions when the high-level tools don't quite fit.
+- **Predicted structures.** A UniProt accession fetches from AlphaFold DB and colors by pLDDT confidence in the official palette.
 - **Scene introspection.** `list_objects`, `list_chains`, `list_ligands` let the model check what's actually loaded before guessing.
 - **Smart structure prep.** Fetching a PDB code grabs the biological assembly when one exists, then runs a BFS heuristic over chain–chain contacts (`multimer_cutoff`, default 8 Å) so sprawling functional multimers like the CRP pentamer or ferritin cage stay whole while crystallographic copies get dropped. Waters and crystallization additives are hidden automatically.
 - **Two-process bridge.** PyMOL's GUI has its own Python; MCPymol works by running a tiny TCP listener *inside* PyMOL plus a separate FastMCP server *outside* it.
@@ -27,12 +29,15 @@ The plugin half runs inside PyMOL and dispatches to `pymol.cmd`. The bridge half
 
 ## Try it
 
-> "Fetch ubiquitin (1ubq) and show it as a cartoon."
+> "Fetch ubiquitin (1ubq) and show it as a cartoon, then show me the render."
 > "Color the alpha helices red and the beta sheets blue."
 > "What ligands are in 1HSG?"
 > "Show the binding pocket around MK1 in 1HSG."
 > "Highlight mutations E6V, K16E, and V67F in hemoglobin (4HHB)."
 > "Run a Poisson-Boltzmann electrostatics calculation on 1LYZ."
+> "Get the AlphaFold model for P69905 and tell me how confident it is."
+> "Superpose 1AKE onto 4AKE and show me where adenylate kinase moves."
+> "Make me a turntable animation of the nucleosome."
 
 Tip: if the model isn't sure what's loaded, ask it to *list the objects* — it'll call `list_objects` and ground itself before guessing names.
 
@@ -145,7 +150,24 @@ If your network blocks PyPI, you may also need to tweak the repository URLs insi
 PYTHONPATH=src uv run pytest tests/
 ```
 
-The suite mocks the socket layer and PyMOL's `cmd` module, so it runs without a PyMOL install. 130+ tests cover the socket payloads, the bridge framing, the conservation pipeline (A3M parsing, Shannon entropy, MMseqs2 mocking, MSA→B-factor mapping), and every view.
+The suite mocks the socket layer and PyMOL's `cmd` module, so it runs without a PyMOL install. 340+ tests cover the socket payloads, the bridge framing, the conservation pipeline (A3M parsing, Shannon entropy, MMseqs2 mocking, MSA→B-factor mapping), the mesh-repair paths, and every view. `tests/test_bridge_roundtrip.py` additionally runs the real bridge against the real plugin listener over TCP on an ephemeral port, so the wire format is checked against itself rather than against a mock.
+
+### Layout
+
+| Module | Responsibility |
+| --- | --- |
+| `mcpymol/app.py` | the shared FastMCP application |
+| `mcpymol/bridge.py` | socket protocol to the in-PyMOL plugin |
+| `mcpymol/structures.py` | fetching/loading structures, sessions, introspection |
+| `mcpymol/primitives.py` | one thin tool per `pymol.cmd` function |
+| `mcpymol/views.py` | the `*_view` scene presets |
+| `mcpymol/rendering.py` | `render`, `turntable` |
+| `mcpymol/comparison.py` | `superposition_view` |
+| `mcpymol/conservation.py` | MSA + Shannon entropy |
+| `mcpymol/printing.py` | watertight STL export |
+| `mcpymol/plugin.py` | the half that runs *inside* PyMOL |
+
+`mcpymol/server.py` is the entry point and re-exports everything, so `from mcpymol.server import ligand_view` still works.
 
 ## The view library
 
@@ -266,6 +288,40 @@ Depth-cueing + fog + soft shadows on a black background. Best on big assemblies 
 ### `pointillist_view` — starfield surface
 
 Replaces the surface with a dense dot cloud; ligands become bright yellow stars. More art than analysis.
+
+### `plddt_view` — AlphaFold confidence
+
+Colors a predicted model by pLDDT in AlphaFold's official palette: dark blue >90 (very high), light blue 70–90 (confident), yellow 50–70 (low), orange <50 (very low). Reports the breakdown, e.g. *"very high: 62%, confident: 21%, …"*.
+
+pLDDT is stored in the B-factor column, which is why `bfactor_view` and `putty_view` render these models backwards — they read low B as *rigid*, whereas low pLDDT means the model doesn't know. `plddt_view` warns if the B-factors don't look like pLDDT at all.
+
+> Get the AlphaFold model for P69905
+
+### `superposition_view` — where two structures differ
+
+Superposes `mobile` onto `target`, then colors the mobile structure by how far each residue's CA actually moved: blue = unchanged, red = most shifted. The target stays as a grey reference. Reports the RMSD, the mean and max shift, and names the worst-shifted residues.
+
+An RMSD alone tells you a structure moved; this tells you where.
+
+> Superpose 1AKE onto 4AKE and show me where it moves
+
+## Rendering and sessions
+
+### `render` — see what you made
+
+Ray-traces the current scene and returns the image as MCP image content, so the model can actually look at it and iterate. This is the tool to use instead of `ray` + `png`, which only leave a file behind.
+
+Defaults to 1000×750 — the image is inlined into the conversation, and base64 inflates it by a third. Above 5 MB (`MCPYMOL_MAX_IMAGE_BYTES`) it returns the path instead. `ray_trace=False` gives a fast unshaded snapshot for checking a selection or camera angle.
+
+### `turntable` — 360° animation
+
+Writes a numbered PNG sequence spinning the camera a full turn, plus the `ffmpeg` command to assemble it. Defaults to the fast OpenGL renderer; ray-tracing 36 frames of a large assembly can take an hour.
+
+> Make me a turntable animation of 1AOI
+
+### `save_session` / `load_session` — keep a scene
+
+`.pse` round-trips the entire session: every object, selection, representation, color, scene and the camera. Save before experimenting with a scene that took effort to build. `load_session(merge=True)` adds a saved scene to the current one rather than replacing it.
 
 ## 🖨️ 3D Printing Export
 

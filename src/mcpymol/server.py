@@ -158,6 +158,7 @@ from mcpymol.rendering import (
 )
 from mcpymol.structures import (
     _GHOST_HEART_GREENS,
+    _SESSION_SUFFIXES,
     _UNIPROT_RE,
     ALPHAFOLD_URL,
     DEFAULT_ALPHAFOLD_VERSION,
@@ -171,7 +172,9 @@ from mcpymol.structures import (
     list_chains,
     list_ligands,
     list_objects,
+    load_session,
     load_structure,
+    save_session,
 )
 from mcpymol.views import (
     _PB_SUBPROCESS_TIMEOUT,
@@ -214,6 +217,7 @@ __all__ = [
     "_PNG_EOF",
     "_PRINT_DEPS_HINT",
     "_RECV_CHUNK",
+    "_SESSION_SUFFIXES",
     "_SLOW_OP_TIMEOUT",
     "_TOP_N_SHIFTED",
     "_UNIPROT_RE",
@@ -281,6 +285,7 @@ __all__ = [
     "list_chains",
     "list_ligands",
     "list_objects",
+    "load_session",
     "load_structure",
     "ls",
     "main",
@@ -310,6 +315,7 @@ __all__ = [
     "reset",
     "rock",
     "save",
+    "save_session",
     "scene",
     "scene_order",
     "sculpt_activate",
