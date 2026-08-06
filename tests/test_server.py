@@ -1,15 +1,18 @@
 import json
+import subprocess
 import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from mcpymol.server import (
+    _SLOW_OP_TIMEOUT,
     _parse_groups,
     _repair_to_stl,
     cinematic_view,
     color,
     crosslink_view,
+    draw,
     electrostatic_view,
     fetch_structure,
     hydrophobic_surface_view,
@@ -19,13 +22,18 @@ from mcpymol.server import (
     list_ligands,
     list_objects,
     load_structure,
+    mpng,
     mutation_view,
     pharmacophore_view,
+    png,
     pocket_view,
     pointillist_view,
+    poisson_boltzmann_view,
     print_export,
     print_ribbon_view,
     putty_view,
+    ray,
+    save,
     select,
     send_request,
     show,
@@ -43,7 +51,7 @@ def _sr_mock(**action_results):
     it is invoked with (action, args, kwargs) to produce the result.
     """
 
-    def fake(action, args=None, kwargs=None):
+    def fake(action, args=None, kwargs=None, **_ignored):
         if action in action_results:
             val = action_results[action]
             result = val(action, args, kwargs) if callable(val) else val
@@ -712,3 +720,139 @@ def test_repair_voxel_consolidates_to_single_body():
     assert info["faces"] == 900
     big.export.assert_called_once_with("out.stl")
     fake_tm.repair.fill_holes.assert_called_once_with(big)
+
+
+# ── poisson_boltzmann_view: external-tool failure handling ────────────────────
+
+
+def _pb_send_request(save_status="success"):
+    """Fake send_request that actually writes the PDB the solver will read."""
+
+    def fake(action, args=None, kwargs=None, **_ignored):
+        if action == "do" and args and args[0].startswith("save "):
+            if save_status == "error":
+                return {"status": "error", "error": "session is busy"}
+            path = args[0].split("save ", 1)[1].split(",")[0].strip()
+            with open(path, "w") as fh:
+                fh.write("ATOM      1  N   MET A   1       0.0   0.0   0.0\n")
+        return {"status": "success", "result": "OK"}
+
+    return fake
+
+
+@patch("subprocess.run")
+@patch("mcpymol.server.send_request")
+def test_pb_view_reports_save_failure(mock_sr, mock_run):
+    """A failed save must be reported, not left to surface as a PDB2PQR error
+    about a file that was never written."""
+    mock_sr.side_effect = _pb_send_request(save_status="error")
+
+    result = poisson_boltzmann_view(obj_name="1LYZ")
+
+    assert "Error saving 1LYZ" in result
+    assert "session is busy" in result
+    mock_run.assert_not_called()
+
+
+@patch("subprocess.run")
+@patch("mcpymol.server.send_request")
+def test_pb_view_reports_missing_pdb(mock_sr, mock_run):
+    """PyMOL claiming success without producing the file means the two halves
+    aren't sharing a filesystem — say so instead of running the solver."""
+    mock_sr.side_effect = _sr_mock()  # never writes anything
+
+    result = poisson_boltzmann_view(obj_name="1LYZ")
+
+    assert "did not write" in result
+    assert "same machine" in result
+    mock_run.assert_not_called()
+
+
+@patch("subprocess.run")
+@patch("mcpymol.server.send_request")
+def test_pb_view_reports_missing_pdb2pqr(mock_sr, mock_run):
+    mock_sr.side_effect = _pb_send_request()
+    mock_run.side_effect = FileNotFoundError("pdb2pqr")
+
+    result = poisson_boltzmann_view(obj_name="1LYZ")
+
+    assert "PDB2PQR not found on PATH" in result
+    assert "pip install pdb2pqr" in result
+
+
+@patch("subprocess.run")
+@patch("mcpymol.server.send_request")
+def test_pb_view_reports_pdb2pqr_timeout(mock_sr, mock_run):
+    """A wedged solver must not hang the MCP server forever."""
+    mock_sr.side_effect = _pb_send_request()
+    mock_run.side_effect = subprocess.TimeoutExpired(cmd="pdb2pqr", timeout=600.0)
+
+    result = poisson_boltzmann_view(obj_name="1LYZ")
+
+    assert "PDB2PQR timed out" in result
+
+
+@patch("subprocess.run")
+@patch("mcpymol.server.send_request")
+def test_pb_view_reports_missing_apbs(mock_sr, mock_run):
+    mock_sr.side_effect = _pb_send_request()
+    mock_run.side_effect = [MagicMock(returncode=0, stderr=""), FileNotFoundError("apbs")]
+
+    result = poisson_boltzmann_view(obj_name="1LYZ")
+
+    assert "APBS not found on PATH" in result
+    assert "brewsci/bio/apbs" in result
+
+
+@patch("subprocess.run")
+@patch("mcpymol.server.send_request")
+def test_pb_view_reports_apbs_timeout(mock_sr, mock_run):
+    mock_sr.side_effect = _pb_send_request()
+    mock_run.side_effect = [
+        MagicMock(returncode=0, stderr=""),
+        subprocess.TimeoutExpired(cmd="apbs", timeout=600.0),
+    ]
+
+    result = poisson_boltzmann_view(obj_name="1LYZ")
+
+    assert "APBS timed out" in result
+    assert "MCPYMOL_PB_TIMEOUT" in result
+
+
+@patch("subprocess.run")
+@patch("mcpymol.server.send_request")
+def test_pb_view_passes_a_timeout_to_both_solvers(mock_sr, mock_run):
+    """Regression: neither subprocess may run unbounded."""
+    mock_sr.side_effect = _pb_send_request()
+    mock_run.return_value = MagicMock(returncode=1, stderr="boom")
+
+    poisson_boltzmann_view(obj_name="1LYZ")
+
+    assert mock_run.call_args_list, "solver was never invoked"
+    for call in mock_run.call_args_list:
+        assert call.kwargs.get("timeout"), f"no timeout on {call.args[0]!r}"
+
+
+# ── slow operations get a longer socket budget ───────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "func,args,action",
+    [
+        (ray, ("1920", "1080"), "ray"),
+        (draw, ("1920", "1080"), "draw"),
+        (mpng, ("frame_",), "mpng"),
+        (png, ("out.png",), "png"),
+        (save, ("out.pdb",), "save"),
+    ],
+)
+@patch("mcpymol.server.send_request")
+def test_slow_ops_use_the_long_timeout(mock_sr, func, args, action):
+    """Ray-tracing a large scene takes minutes; the 10 s default guaranteed a
+    spurious 'Socket connection failed' on exactly the calls worth waiting for."""
+    mock_sr.return_value = {"status": "success", "result": "OK"}
+
+    func(*args)
+
+    assert mock_sr.call_args.kwargs["timeout"] == _SLOW_OP_TIMEOUT
+    assert mock_sr.call_args.args[0] == action
