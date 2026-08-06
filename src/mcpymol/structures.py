@@ -6,8 +6,29 @@ tools let the model check the session state instead of guessing object names,
 chain IDs or ligand codes.
 """
 
+import os
+import re
+import tempfile
+import urllib.error
+import urllib.request
+
 from mcpymol.app import mcp
 from mcpymol.bridge import send_request
+
+# AlphaFold DB serves predicted models by UniProt accession.  PyMOL's own
+# cmd.fetch only knows the RCSB, so these are downloaded here and loaded from
+# disk.
+ALPHAFOLD_URL = os.environ.get(
+    "MCPYMOL_ALPHAFOLD_URL", "https://alphafold.ebi.ac.uk/files/AF-{acc}-F{frag}-model_v{ver}.cif"
+)
+DEFAULT_ALPHAFOLD_VERSION = 4
+
+# UniProt accession format (the official regex from uniprot.org). Deliberately
+# anchored: a 4-character PDB code can never match, so the two namespaces stay
+# distinguishable when routing a bare identifier.
+_UNIPROT_RE = re.compile(
+    r"^([OPQ][0-9][A-Z0-9]{3}[0-9]|[A-NR-Z][0-9]([A-Z][A-Z0-9]{2}[0-9]){1,2})$", re.IGNORECASE
+)
 
 # Chain–chain contact radius for the BFS multimer heuristic.  8 Å keeps
 # sprawling functional assemblies (CRP pentamer, ferritin cage) whole while
@@ -92,21 +113,79 @@ def _apply_multimer_heuristic(name: str, cutoff: float = DEFAULT_MULTIMER_CUTOFF
     send_request("hide", args=["everything", f"({name}) and solvent"])
 
 
+def _alphafold_accession(identifier: str) -> str | None:
+    """Return the UniProt accession if ``identifier`` names an AlphaFold model.
+
+    Accepts what people actually type: ``af-P12345``, ``AF-P12345-F1``, the
+    full ``AF-P12345-F1-model_v4`` filename, or a bare accession.  Returns None
+    for anything else (notably 4-character PDB codes), so the caller can fall
+    through to the RCSB.
+    """
+    ident = identifier.strip()
+    if not ident:
+        return None
+
+    upper = ident.upper()
+    if upper.startswith("AF-") or upper.startswith("AF_"):
+        # AF-P12345-F1-model_v4 → P12345
+        acc = re.split(r"[-_]", ident[3:])[0]
+        return acc.upper() if _UNIPROT_RE.match(acc) else None
+
+    # A bare accession. PDB codes are exactly four characters and can never
+    # match the UniProt pattern, so this does not shadow them.
+    return upper if _UNIPROT_RE.match(ident) else None
+
+
+def _download_alphafold(accession: str, version: int, fragment: int = 1) -> tuple[str | None, str]:
+    """Download an AlphaFold model to a temp file. Returns (path, message)."""
+    url = ALPHAFOLD_URL.format(acc=accession, frag=fragment, ver=version)
+    try:
+        with urllib.request.urlopen(url, timeout=60) as resp:
+            data = resp.read()
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return None, (
+                f"No AlphaFold model for '{accession}' (model_v{version}). Check the "
+                f"UniProt accession, or try another model_version — the DB is "
+                f"versioned and older entries are not always rebuilt."
+            )
+        return None, f"AlphaFold DB returned HTTP {e.code} for {accession}: {e.reason}"
+    except (urllib.error.URLError, TimeoutError) as e:
+        return None, f"Could not reach AlphaFold DB ({url}): {e}"
+
+    if not data:
+        return None, f"AlphaFold DB returned an empty file for {accession}."
+
+    fd, path = tempfile.mkstemp(suffix=".cif", prefix=f"AF-{accession}-")
+    with os.fdopen(fd, "wb") as fh:
+        fh.write(data)
+    return path, ""
+
+
 @mcp.tool()
 def fetch_structure(
     pdb_code: str, obj_name: str | None = None, multimer_cutoff: float = DEFAULT_MULTIMER_CUTOFF
 ) -> str:
     """
-    Fetches a protein structure from the PDB.
+    Fetches a protein structure from the PDB, or a predicted model from AlphaFold DB.
+
     By default, it attempts to fetch the first biological assembly (multimer),
     and removes any unrelated chains/states that are not part of the primary multimer.
 
+    A UniProt accession or an ``AF-`` prefixed identifier routes to AlphaFold DB
+    instead and is coloured by pLDDT confidence — see :func:`fetch_alphafold`.
+
     Args:
-        pdb_code: 4-letter PDB code (e.g. "1abc")
+        pdb_code: 4-letter PDB code (e.g. "1abc"), or an AlphaFold identifier
+            (e.g. "P69905", "af-P69905").
         obj_name: Optional custom name for the object in PyMOL
         multimer_cutoff: Distance (A) between chains to keep them in the same multimer.
                          Default 8.0A is suitable for most functional assemblies.
     """
+    accession = _alphafold_accession(pdb_code)
+    if accession is not None:
+        return fetch_alphafold(uniprot_id=accession, obj_name=obj_name)
+
     name = obj_name if obj_name else pdb_code
 
     send_request("do", args=["reinitialize"])
@@ -148,6 +227,61 @@ def load_structure(
     _apply_ghost_heart(obj_name)
     send_request("zoom", args=[obj_name])
     return f"Successfully loaded {file_path} as '{obj_name}' with ghost heart style and BFS multimer heuristic (cutoff={multimer_cutoff}A)."
+
+
+@mcp.tool()
+def fetch_alphafold(
+    uniprot_id: str,
+    obj_name: str | None = None,
+    model_version: int = DEFAULT_ALPHAFOLD_VERSION,
+    fragment: int = 1,
+) -> str:
+    """
+    Fetches a predicted structure from AlphaFold DB by UniProt accession.
+
+    These are *predictions*, not experimental structures, so the model is
+    coloured by pLDDT confidence rather than the usual style — dark blue is
+    reliable, orange is essentially unmodelled. Read the orange and yellow
+    regions as "probably disordered or wrong", not as flexible loops.
+
+    Note that pLDDT rides in the B-factor column, so ``bfactor_view`` and
+    ``putty_view`` will mis-colour these models (they assume low = rigid,
+    which is backwards for confidence). Use ``plddt_view`` instead.
+
+    Args:
+        uniprot_id: UniProt accession (e.g. "P69905" for human haemoglobin
+            alpha). An "AF-" prefix is accepted and stripped.
+        obj_name: Optional custom name for the object in PyMOL.
+        model_version: AlphaFold DB model version. 4 is current.
+        fragment: Fragment number for long proteins split across models
+            (F1, F2, …). Most entries only have F1.
+    """
+    accession = _alphafold_accession(uniprot_id) or uniprot_id.strip().upper()
+    name = obj_name if obj_name else f"AF_{accession}"
+
+    path, error = _download_alphafold(accession, model_version, fragment)
+    if path is None:
+        return error
+
+    try:
+        send_request("do", args=["reinitialize"])
+        send_request("set", args=["mouse_wheel_scale", "0.1"])
+        send_request("delete", args=[name])
+
+        res = send_request("load", args=[path, name], timeout=120.0)
+        if res.get("status") == "error":
+            return f"Error loading AlphaFold model for {accession}: {res.get('error')}"
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+    # A predicted monomer — the multimer heuristic has nothing to do here.
+    from mcpymol.views import plddt_view
+
+    summary = plddt_view(obj_name=name)
+    return f"Fetched AlphaFold model AF-{accession}-F{fragment} (v{model_version}) as '{name}'.\n{summary}"
 
 
 # ── Scene introspection ──────────────────────────────────────────────────────

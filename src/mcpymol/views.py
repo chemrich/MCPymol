@@ -98,6 +98,99 @@ def bfactor_view(obj_name: str) -> str:
     return f"Showing B-factor view for {obj_name}: blue=rigid, red=flexible."
 
 
+# AlphaFold's published pLDDT confidence bands and their official colours.
+# Ordered low → high; each entry is (name, lower_bound, rgb, label).
+_PLDDT_BANDS = [
+    ("plddt_very_low", 0.0, (1.000, 0.490, 0.271), "very low (<50)"),
+    ("plddt_low", 50.0, (1.000, 0.859, 0.075), "low (50-70)"),
+    ("plddt_confident", 70.0, (0.396, 0.796, 0.953), "confident (70-90)"),
+    ("plddt_very_high", 90.0, (0.051, 0.341, 0.827), "very high (>90)"),
+]
+
+
+def _read_ca_bfactors(obj_name: str) -> list[float] | None:
+    """Per-residue B-factors (one per CA), read back via a PDB dump.
+
+    PyMOL has no "send me a variable" command, so the same trick
+    ``list_ligands`` uses applies: ask for the atoms as PDB text and parse the
+    fixed-width columns.
+    """
+    res = send_request("get_pdbstr", args=[f"({obj_name}) and name CA"], timeout=60.0)
+    if res.get("status") == "error":
+        return None
+    values = []
+    for line in (res.get("result") or "").splitlines():
+        if line.startswith(("ATOM  ", "HETATM")):
+            try:
+                values.append(float(line[60:66]))
+            except ValueError:
+                continue
+    return values
+
+
+@mcp.tool()
+def plddt_view(obj_name: str) -> str:
+    """
+    Colors an AlphaFold model by pLDDT confidence, using the official palette.
+
+    Dark blue = very high (>90), light blue = confident (70-90), yellow = low
+    (50-70), orange = very low (<50). Regions below 70 are usually intrinsically
+    disordered or simply unreliable — read them as "the model does not know",
+    not as a flexible loop.
+
+    AlphaFold stores pLDDT in the B-factor column, which is why ``bfactor_view``
+    and ``putty_view`` get these models backwards: they assume low = rigid,
+    whereas low pLDDT = low confidence. Use this instead for predicted models.
+
+    Args:
+        obj_name: PyMOL object name (e.g. "AF_P69905")
+    """
+    scores = _read_ca_bfactors(obj_name)
+    if scores is None:
+        return f"Error: could not read B-factors from '{obj_name}'."
+    if not scores:
+        return f"Error: no residues found in '{obj_name}'."
+
+    send_request("hide", args=["everything", obj_name])
+    send_request("show", args=["cartoon", obj_name])
+
+    for i, (color_name, lower, (r, g, b), _label) in enumerate(_PLDDT_BANDS):
+        send_request("do", args=[f"set_color {color_name}, [{r}, {g}, {b}]"])
+        # Paint low-to-high; each band's upper edge is the next band's floor,
+        # and the last band is open-ended.
+        sel = f"({obj_name}) and b > {lower}"
+        if i + 1 < len(_PLDDT_BANDS):
+            sel += f" and b < {_PLDDT_BANDS[i + 1][1]}"
+        send_request("color", args=[color_name, sel])
+
+    send_request("do", args=["bg_color black"])
+    send_request("center", args=[obj_name])
+    send_request("do", args=[f"origin {obj_name}"])
+
+    # A confidence breakdown is the number people actually want from a
+    # predicted model, and it is cheap now that the scores are already here.
+    total = len(scores)
+    counts = []
+    for i, (_name, lower, _rgb, label) in enumerate(_PLDDT_BANDS):
+        upper = _PLDDT_BANDS[i + 1][1] if i + 1 < len(_PLDDT_BANDS) else 101.0
+        n = sum(1 for s in scores if lower <= s < upper)
+        counts.append(f"{label}: {100.0 * n / total:.0f}%")
+
+    mean = sum(scores) / total
+    warning = ""
+    if max(scores) > 100.0 or mean == 0.0:
+        warning = (
+            " NOTE: these B-factors do not look like pLDDT (expected 0–100); "
+            "this may be an experimental structure, where bfactor_view is the "
+            "right tool."
+        )
+
+    return (
+        f"Showing pLDDT confidence for {obj_name} over {total} residues "
+        f"(mean {mean:.1f}). " + ", ".join(counts) + "." + warning
+    )
+
+
 @mcp.tool()
 def interface_view(obj_name: str, chain_a: str, chain_b: str) -> str:
     """
