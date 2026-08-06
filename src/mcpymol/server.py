@@ -20,6 +20,15 @@ PORT = int(os.environ.get("MCPYMOL_PORT", 9876))
 # MMseqs2 server for evolutionary conservation (ColabFold public API by default)
 MMSEQS_URL = os.environ.get("MCPYMOL_MMSEQS_URL", "https://api.colabfold.com")
 
+# Wall-clock ceiling for the external APBS/PDB2PQR binaries.  Without one a
+# wedged solver hangs the whole MCP server, since tool calls are synchronous.
+_PB_SUBPROCESS_TIMEOUT = float(os.environ.get("MCPYMOL_PB_TIMEOUT", 600.0))
+
+# Operations that legitimately run for minutes: ray-tracing a large scene,
+# writing a movie frame series, saving a big assembly.  The 10 s default is
+# right for the interactive commands but guarantees a spurious timeout here.
+_SLOW_OP_TIMEOUT = float(os.environ.get("MCPYMOL_SLOW_OP_TIMEOUT", 600.0))
+
 # Ordered green shades used by the ghost heart style
 _GHOST_HEART_GREENS = ["forest", "limegreen", "chartreuse", "palegreen", "lime", "tv_green"]
 
@@ -1066,27 +1075,59 @@ def poisson_boltzmann_view(obj_name: str) -> str:
         apbs_in = os.path.join(tmpdir, f"{obj_name}.in")
         dx_path = pqr_path + ".dx"
 
-        # Save protein from PyMOL
-        send_request("do", args=[f"save {pdb_path}, ({obj_name}) and polymer.protein"])
+        # Save protein from PyMOL.  Writing a big assembly can outrun the
+        # default socket timeout, so allow longer and check the result — an
+        # unnoticed failure here surfaces as a baffling PDB2PQR error about a
+        # file that was never written.
+        save_res = send_request(
+            "do", args=[f"save {pdb_path}, ({obj_name}) and polymer.protein"], timeout=120.0
+        )
+        if save_res.get("status") == "error":
+            return f"Error saving {obj_name} for electrostatics: {save_res.get('error')}"
+        if not os.path.exists(pdb_path):
+            return (
+                f"PyMOL did not write {pdb_path}. The bridge and PyMOL must run on the "
+                f"same machine for poisson_boltzmann_view to exchange files."
+            )
 
         # PDB2PQR: assign charges/radii
-        result = subprocess.run(
-            [
-                "pdb2pqr",
-                "--ff=AMBER",
-                f"--apbs-input={apbs_in}",
-                "--with-ph=7.0",
-                pdb_path,
-                pqr_path,
-            ],
-            capture_output=True,
-            text=True,
-        )
+        try:
+            result = subprocess.run(
+                [
+                    "pdb2pqr",
+                    "--ff=AMBER",
+                    f"--apbs-input={apbs_in}",
+                    "--with-ph=7.0",
+                    pdb_path,
+                    pqr_path,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=_PB_SUBPROCESS_TIMEOUT,
+            )
+        except FileNotFoundError:
+            return "PDB2PQR not found on PATH. Install it with: pip install pdb2pqr"
+        except subprocess.TimeoutExpired:
+            return f"PDB2PQR timed out after {_PB_SUBPROCESS_TIMEOUT}s."
         if result.returncode != 0:
             return f"PDB2PQR failed: {result.stderr[-500:]}"
 
         # APBS: compute electrostatic potential
-        result = subprocess.run(["apbs", apbs_in], capture_output=True, text=True, cwd=tmpdir)
+        try:
+            result = subprocess.run(
+                ["apbs", apbs_in],
+                capture_output=True,
+                text=True,
+                cwd=tmpdir,
+                timeout=_PB_SUBPROCESS_TIMEOUT,
+            )
+        except FileNotFoundError:
+            return "APBS not found on PATH. Install it with: brew install brewsci/bio/apbs"
+        except subprocess.TimeoutExpired:
+            return (
+                f"APBS timed out after {_PB_SUBPROCESS_TIMEOUT}s. Large structures can "
+                f"exceed this; raise MCPYMOL_PB_TIMEOUT to allow longer."
+            )
         if result.returncode != 0:
             return f"APBS failed: {result.stderr[-500:]}"
 
@@ -1796,7 +1837,7 @@ def save(filename: str, selection: str | None = "all", state: str | None = "-1")
     if state is not None:
         call_args.append(state)
 
-    res = send_request("save", args=call_args)
+    res = send_request("save", args=call_args, timeout=_SLOW_OP_TIMEOUT)
     if res.get("status") == "error":
         return res.get("error", "Unknown error")
     return "Executed save successfully."
@@ -1813,7 +1854,7 @@ def png(filename: str, options: str | None = None) -> str:
     if options is not None:
         call_args.append(options)
 
-    res = send_request("png", args=call_args)
+    res = send_request("png", args=call_args, timeout=_SLOW_OP_TIMEOUT)
     if res.get("status") == "error":
         return res.get("error", "Unknown error")
     return "Executed png successfully."
@@ -2563,7 +2604,7 @@ def ray(width: str | None = None, height: str | None = None) -> str:
     if height is not None:
         call_args.append(height)
 
-    res = send_request("ray", args=call_args)
+    res = send_request("ray", args=call_args, timeout=_SLOW_OP_TIMEOUT)
     if res.get("status") == "error":
         return res.get("error", "Unknown error")
     return "Executed ray successfully."
@@ -2580,7 +2621,7 @@ def draw(width: str | None = None, height: str | None = None) -> str:
     if height is not None:
         call_args.append(height)
 
-    res = send_request("draw", args=call_args)
+    res = send_request("draw", args=call_args, timeout=_SLOW_OP_TIMEOUT)
     if res.get("status") == "error":
         return res.get("error", "Unknown error")
     return "Executed draw successfully."
@@ -2595,7 +2636,7 @@ def mpng(prefix: str) -> str:
     if prefix is not None:
         call_args.append(prefix)
 
-    res = send_request("mpng", args=call_args)
+    res = send_request("mpng", args=call_args, timeout=_SLOW_OP_TIMEOUT)
     if res.get("status") == "error":
         return res.get("error", "Unknown error")
     return "Executed mpng successfully."
