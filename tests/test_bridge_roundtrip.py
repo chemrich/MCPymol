@@ -16,9 +16,9 @@ from unittest.mock import patch
 
 import pytest
 
-import mcpymol.server as server_module
+import mcpymol.bridge as bridge_module
+from mcpymol.bridge import send_request
 from mcpymol.plugin import PyMOLSocketServer
-from mcpymol.server import send_request
 
 
 @pytest.fixture
@@ -45,7 +45,9 @@ def live_bridge():
         time.sleep(0.01)
     assert port, "listener never bound"
 
-    with patch.object(server_module, "PORT", port):
+    # send_request reads PORT out of its own module globals, so that is the
+    # binding that has to move — not the re-export on mcpymol.server.
+    with patch.object(bridge_module, "PORT", port):
         yield server
 
     server.stop()
@@ -126,7 +128,7 @@ def test_stalled_client_does_not_wedge_the_listener(live_bridge):
     # Must be patched before the stalled peer is accepted — serve_connection
     # reads RECV_TIMEOUT once, at the moment it takes the connection.
     with patch("mcpymol.plugin.RECV_TIMEOUT", 0.5):
-        stalled = socket.create_connection(("127.0.0.1", server_module.PORT))
+        stalled = socket.create_connection(("127.0.0.1", bridge_module.PORT))
         try:
             # A deliberately incomplete JSON document, and never half-closed.
             stalled.sendall(b'{"action": "refresh"')
@@ -175,7 +177,7 @@ def test_concurrent_clients_are_serialized_not_dropped(live_bridge):
 def test_non_json_garbage_gets_an_error_response(live_bridge):
     """A client speaking the wrong protocol gets told so, and the listener
     stays up for the next real request."""
-    with socket.create_connection(("127.0.0.1", server_module.PORT)) as raw:
+    with socket.create_connection(("127.0.0.1", bridge_module.PORT)) as raw:
         raw.sendall(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
         raw.shutdown(socket.SHUT_WR)
         reply = b""
