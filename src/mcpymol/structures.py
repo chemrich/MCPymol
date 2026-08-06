@@ -284,6 +284,85 @@ def fetch_alphafold(
     return f"Fetched AlphaFold model AF-{accession}-F{fragment} (v{model_version}) as '{name}'.\n{summary}"
 
 
+# ── Sessions ─────────────────────────────────────────────────────────────────
+
+# PyMOL decides it is writing a session from the extension, so these are the
+# only two that round-trip a whole scene rather than bare coordinates.
+_SESSION_SUFFIXES = (".pse", ".pse.gz")
+
+
+@mcp.tool()
+def save_session(filename: str) -> str:
+    """
+    Saves the entire PyMOL session to a .pse file.
+
+    A session captures everything — every object, selection, representation,
+    colour, scene and the camera — so the work can be reopened exactly as it
+    was. Use this before experimenting with a scene you would not want to
+    rebuild, and to hand a finished figure to a colleague.
+
+    Unlike ``save``, which writes bare coordinates, this preserves the whole
+    visual state.
+
+    Args:
+        filename: Path to write. A ``.pse`` extension is added if missing.
+    """
+    path = os.path.abspath(os.path.expanduser(filename.strip()))
+    if not path.lower().endswith(_SESSION_SUFFIXES):
+        path += ".pse"
+
+    parent = os.path.dirname(path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+
+    res = send_request("save", args=[path], timeout=300.0)
+    if res.get("status") == "error":
+        return f"Error saving session: {res.get('error')}"
+
+    if not os.path.exists(path):
+        return (
+            f"PyMOL reported success but no file appeared at {path}. If PyMOL is "
+            f"running on a different machine than this bridge, they cannot "
+            f"exchange files."
+        )
+    return f"Saved session to {path} ({os.path.getsize(path) / 1e6:.1f} MB)."
+
+
+@mcp.tool()
+def load_session(filename: str, merge: bool = False) -> str:
+    """
+    Restores a PyMOL session from a .pse file.
+
+    By default this replaces everything currently loaded, exactly as opening
+    the file in PyMOL would. Set ``merge=True`` to add its objects to the
+    current session instead, which is how you get two saved scenes side by
+    side — though note that objects with the same name will collide.
+
+    Args:
+        filename: Path to the .pse file to open.
+        merge: Add to the current session rather than replacing it.
+    """
+    path = os.path.abspath(os.path.expanduser(filename.strip()))
+    if not os.path.exists(path):
+        return f"Error: no such file: {path}"
+    if not path.lower().endswith(_SESSION_SUFFIXES):
+        return (
+            f"Error: {path} is not a PyMOL session (.pse). Use load_structure "
+            f"for coordinate files such as PDB or mmCIF."
+        )
+
+    kwargs = {"partial": 1} if merge else {}
+    res = send_request("load", args=[path], kwargs=kwargs, timeout=300.0)
+    if res.get("status") == "error":
+        return f"Error loading session: {res.get('error')}"
+
+    listed = send_request("get_object_list", args=["all"])
+    objects = listed.get("result") or [] if listed.get("status") == "success" else []
+    how = "Merged" if merge else "Loaded"
+    summary = ", ".join(objects) if objects else "no objects"
+    return f"{how} session {path}. Objects now in the session: {summary}."
+
+
 # ── Scene introspection ──────────────────────────────────────────────────────
 
 

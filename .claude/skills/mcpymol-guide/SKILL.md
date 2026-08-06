@@ -18,6 +18,11 @@ transparency, H-bonds and labels in one call. Reach for
 
 ## Core workflow
 
+0. **Predicted structures.** `fetch_structure` also accepts a UniProt
+   accession (`P69905`, `af-P69905`) and routes it to AlphaFold DB, colouring
+   by pLDDT confidence. For predicted models use `plddt_view`, never
+   `bfactor_view`/`putty_view` — pLDDT lives in the B-factor column and those
+   presets read it backwards (they assume low = rigid; low pLDDT = unreliable).
 1. **`fetch_structure(pdb_code)`** — grabs the biological assembly when one
    exists, runs a BFS chain-contact heuristic (`multimer_cutoff`, default
    8.0 Å) so functional multimers stay whole while crystallographic copies
@@ -27,8 +32,11 @@ transparency, H-bonds and labels in one call. Reach for
    `list_chains(obj_name)`, `list_ligands(obj_name)` instead of guessing
    object names, chain IDs, or 3-letter ligand codes.
 3. **Apply a view preset** (below) or build the scene manually.
-4. **Render**: `ray(width, height)` then `png(filename)`, then `Read` the PNG
-   to actually see it. A bare `png` without `ray` is fast but unshaded.
+4. **Render with `render()`** — it ray-traces and returns the image directly,
+   so you can see the result and iterate. Prefer it over `ray` + `png`, which
+   only leave a file on disk. Pass `ray_trace=False` for a fast unshaded
+   check of a selection or orientation, and keep the width/height modest —
+   the image is inlined into the conversation.
 
 ## View-preset catalogue
 
@@ -45,7 +53,24 @@ All take `obj_name`. Each is a one-call scene.
   needs `apbs` + `pdb2pqr`).
 - **Illustrative:** `textbook_view` (cel-shaded; needs `ray`),
   `cinematic_view` (fog/shadows; needs `ray`), `pointillist_view`.
+- **Predicted-model confidence:** `plddt_view` (AlphaFold pLDDT in the
+  official palette, plus a confidence breakdown).
+- **Comparing two structures:** `superposition_view(mobile, target)` —
+  superposes and colours the mobile structure by per-residue shift, so you
+  see *where* it moved rather than just an RMSD. Names the worst-shifted
+  residues.
 - **3D printing:** `print_ribbon_view` — see below.
+
+## Rendering, movies and sessions
+
+- `render(width, height, ray_trace, filename)` — the one to reach for. Returns
+  the image so you can look at it.
+- `turntable(obj_name, frames, out_dir)` — a 360° PNG sequence plus the
+  ffmpeg line to assemble it. Defaults to the fast renderer; `ray_trace=True`
+  is for finals only (36 traced frames of a big assembly can take an hour).
+- `save_session(filename)` / `load_session(filename)` — `.pse` round-trips
+  the whole scene (objects, colours, camera, scenes). Save before
+  experimenting with a scene that took effort to build.
 
 ## Selection syntax (PyMOL)
 
