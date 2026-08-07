@@ -6,6 +6,8 @@ tools let the model check the session state instead of guessing object names,
 chain IDs or ligand codes.
 """
 
+import itertools
+import json
 import os
 import re
 import tempfile
@@ -14,6 +16,7 @@ import urllib.request
 
 from mcpymol.app import mcp
 from mcpymol.bridge import send_request
+from mcpymol.pdbtext import parse_atoms, residue_order
 
 # AlphaFold DB serves predicted models by UniProt accession.  PyMOL's own
 # cmd.fetch only knows the RCSB, so these are downloaded here and loaded from
@@ -22,6 +25,13 @@ ALPHAFOLD_URL = os.environ.get(
     "MCPYMOL_ALPHAFOLD_URL", "https://alphafold.ebi.ac.uk/files/AF-{acc}-F{frag}-model_v{ver}.cif"
 )
 DEFAULT_ALPHAFOLD_VERSION = 4
+
+# RCSB's data API supplies the metadata PyMOL does not keep: title, method,
+# resolution, release date, source organism.
+RCSB_DATA_URL = os.environ.get("MCPYMOL_RCSB_URL", "https://data.rcsb.org/rest/v1/core")
+
+# A PDB ID is 4 characters starting with a digit; extended IDs are 12.
+_PDB_ID_RE = re.compile(r"^(pdb_[0-9a-z]{8}|[0-9][a-z0-9]{3})$", re.IGNORECASE)
 
 # UniProt accession format (the official regex from uniprot.org). Deliberately
 # anchored: a 4-character PDB code can never match, so the two namespaces stay
@@ -282,6 +292,222 @@ def fetch_alphafold(
 
     summary = plddt_view(obj_name=name)
     return f"Fetched AlphaFold model AF-{accession}-F{fragment} (v{model_version}) as '{name}'.\n{summary}"
+
+
+def _int_result(action: str, args: list) -> int | None:
+    """Run a PyMOL command that returns a count, or None if it did not."""
+    res = send_request(action, args=args)
+    if res.get("status") == "error":
+        return None
+    try:
+        return int(res.get("result"))  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+
+
+def _rcsb_get(path: str, timeout: float = 20.0):
+    """Best-effort GET against the RCSB data API. Returns None on any failure.
+
+    Metadata is a nice-to-have on top of what PyMOL already knows, so a slow
+    or unreachable API must degrade to "no metadata" rather than fail the tool.
+    """
+    try:
+        with urllib.request.urlopen(f"{RCSB_DATA_URL}/{path}", timeout=timeout) as resp:
+            return json.loads(resp.read().decode())
+    except (urllib.error.URLError, TimeoutError, ValueError, OSError):
+        return None
+
+
+def _rcsb_metadata(pdb_id: str) -> dict:
+    """Title, method, resolution, release date and organisms for a PDB entry."""
+    entry = _rcsb_get(f"entry/{pdb_id}")
+    if not entry:
+        return {}
+
+    info: dict = {}
+    if title := (entry.get("struct") or {}).get("title"):
+        info["title"] = title.strip()
+
+    methods = [m.get("method") for m in entry.get("exptl") or [] if m.get("method")]
+    if methods:
+        info["method"] = ", ".join(methods)
+
+    entry_info = entry.get("rcsb_entry_info") or {}
+    resolutions = entry_info.get("resolution_combined") or []
+    if resolutions:
+        info["resolution"] = resolutions[0]
+
+    released = (entry.get("rcsb_accession_info") or {}).get("initial_release_date")
+    if released:
+        info["released"] = released[:10]
+
+    # Source organism lives on the polymer entities, one extra call each; two
+    # is enough to name a complex without turning this into a crawl.
+    entity_ids = (entry.get("rcsb_entry_container_identifiers") or {}).get(
+        "polymer_entity_ids"
+    ) or []
+    organisms: list[str] = []
+    for entity_id in entity_ids[:2]:
+        entity = _rcsb_get(f"polymer_entity/{pdb_id}/{entity_id}", timeout=10.0)
+        for source in (entity or {}).get("rcsb_entity_source_organism") or []:
+            name = source.get("ncbi_scientific_name")
+            if name and name not in organisms:
+                organisms.append(name)
+    if organisms:
+        info["organisms"] = organisms
+    return info
+
+
+@mcp.tool()
+def structure_info(obj_name: str, pdb_id: str | None = None) -> str:
+    """
+    Summarises what a loaded structure actually is, in one call.
+
+    Answers the question you ask before any analysis: what protein is this,
+    how was it determined, at what resolution, what is in the file. Combines
+    what PyMOL knows (chains, residue and atom counts, ligands, symmetry)
+    with entry metadata from the RCSB (title, method, resolution, release
+    date, source organism).
+
+    Metadata lookup is best-effort — it is skipped silently if the object is
+    not named after a PDB entry, or the API is unreachable.
+
+    Args:
+        obj_name: PyMOL object to describe (e.g. "1hsg").
+        pdb_id: PDB code to look up, if the object was renamed and its name
+            no longer matches the entry.
+    """
+    lines: list[str] = []
+
+    chains_res = send_request("get_chains", args=[obj_name])
+    if chains_res.get("status") == "error":
+        return f"Error inspecting '{obj_name}': {chains_res.get('error')}"
+    chains = chains_res.get("result") or []
+
+    code = (pdb_id or obj_name).strip()
+    meta = _rcsb_metadata(code.lower()) if _PDB_ID_RE.match(code) else {}
+
+    header = f"{obj_name}"
+    if meta.get("title"):
+        header += f" — {meta['title']}"
+    lines.append(header)
+
+    provenance = []
+    if meta.get("method"):
+        provenance.append(meta["method"])
+    if meta.get("resolution") is not None:
+        provenance.append(f"{meta['resolution']:.2f} A resolution")
+    if meta.get("released"):
+        provenance.append(f"released {meta['released']}")
+    if provenance:
+        lines.append("  " + ", ".join(provenance))
+    if meta.get("organisms"):
+        lines.append(f"  Source: {', '.join(meta['organisms'])}")
+
+    counts = []
+    for label, selection in (
+        ("atoms", f"({obj_name})"),
+        ("residues", f"({obj_name}) and polymer and name CA"),
+        ("waters", f"({obj_name}) and solvent"),
+    ):
+        n = _int_result("count_atoms", [selection])
+        if n is not None:
+            counts.append(f"{n:,} {label}")
+    if counts:
+        lines.append("  " + ", ".join(counts))
+
+    if chains:
+        lines.append(f"  Chains ({len(chains)}): {', '.join(chains)}")
+    else:
+        lines.append("  No chains found — is the object loaded?")
+
+    ligand_summary = list_ligands(obj_name=obj_name)
+    lines.append(f"  {ligand_summary}")
+
+    n_states = _int_result("count_states", [obj_name])
+    if n_states is not None and n_states > 1:
+        lines.append(f"  {n_states} states (NMR ensemble or trajectory)")
+
+    symmetry = send_request("get_symmetry", args=[obj_name])
+    sym = symmetry.get("result")
+    if isinstance(sym, (list, tuple)) and len(sym) >= 7 and sym[6]:
+        lines.append(f"  Space group {sym[6]}, cell {sym[0]:.1f} x {sym[1]:.1f} x {sym[2]:.1f} A")
+
+    # An AlphaFold model has confidence, not temperature, in the B-factor
+    # column — worth flagging, because it changes which tools are meaningful.
+    dump = send_request("get_pdbstr", args=[f"({obj_name}) and name CA"], timeout=60.0)
+    bfactors = [a.bfactor for a in parse_atoms(dump.get("result") or "", ca_only=True)]
+    if bfactors and not meta and min(bfactors) >= 0.0 and max(bfactors) <= 100.0:
+        lines.append(
+            f"  B-factors span {min(bfactors):.1f}-{max(bfactors):.1f}; if this is a "
+            f"predicted model that column is pLDDT — use plddt_view, not bfactor_view."
+        )
+
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def get_sequence(obj_name: str, chain: str | None = None) -> str:
+    """
+    Returns the amino-acid sequence of a loaded structure, in FASTA.
+
+    Also reports how the sequence positions line up with the residue numbers
+    in the file, and where the chain is broken. Both matter: PDB numbering
+    rarely starts at 1, so "residue 50" in a paper and position 50 in the
+    sequence are usually different residues — and unmodelled loops leave gaps
+    in the structure that the sequence alone does not reveal.
+
+    Args:
+        obj_name: PyMOL object (e.g. "1hsg").
+        chain: Chain to extract. Omit for every chain in the object.
+    """
+    selection = f"({obj_name}) and polymer.protein"
+    if chain:
+        selection += f" and chain {chain}"
+
+    fasta_res = send_request("get_fastastr", args=[selection], timeout=60.0)
+    if fasta_res.get("status") == "error":
+        return f"Error reading sequence from '{obj_name}': {fasta_res.get('error')}"
+
+    fasta = (fasta_res.get("result") or "").strip()
+    if not fasta:
+        where = f"chain {chain} of " if chain else ""
+        return f"No protein sequence found in {where}'{obj_name}'."
+
+    lines = [fasta, ""]
+
+    dump = send_request("get_pdbstr", args=[f"{selection} and name CA"], timeout=60.0)
+    residues = parse_atoms(dump.get("result") or "", ca_only=True)
+    if not residues:
+        return fasta
+
+    by_chain: dict[str, list] = {}
+    for atom in residues:
+        by_chain.setdefault(atom.chain, []).append(atom)
+
+    for chain_id, atoms in by_chain.items():
+        atoms.sort(key=lambda a: residue_order(a.resi))
+        first, last = atoms[0], atoms[-1]
+        label = f"Chain {chain_id or '(blank)'}"
+        lines.append(
+            f"{label}: {len(atoms)} modelled residues, numbered "
+            f"{first.resi}-{last.resi} ({first.resn}{first.resi} to {last.resn}{last.resi})."
+        )
+        if first.resi.isdigit() and int(first.resi) != 1:
+            lines.append(
+                f"  Numbering starts at {first.resi}, so sequence position 1 is "
+                f"residue {first.resi} — offset by {int(first.resi) - 1}."
+            )
+
+        gaps = []
+        for previous, current in itertools.pairwise(atoms):
+            start, end = residue_order(previous.resi)[0], residue_order(current.resi)[0]
+            if end - start > 1:
+                gaps.append(f"{previous.resi}->{current.resi} ({end - start - 1} missing)")
+        if gaps:
+            lines.append(f"  Chain breaks (unmodelled): {', '.join(gaps)}")
+
+    return "\n".join(lines)
 
 
 # ── Sessions ─────────────────────────────────────────────────────────────────

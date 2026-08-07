@@ -9,6 +9,7 @@ import os
 
 from mcpymol.app import mcp
 from mcpymol.bridge import send_request
+from mcpymol.pdbtext import parse_atoms
 
 # Wall-clock ceiling for the external APBS/PDB2PQR binaries.  Without one a
 # wedged solver hangs the whole MCP server, since tool calls are synchronous.
@@ -118,14 +119,7 @@ def _read_ca_bfactors(obj_name: str) -> list[float] | None:
     res = send_request("get_pdbstr", args=[f"({obj_name}) and name CA"], timeout=60.0)
     if res.get("status") == "error":
         return None
-    values = []
-    for line in (res.get("result") or "").splitlines():
-        if line.startswith(("ATOM  ", "HETATM")):
-            try:
-                values.append(float(line[60:66]))
-            except ValueError:
-                continue
-    return values
+    return [a.bfactor for a in parse_atoms(res.get("result") or "", ca_only=True)]
 
 
 @mcp.tool()

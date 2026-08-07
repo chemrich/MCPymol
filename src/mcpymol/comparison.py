@@ -10,6 +10,7 @@ import json
 
 from mcpymol.app import mcp
 from mcpymol.bridge import send_request
+from mcpymol.pdbtext import parse_atoms, residue_order
 
 # Deviations above this are almost always a domain-scale motion rather than
 # local jitter; used only to pick a sensible default colour ceiling.
@@ -20,24 +21,8 @@ _TOP_N_SHIFTED = 8
 
 
 def _parse_ca_coords(pdb_text: str) -> dict[tuple[str, str], tuple[float, float, float]]:
-    """Map (chain, resi) → (x, y, z) from CA records in PDB text.
-
-    Fixed-width PDB columns: chain 22, resSeq 23-26, x/y/z 31-38/39-46/47-54.
-    """
-    coords: dict[tuple[str, str], tuple[float, float, float]] = {}
-    for line in pdb_text.splitlines():
-        if not line.startswith(("ATOM  ", "HETATM")):
-            continue
-        if line[12:16].strip() != "CA":
-            continue
-        try:
-            xyz = (float(line[30:38]), float(line[38:46]), float(line[46:54]))
-        except ValueError:
-            continue
-        chain = line[21].strip()
-        resi = line[22:27].strip()  # includes any insertion code
-        coords[(chain, resi)] = xyz
-    return coords
+    """Map (chain, resi) -> (x, y, z) for every alpha carbon."""
+    return {a.residue_key: (a.x, a.y, a.z) for a in parse_atoms(pdb_text, ca_only=True)}
 
 
 def _match_residues(
@@ -81,8 +66,7 @@ def _distance(a: tuple[float, float, float], b: tuple[float, float, float]) -> f
 
 def _resi_sort_key(resi: str) -> tuple[int, str]:
     """Sort 10A after 10 and before 11, without choking on insertion codes."""
-    digits = "".join(c for c in resi if c.isdigit() or c == "-")
-    return (int(digits) if digits not in ("", "-") else 0, resi)
+    return residue_order(resi)
 
 
 @mcp.tool()
