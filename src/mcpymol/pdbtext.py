@@ -26,6 +26,7 @@ Spec cols    Slice    Field
 ===========  =======  ==========================================
 """
 
+import math
 from typing import NamedTuple
 
 
@@ -119,6 +120,11 @@ def _element_from_name(name: str) -> str:
     """
     stripped = name.lstrip("0123456789")
     return stripped[:1] if stripped else ""
+
+
+def distance3d(p: tuple[float, float, float], q: tuple[float, float, float]) -> float:
+    """Euclidean distance between two points, in whatever unit they are in."""
+    return math.sqrt((p[0] - q[0]) ** 2 + (p[1] - q[1]) ** 2 + (p[2] - q[2]) ** 2)
 
 
 def residue_order(resi: str) -> tuple[int, str]:

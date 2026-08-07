@@ -14,6 +14,7 @@ import mcpymol
 import mcpymol.server as server
 
 TOOL_MODULES = [
+    "mcpymol.analysis",
     "mcpymol.bridge",
     "mcpymol.comparison",
     "mcpymol.pdbtext",
