@@ -61,6 +61,12 @@ def _sr_mock(**action_results):
             val = action_results[action]
             result = val(action, args, kwargs) if callable(val) else val
             return {"status": "success", "result": result}
+        # Loaders now verify that atoms actually arrived before doing anything
+        # destructive, so the default has to look like a structure that loaded.
+        if action == "count_atoms":
+            return {"status": "success", "result": 1200}
+        if action == "get_object_list":
+            return {"status": "success", "result": []}
         return {"status": "success", "result": "OK"}
 
     return fake
@@ -177,7 +183,9 @@ def test_fetch_structure_multimer(mock_sr):
 
     assert "Successfully fetched 1ubq" in result
     acts = _actions(mock_sr)
-    assert acts[0] == "do"  # reinitialize
+    # A scoped delete of the object being replaced — nothing session-wide runs
+    # before the fetch is known to have produced atoms.
+    assert acts[0] == "delete"
     assert "fetch" in acts
     assert "get_chains" in acts
     assert "remove" in acts  # multimer cleanup
@@ -1116,12 +1124,12 @@ def test_every_tool_has_a_description_and_schema():
     "name,required,optional",
     [
         ("zoom", [], ["selection", "buffer"]),
-        ("symexp", ["prefix", "selection"], ["cutoff", "segi"]),
         ("util_cbc", [], ["selection"]),
         ("deselect", [], []),
         ("set", ["setting", "value"], ["selection"]),  # tool-name override
         ("as", ["representation"], ["selection"]),
         ("super", ["mobile"], ["target", "options"]),
+        ("symexp", ["prefix", "obj_name", "selection"], ["cutoff", "segi"]),
     ],
 )
 def test_wrapper_schemas_match_their_signatures(name, required, optional):

@@ -170,7 +170,11 @@ def _sr_structure(chains=("A", "B"), counts=None, pdb="", states=1, symmetry=Non
             for key, value in counts.items():
                 if key in sel:
                     return {"status": "success", "result": value}
-            return {"status": "success", "result": 0}
+            # Default to "something loaded" so the loaders' emptiness guard
+            # does not fire in tests that are about something else.
+            return {"status": "success", "result": 1200}
+        if action == "get_object_list":
+            return {"status": "success", "result": []}
         if action == "count_states":
             return {"status": "success", "result": states}
         if action == "get_symmetry":
@@ -392,7 +396,9 @@ def test_fetch_structure_clears_the_session_by_default(mock_sr, mock_meta):
     fetch_structure(pdb_code="1ubq")
 
     dos = [c.kwargs["args"][0] for c in mock_sr.call_args_list if c.args[0] == "do"]
-    assert "reinitialize" in dos
+    # Settings are reset; objects are cleared by name, after the fetch is known
+    # to have worked. A blanket "reinitialize" would run before it.
+    assert "reinitialize settings" in dos
 
 
 @patch("mcpymol.structures._rcsb_metadata")
@@ -417,3 +423,121 @@ def test_load_structure_can_add_to_the_session(mock_sr):
 
     dos = [c.kwargs["args"][0] for c in mock_sr.call_args_list if c.args[0] == "do"]
     assert "reinitialize" not in dos
+
+
+# ── a failed load must not cost you the session ──────────────────────────────
+#
+# Reported in #15: behind a VPN blocking the RCSB, a fetch returned a success
+# message naming the object and the session was gone. cmd.fetch does not raise
+# when the download fails, and the plugin reports success regardless, so the
+# only defence is checking that atoms actually arrived.
+
+
+def _sr_empty_fetch(existing=("1ubq", "4hhb")):
+    """A fetch that 'succeeds' while producing nothing, as a blocked download
+    does."""
+    deleted = []
+
+    def fake(action, args=None, kwargs=None, **_ignored):
+        if action == "count_atoms":
+            return {"status": "success", "result": 0}
+        if action == "get_object_list":
+            return {"status": "success", "result": list(existing)}
+        if action == "delete":
+            deleted.append(args[0])
+        return {"status": "success", "result": "OK"}
+
+    fake.deleted = deleted
+    return fake
+
+
+@patch("mcpymol.structures._rcsb_metadata")
+@patch("mcpymol.structures.send_request")
+def test_empty_fetch_reports_an_error_not_success(mock_sr, mock_meta):
+    mock_sr.side_effect = _sr_empty_fetch()
+    mock_meta.return_value = {}
+
+    result = fetch_structure(pdb_code="1abc")
+
+    assert "Loaded nothing for '1abc'" in result
+    assert "Successfully fetched" not in result
+    assert "Nothing else in the session was touched" in result
+
+
+@patch("mcpymol.structures._rcsb_metadata")
+@patch("mcpymol.structures.send_request")
+def test_empty_fetch_leaves_other_objects_alone(mock_sr, mock_meta):
+    """The destructive part of #15: the session was cleared before the fetch,
+    so a failed download took unrelated structures with it."""
+    fake = _sr_empty_fetch(existing=("1ubq", "4hhb"))
+    mock_sr.side_effect = fake
+    mock_meta.return_value = {}
+
+    fetch_structure(pdb_code="1abc")
+
+    assert "1ubq" not in fake.deleted
+    assert "4hhb" not in fake.deleted
+    dos = [c.kwargs["args"][0] for c in mock_sr.call_args_list if c.args[0] == "do"]
+    assert not any("reinitialize" in d for d in dos), "session was cleared on a failed fetch"
+
+
+@patch("mcpymol.structures.send_request")
+def test_empty_load_reports_an_error(mock_sr):
+    mock_sr.side_effect = _sr_empty_fetch()
+
+    result = load_structure(file_path="/tmp/empty.pdb", obj_name="model")
+
+    assert "Loaded nothing for '/tmp/empty.pdb'" in result
+
+
+@patch("mcpymol.structures._rcsb_metadata")
+@patch("mcpymol.structures.send_request")
+def test_successful_fetch_clears_only_other_objects(mock_sr, mock_meta):
+    """replace=True still gives a clean session — but by name, after the fetch
+    is known to have worked, rather than by wiping everything beforehand."""
+
+    deleted = []
+
+    def fake(action, args=None, kwargs=None, **_ignored):
+        if action == "count_atoms":
+            return {"status": "success", "result": 1200}
+        if action == "get_object_list":
+            return {"status": "success", "result": ["1ubq", "4hhb", "1abc"]}
+        if action == "get_chains":
+            return {"status": "success", "result": ["A"]}
+        if action == "delete":
+            deleted.append(args[0])
+        return {"status": "success", "result": "OK"}
+
+    mock_sr.side_effect = fake
+    mock_meta.return_value = {}
+
+    result = fetch_structure(pdb_code="1abc")
+
+    assert "Successfully fetched 1abc" in result
+    assert "1ubq" in deleted and "4hhb" in deleted
+    assert deleted.count("1abc") == 1, "the fetched object must survive the cleanup"
+
+
+@patch("mcpymol.structures._rcsb_metadata")
+@patch("mcpymol.structures.send_request")
+def test_settings_are_reset_without_deleting_objects(mock_sr, mock_meta):
+    """A previous preset's fog or ray_trace_mode would otherwise leak into the
+    new scene, which is what the blanket reinitialize was buying."""
+
+    def fake(action, args=None, kwargs=None, **_ignored):
+        if action == "count_atoms":
+            return {"status": "success", "result": 1200}
+        if action == "get_object_list":
+            return {"status": "success", "result": ["1abc"]}
+        if action == "get_chains":
+            return {"status": "success", "result": ["A"]}
+        return {"status": "success", "result": "OK"}
+
+    mock_sr.side_effect = fake
+    mock_meta.return_value = {}
+
+    fetch_structure(pdb_code="1abc")
+
+    dos = [c.kwargs["args"][0] for c in mock_sr.call_args_list if c.args[0] == "do"]
+    assert "reinitialize settings" in dos

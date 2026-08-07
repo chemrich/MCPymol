@@ -19,6 +19,10 @@ from mcpymol.views import _PLDDT_BANDS, _read_ca_bfactors, plddt_view
 
 
 def _sr_ok(action, args=None, kwargs=None, **_ignored):
+    if action == "count_atoms":
+        return {"status": "success", "result": 1200}
+    if action == "get_object_list":
+        return {"status": "success", "result": []}
     return {"status": "success", "result": "OK"}
 
 

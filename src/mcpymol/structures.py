@@ -66,6 +66,42 @@ DEFAULT_MULTIMER_CUTOFF = 8.0
 _GHOST_HEART_GREENS = ["forest", "limegreen", "chartreuse", "palegreen", "lime", "tv_green"]
 
 
+def _clear_other_objects(keep: str) -> None:
+    """Delete every object except ``keep``, then reset settings.
+
+    Replaces a blanket ``reinitialize``, which ran *before* the fetch and so
+    destroyed the session even when the fetch then failed. ``reinitialize
+    settings`` still gives a fresh structure the clean slate it wants — a
+    previous preset's fog or ray_trace_mode would otherwise leak into the new
+    scene — without touching objects.
+    """
+    listed = send_request("get_object_list", args=["all"])
+    if listed.get("status") == "success":
+        for existing in listed.get("result") or []:
+            if existing != keep:
+                send_request("delete", args=[existing])
+    send_request("do", args=["reinitialize settings"])
+
+
+def _verify_loaded(name: str, source: str) -> str | None:
+    """Return an error message if ``name`` came out empty, else None.
+
+    ``cmd.fetch`` does not raise when the download fails — it simply produces
+    no atoms — and the plugin reports success regardless. Without this check a
+    blocked download returned "Successfully fetched" while the caller had
+    nothing, which is the worst kind of reply: confidently wrong.
+    """
+    atoms = _int_result("count_atoms", [f"({name})"])
+    if atoms:
+        return None
+    return (
+        f"Loaded nothing for '{source}': the object '{name}' has no atoms. "
+        f"PyMOL reports success even when a fetch downloads nothing, so this is "
+        f"usually a blocked or failed download — a proxy or VPN in front of the "
+        f"RCSB is the common cause. Nothing else in the session was touched."
+    )
+
+
 def _apply_ghost_heart(name: str):
     """Applies the ghost heart visualization style to an object.
 
@@ -280,15 +316,22 @@ def fetch_structure(
 
     name = obj_name if obj_name else pdb_code
 
-    if replace:
-        send_request("do", args=["reinitialize"])
-    send_request("set", args=["mouse_wheel_scale", "0.1"])
+    # Only ever delete the object being replaced. Clearing the session comes
+    # after the fetch is known to have produced something, so a failed download
+    # cannot cost the caller everything they had loaded.
     send_request("delete", args=[name])
 
-    # Use standard fetch
     res = send_request("fetch", args=[pdb_code, name])
     if res.get("status") == "error":
         return f"Error fetching {pdb_code}: {res.get('error')}"
+
+    empty = _verify_loaded(name, pdb_code)
+    if empty:
+        return empty
+
+    if replace:
+        _clear_other_objects(name)
+    send_request("set", args=["mouse_wheel_scale", "0.1"])
 
     _apply_multimer_heuristic(name, multimer_cutoff)
     _apply_ghost_heart(name)
@@ -318,13 +361,18 @@ def load_structure(
     """
     Loads a structure from a local file path and applies the BFS multimer heuristic.
     """
-    if replace:
-        send_request("do", args=["reinitialize"])
-    send_request("set", args=["mouse_wheel_scale", "0.1"])
     send_request("delete", args=[obj_name])
     res = send_request("load", args=[file_path, obj_name])
     if res.get("status") == "error":
         return f"Error loading {file_path}: {res.get('error')}"
+
+    empty = _verify_loaded(obj_name, file_path)
+    if empty:
+        return empty
+
+    if replace:
+        _clear_other_objects(obj_name)
+    send_request("set", args=["mouse_wheel_scale", "0.1"])
 
     _apply_multimer_heuristic(obj_name, multimer_cutoff)
     _apply_ghost_heart(obj_name)
@@ -386,14 +434,19 @@ def fetch_alphafold(
         return error
 
     try:
-        if replace:
-            send_request("do", args=["reinitialize"])
-        send_request("set", args=["mouse_wheel_scale", "0.1"])
         send_request("delete", args=[name])
 
         res = send_request("load", args=[path, name], timeout=120.0)
         if res.get("status") == "error":
             return f"Error loading AlphaFold model for {accession}: {res.get('error')}"
+
+        empty = _verify_loaded(name, accession)
+        if empty:
+            return empty
+
+        if replace:
+            _clear_other_objects(name)
+        send_request("set", args=["mouse_wheel_scale", "0.1"])
     finally:
         try:
             os.unlink(path)
