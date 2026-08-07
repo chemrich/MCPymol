@@ -29,8 +29,12 @@ release closes that gap.
 ### Note on dependencies
 The optional `analysis` extra was considered and deliberately not added. For this scope nothing earned it: per-residue SASA comes from PyMOL in two round trips via `get_area(load_b=1)`, and contact search is a spatial-grid problem where numpy would add a second code path for no measurable gain. The core stays dependency-free.
 
+### Developer experience
+- **Pre-commit hooks that actually cover the gates.** The config had a single hook (the `uv.lock` guard), `pre-commit` was not a declared dependency so nothing installed the binary `CONTRIBUTING.md` told you to run, and the hook was consequently never installed in practice — every check happened only in CI, after a push. Commits now run ruff, ruff-format, mypy, the lockfile guard, and file hygiene (trailing whitespace, final newline, line endings, YAML/TOML validity, merge markers, stray `breakpoint()`, oversized files); pushes run the full test suite, which is too slow at ~16 s to pay per commit. `pre-commit` is in the dev group, and `default_install_hook_types` wires both stages from one `pre-commit install`.
+- The ruff and mypy hooks run via `uv run` rather than pre-commit's own tool repos, so they use exactly the versions in `uv.lock` — the versions CI installs — instead of introducing a second place for tool versions to drift.
+
 ### Tests
-- 346 → 465.
+- 346 → 469.
 
 ## [1.3.0] - 2026-08-07
 

@@ -58,6 +58,7 @@ mcpymol = "mcpymol.server:main"
 
 [dependency-groups]
 dev = [
+    "pre-commit>=4.0",
     "pytest>=9.0.3",
     "pytest-mock>=3.15.1",
     "pytest-cov>=6.0",

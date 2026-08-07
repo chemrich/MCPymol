@@ -8,13 +8,42 @@ Thanks for the interest! This is a small, opinionated tool; PRs are welcome.
 git clone https://github.com/chemrich/MCPymol.git
 cd MCPymol
 uv sync --all-groups
-pre-commit install   # enables the local uv.lock-sync hook
+uv run pre-commit install   # installs both the commit and push hooks
 ```
 
-The pre-commit hook runs `uv lock --locked` so a lockfile that has drifted
-from `pyproject.toml` is caught before you push. CI enforces the same check
-(the "Lockfile in sync" job), so it covers Dependabot and anyone without the
-hook too. If a commit is blocked, run `uv lock` and re-stage `uv.lock`.
+`pre-commit` is in the dev dependency group, so `uv sync --all-groups` provides
+it — there is nothing to install globally.
+
+## The hooks
+
+They mirror CI, so a red pipeline is something you find in a second rather than
+after a push. `pre-commit install` wires up both stages in one go.
+
+**On commit** (fast — under a second on a small change):
+
+| Hook | What it does |
+| --- | --- |
+| `ruff check --fix` | lint, auto-fixing what it can |
+| `ruff format` | formatting |
+| `mypy` | type check over `src/` |
+| `uv lock --locked` | blocks a lockfile that has drifted from `pyproject.toml` |
+| hygiene | trailing whitespace, final newline, line endings, YAML/TOML validity, merge markers, stray `breakpoint()`, files over 512 KB |
+
+**On push:** the full `pytest` suite. It takes about 16 seconds — too slow to
+pay on every commit, unremarkable on a push.
+
+Two things worth knowing:
+
+- The `ruff` and `mypy` hooks run through `uv run`, so they use exactly the
+  versions in `uv.lock` — the same ones CI installs. Pinning tool versions
+  separately in `.pre-commit-config.yaml` would give the project two sources of
+  truth that drift until a hook passes locally and CI fails.
+- The auto-fixing hooks **fail the commit when they change a file**. That is
+  intended: inspect what changed, `git add` it, and commit again.
+
+CI enforces every one of these independently, so Dependabot PRs and anyone who
+skipped `pre-commit install` are still covered. Use `git commit --no-verify` to
+bypass the hooks in a pinch — CI will still catch it.
 
 ## Run the tests
 
