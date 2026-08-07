@@ -34,7 +34,10 @@ repos:
       - id: check-added-large-files
         # Structures and renders are gitignored; this catches the ones that
         # slip past, since a stray PDB or PNG is easy to add and hard to remove.
-        args: [--maxkb=512]
+        # Sized to catch accidents rather than curated media: a downloaded
+        # assembly or a ray-traced PNG runs to several MB, while the largest
+        # deliberate asset here is an 830 KB turntable GIF.
+        args: [--maxkb=1024]
 
   - repo: local
     hooks:

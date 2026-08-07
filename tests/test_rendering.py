@@ -11,8 +11,12 @@ from mcp.server.fastmcp import Image
 from mcpymol.rendering import _PNG_EOF, _read_complete_png, render, turntable
 
 
-def _png_bytes(width=2, height=2):
-    """A real, minimal, valid PNG — not a stub, so the IEND check is exercised."""
+def _png_bytes(width=8, height=8):
+    """A real, minimal, valid PNG with varied pixels.
+
+    Varied deliberately: a flat image is what a *failed* render looks like, so
+    a uniform stub would be indistinguishable from the blank-image bug.
+    """
 
     def chunk(tag, data):
         return (
@@ -22,7 +26,13 @@ def _png_bytes(width=2, height=2):
             + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
         )
 
-    raw = b"".join(b"\x00" + b"\xff\x00\x00" * width for _ in range(height))
+    raw = b"".join(
+        b"\x00"
+        + b"".join(
+            bytes(((x * 7) % 256, (y * 11) % 256, ((x + y) * 13) % 256)) for x in range(width)
+        )
+        for y in range(height)
+    )
     return (
         b"\x89PNG\r\n\x1a\n"
         + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
@@ -97,12 +107,13 @@ def test_render_asks_pymol_to_ray_trace_at_the_requested_size(mock_sr):
 
 
 @patch("mcpymol.rendering.send_request")
-def test_render_can_skip_ray_tracing(mock_sr):
+def test_render_ignores_a_request_to_skip_ray_tracing(mock_sr):
+    """See test_render_always_ray_traces — ray=0 is blank over the bridge."""
     mock_sr.side_effect = _writes_png([])
 
     render(ray_trace=False)
 
-    assert mock_sr.call_args.kwargs["kwargs"]["ray"] == 0
+    assert mock_sr.call_args.kwargs["kwargs"]["ray"] == 1
 
 
 @patch("mcpymol.rendering.send_request")
@@ -165,7 +176,7 @@ def test_render_reports_a_missing_file(mock_sr):
 @patch("mcpymol.rendering.send_request")
 def test_render_refuses_to_inline_a_huge_image(mock_sr, tmp_path):
     """Base64 inflates by a third; a 40 MB render would swamp the context."""
-    big = _png_bytes(width=2, height=2)
+    big = _png_bytes()
     mock_sr.side_effect = _writes_png([], data=big)
 
     with patch("mcpymol.rendering.MAX_INLINE_IMAGE_BYTES", 10):
@@ -203,7 +214,7 @@ def test_turntable_writes_one_frame_per_step(mock_sr, tmp_path):
         "turntable_0002.png",
         "turntable_0003.png",
     ]
-    assert "Wrote 4 OpenGL frames" in result
+    assert "Wrote 4 ray-traced frames" in result
 
 
 @patch("mcpymol.rendering.send_request")
@@ -232,15 +243,15 @@ def test_turntable_sets_the_rotation_origin(mock_sr, tmp_path):
 
 
 @patch("mcpymol.rendering.send_request")
-def test_turntable_defaults_to_the_fast_renderer(mock_sr, tmp_path):
-    """36 ray-traced frames of a big assembly can take an hour."""
+def test_turntable_ray_traces_by_default(mock_sr, tmp_path):
+    """The old default was the OpenGL path, which writes blank frames here."""
     mock_sr.return_value = {"status": "success", "result": "OK"}
 
     turntable(frames=3, out_dir=str(tmp_path))
 
     for c in mock_sr.call_args_list:
         if c.args[0] == "png":
-            assert c.kwargs["kwargs"]["ray"] == 0
+            assert c.kwargs["kwargs"]["ray"] == 1
 
 
 @patch("mcpymol.rendering.send_request")
@@ -331,3 +342,90 @@ def test_a_non_black_background_is_also_made_opaque():
     calls = [(c.args[0], tuple(c.kwargs["args"])) for c in mock_sr.call_args_list]
     assert ("do", ("bg_color white",)) in calls
     assert ("set", ("opaque_background", "1")) in calls
+
+
+# ── the OpenGL path does not work over the bridge ────────────────────────────
+
+
+def _flat_png(width=4, height=4):
+    """A PNG of a single colour — what PyMOL's OpenGL capture writes when it
+    runs off the GUI thread."""
+    import struct
+    import zlib
+
+    def chunk(tag, data):
+        return (
+            struct.pack(">I", len(data))
+            + tag
+            + data
+            + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
+        )
+
+    raw = b"".join(b"\x00" + b"\x00\x00\x00" * width for _ in range(height))
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+        + chunk(b"IDAT", zlib.compress(raw))
+        + chunk(b"IEND", b"")
+    )
+
+
+def test_looks_blank_detects_a_flat_image():
+    from mcpymol.rendering import _looks_blank
+
+    assert _looks_blank(_flat_png()) is True
+
+
+def test_looks_blank_passes_a_real_render():
+    from mcpymol.rendering import _looks_blank
+
+    assert _looks_blank(_png_bytes()) is False
+
+
+def test_looks_blank_survives_a_corrupt_png():
+    from mcpymol.rendering import _looks_blank
+
+    assert _looks_blank(b"\x89PNG\r\n\x1a\ngarbage") is False
+
+
+@patch("mcpymol.rendering.send_request")
+def test_render_always_ray_traces(mock_sr):
+    """ray_trace=False silently produced a blank image: PyMOL's OpenGL capture
+    needs its GUI thread and the plugin dispatches on a socket thread."""
+    mock_sr.side_effect = _writes_png([])
+
+    render(ray_trace=False)
+
+    assert mock_sr.call_args.kwargs["kwargs"]["ray"] == 1
+
+
+@patch("mcpymol.rendering.send_request")
+def test_render_reports_a_blank_image(mock_sr):
+    mock_sr.side_effect = _writes_png([], data=_flat_png())
+
+    result = render()
+
+    assert isinstance(result, str)
+    assert "single flat colour" in result
+    assert "count_atoms" in result
+
+
+@patch("mcpymol.rendering.send_request")
+def test_render_explains_why_it_ignored_ray_trace_false(mock_sr):
+    mock_sr.side_effect = _writes_png([], data=_flat_png())
+
+    result = render(ray_trace=False)
+
+    assert "GUI thread" in result
+
+
+@patch("mcpymol.rendering.send_request")
+def test_turntable_always_ray_traces(mock_sr, tmp_path):
+    """Its default used to be the broken path, so every frame came out blank."""
+    mock_sr.return_value = {"status": "success", "result": "OK"}
+
+    turntable(frames=3, out_dir=str(tmp_path), ray_trace=False)
+
+    for call in mock_sr.call_args_list:
+        if call.args[0] == "png":
+            assert call.kwargs["kwargs"]["ray"] == 1
