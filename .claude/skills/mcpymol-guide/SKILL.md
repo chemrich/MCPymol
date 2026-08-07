@@ -49,9 +49,14 @@ substantial, likely specific association. Say which regime the number is in.
 
 0. **Predicted structures.** `fetch_structure` also accepts a UniProt
    accession (`P69905`, `af-P69905`) and routes it to AlphaFold DB, colouring
-   by pLDDT confidence. For predicted models use `plddt_view`, never
+   by pLDDT confidence; `fetch_alphafold` is the same thing called directly,
+   and takes `model_version` / `fragment` for older or split entries. For predicted models use `plddt_view`, never
    `bfactor_view`/`putty_view` — pLDDT lives in the B-factor column and those
    presets read it backwards (they assume low = rigid; low pLDDT = unreliable).
+0b. **Local files.** `load_structure(file_path, obj_name)` takes a PDB/mmCIF
+   off disk — a built model, a docking pose, an MD frame — and applies the
+   same multimer heuristic and styling as a fetch. Use it whenever the user
+   has a file rather than an accession.
 1. **`fetch_structure(pdb_code)`** — grabs the biological assembly when one
    exists, runs a BFS chain-contact heuristic (`multimer_cutoff`, default
    8.0 Å) so functional multimers stay whole while crystallographic copies
@@ -153,9 +158,9 @@ watertight solid, with the spine acting as internal rebar for rigidity.
 - The STL is in the same coordinate frame across groups — in a slicer,
   load the first then add others as *parts* (don't re-centre).
 
-### After editing `src/mcpymol/server.py`
+### After editing anything under `src/mcpymol/`
 
-The MCP server imports `server.py` at startup. Code changes are **not live**
+The MCP server imports the package at startup. Code changes are **not live**
 until the user reconnects it (`/mcp` → reconnect mcpymol, or restart Claude
 Code) — you cannot restart it yourself. After a reconnect, confirm the new
 behavior from tool output, don't assume it loaded (a stale server returns
@@ -168,3 +173,9 @@ the old result).
 - Long `get_fastastr`/`get_chains` JSON parse errors → pre-2026-05 build.
 - `poisson_boltzmann_view` fails → missing `apbs`/`pdb2pqr`.
 - 3D-print tools say the `print` extra is missing → `uv sync --extra print`.
+- A tool reports a file "did not appear" → PyMOL and the bridge are not on the
+  same machine; they exchange files through the filesystem.
+- `render` returns a size complaint instead of an image → ask for a smaller
+  width/height, or raise `MCPYMOL_MAX_IMAGE_BYTES`.
+- A scene comes out blank → check the selection with `count_atoms` before
+  assuming the view preset failed.
