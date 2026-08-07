@@ -256,7 +256,7 @@ def as_tool(
     """
     Shows one representation while hiding all others for the specified selection
     """
-    return _call("as", representation=representation, selection=selection)
+    return _call("show_as", representation=representation, selection=selection)
 
 
 @mcp.tool(name="set")
@@ -690,13 +690,17 @@ def h_add(
 
 
 @mcp.tool()
-def h_fill(
-    selection: Annotated[str | None, Field(description="Where to fill valences.")] = "all",
-) -> str:
+def h_fill() -> str:
     """
-    Adds hydrogens and adjusts valences
+    Fills open valences on the currently picked atom with hydrogens.
+
+    Takes no selection: cmd.h_fill operates on PyMOL's editor pick, so it needs
+    an atom picked in the GUI and cannot be aimed from here. Passing it a
+    selection used to land the string in its `quiet` argument and fail with an
+    integer conversion error. For adding hydrogens to a selection over the
+    bridge, use `h_add`.
     """
-    return _call("h_fill", selection=selection)
+    return _call("h_fill")
 
 
 @mcp.tool()
@@ -929,7 +933,7 @@ def util_color_by_element(
     """
     Colors atoms by their element
     """
-    return _call("util.color_by_element", selection=selection)
+    return _call("util.cnc", selection=selection)
 
 
 @mcp.tool()
@@ -941,19 +945,24 @@ def util_color_secondary(
     """
     Colors secondary structure elements
     """
-    return _call("util.color_secondary", selection=selection)
+    return _call("util.cbss", selection=selection)
 
 
 @mcp.tool()
 def spheroid(
-    selection: Annotated[
-        str | None, Field(description="What to render as smoothed spheres.")
+    obj: Annotated[
+        str,
+        Field(
+            description="Object to render as smoothed spheres. This is an object "
+            "name, not a selection expression — cmd.spheroid resolves it as an "
+            "object and reports 'Object not found' for anything else."
+        ),
     ] = "all",
 ) -> str:
     """
     Displays atoms as smooth spheres
     """
-    return _call("spheroid", selection=selection)
+    return _call("spheroid", obj=obj)
 
 
 @mcp.tool()
@@ -1010,13 +1019,16 @@ def sculpt_deactivate(obj: Annotated[str, Field(description="Object to stop scul
 
 @mcp.tool()
 def sculpt_iterate(
-    iterations: Annotated[str, Field(description="Number of relaxation cycles to run.")],
-    obj: Annotated[str | None, Field(description="Object to relax.")] = "all",
+    obj: Annotated[str, Field(description="Object to relax.")],
+    iterations: Annotated[
+        str, Field(description='Number of relaxation cycles to run, e.g. "10".')
+    ] = "10",
+    state: Annotated[str, Field(description='State to relax. "-1" is the current state.')] = "-1",
 ) -> str:
     """
     Performs sculpting iterations
     """
-    return _call("sculpt_iterate", iterations=iterations, obj=obj)
+    return _call("sculpt_iterate", obj=obj, state=state, iterations=iterations)
 
 
 @mcp.tool()
@@ -1155,11 +1167,18 @@ def mpng(
 @mcp.tool()
 def symexp(
     prefix: Annotated[str, Field(description="Prefix for the generated symmetry-mate objects.")],
+    obj_name: Annotated[
+        str,
+        Field(
+            description="Object holding the crystal symmetry. Separate from the "
+            "selection below: cmd.symexp needs both."
+        ),
+    ],
     selection: Annotated[
         str, Field(description="Selection whose crystallographic neighbours to build.")
     ],
     cutoff: Annotated[
-        str | None, Field(description="Distance in Angstrom out to which to generate mates.")
+        str, Field(description="Distance in Angstrom out to which to generate mates.")
     ] = "20",
     segi: Annotated[
         str | None, Field(description="Optional segment identifier for the new objects.")
@@ -1168,7 +1187,14 @@ def symexp(
     """
     Generates symmetry-related copies
     """
-    return _call("symexp", prefix=prefix, selection=selection, cutoff=cutoff, segi=segi)
+    return _call(
+        "symexp",
+        prefix=prefix,
+        obj_name=obj_name,
+        selection=selection,
+        cutoff=cutoff,
+        segi=segi,
+    )
 
 
 @mcp.tool()

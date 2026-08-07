@@ -108,7 +108,7 @@ WRAPPER_TESTS = [
     (remove, ("solvent",), "remove", ["solvent"]),
     (distance, ("dist1", "A", "B"), "distance", ["dist1", "A", "B"]),
     (execute_pymol_command, ("bg_color white",), "do", ["bg_color white"]),
-    (as_tool, ("cartoon", "all"), "as", ["cartoon", "all"]),
+    (as_tool, ("cartoon", "all"), "show_as", ["cartoon", "all"]),
     (set_setting, ("transparency", "0.5", "1abc"), "set", ["transparency", "0.5", "1abc"]),
     (cartoon, ("putty", "all"), "cartoon", ["putty", "all"]),
     (spectrum, ("b", "rainbow", "all"), "spectrum", ["b", "rainbow", "all"]),
@@ -135,7 +135,7 @@ WRAPPER_TESTS = [
     (alter, ("1abc", "b=10"), "alter", ["1abc", "b=10"]),
     (alter_state, ("1", "1abc", "b=10"), "alter_state", ["1", "1abc", "b=10"]),
     (h_add, ("all",), "h_add", ["all"]),
-    (h_fill, ("all",), "h_fill", ["all"]),
+    (h_fill, (), "h_fill", []),
     (bond, ("A", "B", "2"), "bond", ["A", "B", "2"]),
     (unbond, ("A", "B"), "unbond", ["A", "B"]),
     (rebuild, ("all",), "rebuild", ["all"]),
@@ -145,14 +145,14 @@ WRAPPER_TESTS = [
     (util_chainbow, ("all",), "util.chainbow", ["all"]),
     (util_rainbow, ("all",), "util.rainbow", ["all"]),
     (util_ss, ("all",), "util.ss", ["all"]),
-    (util_color_by_element, ("all",), "util.color_by_element", ["all"]),
-    (util_color_secondary, ("all",), "util.color_secondary", ["all"]),
-    (spheroid, ("all",), "spheroid", ["all"]),
+    (util_color_by_element, ("all",), "util.cnc", ["all"]),
+    (util_color_secondary, ("all",), "util.cbss", ["all"]),
+    (spheroid, ("1abc",), "spheroid", ["1abc"]),
     (isomesh, ("mesh1", "map1", "1.0", "all"), "isomesh", ["mesh1", "map1", "1.0", "all"]),
     (isosurface, ("surf1", "map1", "1.0", "all"), "isosurface", ["surf1", "map1", "1.0", "all"]),
     (sculpt_activate, ("1abc",), "sculpt_activate", ["1abc"]),
     (sculpt_deactivate, ("1abc",), "sculpt_deactivate", ["1abc"]),
-    (sculpt_iterate, ("10", "1abc"), "sculpt_iterate", ["10", "1abc"]),
+    (sculpt_iterate, ("1abc", "10", "-1"), "sculpt_iterate", ["1abc", "-1", "10"]),
     (scene, ("F1", "store"), "scene", ["F1", "store"]),
     (scene_order, ("F1 F2 F3",), "scene_order", ["F1 F2 F3"]),
     (mset, ("1 x100",), "mset", ["1 x100"]),
@@ -165,7 +165,12 @@ WRAPPER_TESTS = [
     (ray, ("800", "600"), "ray", ["800", "600"]),
     (draw, ("800", "600"), "draw", ["800", "600"]),
     (mpng, ("frame_",), "mpng", ["frame_"]),
-    (symexp, ("sym_", "1abc", "20", "A"), "symexp", ["sym_", "1abc", "20", "A"]),
+    (
+        symexp,
+        ("sym_", "1abc", "1abc and chain A", "20", "A"),
+        "symexp",
+        ["sym_", "1abc", "1abc and chain A", "20", "A"],
+    ),
     (
         set_symmetry,
         ("1abc", "10", "10", "10", "90", "90", "90"),
@@ -199,3 +204,56 @@ def test_auto_wrappers(mock_socket, func, args, expected_action, expected_args):
         or "Measured" in result
     )
     _check_send_request(mock_socket, expected_action, expected_args)
+
+
+# ── regressions: wrappers that pointed at functions PyMOL does not have ──────
+#
+# Seven tools errored on every call. The suite could not catch them because it
+# asserts the payload we *send*, which was faithfully sending the wrong thing.
+# These pin the names and argument order against the real pymol API, verified
+# by introspecting cmd/util in a live PyMOL 3.1.
+
+
+@pytest.mark.parametrize(
+    "func,args,action",
+    [
+        # `as` is a Python keyword, so `getattr(cmd, "as")` can never resolve.
+        (as_tool, ("cartoon", "all"), "show_as"),
+        # pymol.util has cnc (colour non-carbon by element), not color_by_element.
+        (util_color_by_element, ("all",), "util.cnc"),
+        # ...and cbss, not color_secondary.
+        (util_color_secondary, ("all",), "util.cbss"),
+    ],
+)
+def test_wrapper_targets_a_function_that_exists(mock_socket, func, args, action):
+    func(*args)
+    assert json.loads(mock_socket.sendall.call_args[0][0])["action"] == action
+
+
+def test_h_fill_sends_no_selection(mock_socket):
+    """cmd.h_fill(quiet=1) has no selection parameter; a selection landed in
+    `quiet` and failed with an integer conversion error."""
+    h_fill()
+
+    assert json.loads(mock_socket.sendall.call_args[0][0])["args"] == []
+
+
+def test_sculpt_iterate_sends_object_first(mock_socket):
+    """cmd.sculpt_iterate(object, state, cycles) — the object used to arrive in
+    the cycles slot, so PyMOL tried int() on an object name."""
+    sculpt_iterate("1abc", "25", "-1")
+
+    assert json.loads(mock_socket.sendall.call_args[0][0])["args"] == ["1abc", "-1", "25"]
+
+
+def test_symexp_sends_object_and_selection_separately(mock_socket):
+    """cmd.symexp(prefix, object, selection, cutoff) takes both; sending only a
+    selection shifted every later argument and dropped cutoff off the end."""
+    symexp("sym_", "1abc", "1abc and chain A", "12")
+
+    assert json.loads(mock_socket.sendall.call_args[0][0])["args"] == [
+        "sym_",
+        "1abc",
+        "1abc and chain A",
+        "12",
+    ]
