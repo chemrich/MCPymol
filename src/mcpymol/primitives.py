@@ -7,7 +7,7 @@ to :func:`mcpymol.bridge._call` for the shared forwarding logic.
 """
 
 from mcpymol.app import mcp
-from mcpymol.bridge import _SLOW_OP_TIMEOUT, _call, send_request
+from mcpymol.bridge import _SLOW_OP_TIMEOUT, _call, format_measurement, send_request
 
 # ── Primitive tools ──────────────────────────────────────────────────────────
 #
@@ -101,7 +101,11 @@ def remove(selection: str) -> str:
 
 @mcp.tool()
 def distance(name: str, selection1: str, selection2: str) -> str:
-    """Measures and draws a distance object between two selections.
+    """Measures the distance between two selections and returns it in Angstrom.
+
+    Also draws the measurement in the viewport as a named distance object.
+    With multi-atom selections PyMOL reports the average over the pairs it
+    found within its default cutoff.
 
     Args:
         name: Name for the distance object (used to delete/recolor later).
@@ -111,7 +115,79 @@ def distance(name: str, selection1: str, selection2: str) -> str:
     res = send_request("distance", args=[name, selection1, selection2])
     if res.get("status") == "error":
         return res.get("error", "Unknown error")
-    return f"Measured distance between '{selection1}' and '{selection2}' as '{name}'"
+    return format_measurement(
+        f"Distance between '{selection1}' and '{selection2}'",
+        res.get("result"),
+        "A",
+        name,
+    )
+
+
+@mcp.tool()
+def sasa(selection: str = "all", state: str | None = "1") -> str:
+    """Measures solvent-accessible surface area, in square Angstrom.
+
+    Reports the SASA of ``selection`` *in the context of the object it belongs
+    to* — so a chain measured inside a complex is already partly occluded by
+    its partner. To get the free (unbound) area, copy the chain to its own
+    object first with ``create``, or use ``interface_report``, which does the
+    bound/free bookkeeping for you.
+
+    Accuracy depends on PyMOL's ``dot_solvent`` (0 = molecular surface,
+    1 = solvent-accessible) and ``dot_density`` settings.
+
+    Args:
+        selection: What to measure (e.g. "1brs and chain A").
+        state: Object state to measure. "1" is the first/only state.
+    """
+    return _call(
+        "get_area",
+        _measures=("Solvent-accessible surface area", "A^2"),
+        selection=selection,
+        state=state,
+    )
+
+
+@mcp.tool()
+def rms_cur(mobile: str, target: str) -> str:
+    """Measures RMSD between two selections *without* moving anything.
+
+    Use this when the structures are already superposed, or when you want to
+    know how far apart they are as currently positioned. Compare with ``align``
+    and ``super``, which move the mobile structure to minimise RMSD before
+    reporting it, and with ``superposition_view``, which shows where the
+    difference is rather than summarising it as one number.
+
+    Requires the two selections to have matching atom counts.
+
+    Args:
+        mobile: First selection.
+        target: Second selection, same number of atoms.
+    """
+    return _call("rms_cur", _measures=("RMSD (as positioned)", "A"), mobile=mobile, target=target)
+
+
+@mcp.tool()
+def count_atoms(selection: str = "all") -> str:
+    """Counts the atoms matching a selection.
+
+    Handy for checking a selection expression does what you think before
+    building a scene on top of it — an empty count means the expression is
+    wrong, which is otherwise invisible until the picture comes out blank.
+
+    Args:
+        selection: PyMOL selection string to count.
+    """
+    res = send_request("count_atoms", args=[selection])
+    if res.get("status") == "error":
+        return res.get("error", "Unknown error")
+    try:
+        n = int(res.get("result"))  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return f"count_atoms returned an unexpected value: {res.get('result')!r}"
+    if n == 0:
+        return f"Selection '{selection}' matches no atoms. Check the object name and syntax."
+    return f"Selection '{selection}' matches {n:,} atoms."
 
 
 @mcp.tool()
@@ -181,11 +257,23 @@ def angle(
     selection2: str | None = "(pk2)",
     selection3: str | None = "(pk3)",
 ) -> str:
-    """
-    Measures the angle between three selections
+    """Measures the angle between three selections and returns it in degrees.
+
+    Also draws the measurement as a named angle object.
+
+    Args:
+        name: Name for the angle object.
+        selection1: First selection (one arm).
+        selection2: Second selection (the vertex).
+        selection3: Third selection (the other arm).
     """
     return _call(
-        "angle", name=name, selection1=selection1, selection2=selection2, selection3=selection3
+        "angle",
+        _measures=("Angle", "degrees"),
+        name=name,
+        selection1=selection1,
+        selection2=selection2,
+        selection3=selection3,
     )
 
 
@@ -197,11 +285,21 @@ def dihedral(
     selection3: str | None = "(pk3)",
     selection4: str | None = "(pk4)",
 ) -> str:
-    """
-    Measures the dihedral angle between four selections
+    """Measures the dihedral (torsion) angle between four selections, in degrees.
+
+    Also draws the measurement as a named dihedral object. Useful for backbone
+    phi/psi angles and ligand torsions.
+
+    Args:
+        name: Name for the dihedral object.
+        selection1: First atom.
+        selection2: Second atom.
+        selection3: Third atom.
+        selection4: Fourth atom.
     """
     return _call(
         "dihedral",
+        _measures=("Dihedral", "degrees", True),
         name=name,
         selection1=selection1,
         selection2=selection2,
