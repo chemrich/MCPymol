@@ -10,7 +10,7 @@ import json
 
 from mcpymol.app import mcp
 from mcpymol.bridge import send_request
-from mcpymol.pdbtext import parse_atoms, residue_order
+from mcpymol.pdbtext import distance3d, parse_atoms, residue_order
 
 # Deviations above this are almost always a domain-scale motion rather than
 # local jitter; used only to pick a sensible default colour ceiling.
@@ -61,7 +61,8 @@ def _match_residues(
 
 
 def _distance(a: tuple[float, float, float], b: tuple[float, float, float]) -> float:
-    return sum((x - y) ** 2 for x, y in zip(a, b, strict=True)) ** 0.5
+    """Kept as a named helper because the pairing code reads better with it."""
+    return distance3d(a, b)
 
 
 def _resi_sort_key(resi: str) -> tuple[int, str]:
