@@ -76,6 +76,12 @@ package = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+# Network tests are opt-in (`pytest -m network`): CI must pass offline, but
+# these check contracts with external APIs that mocks cannot catch drifting.
+addopts = "-m 'not network'"
+markers = [
+    "network: hits a real external API; run before a release",
+]
 
 [tool.ruff]
 target-version = "py310"

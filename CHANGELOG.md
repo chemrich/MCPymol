@@ -18,6 +18,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Troubleshooting rows for the failure modes introduced since v1.2.1: files not appearing when PyMOL and the bridge are on different machines, oversized renders, AlphaFold entries with no model at a given version, blank views from empty selections, and slow-operation timeouts.
 - `tests/test_docs.py` keeps these true. An environment variable added in code but not the README, a headline tool missing from the README or the skill, a doc that sends readers to `server.py` for implementation, or a `CONTRIBUTING` that stops warning about facade patching — each now fails CI. Written after this audit found six undocumented variables and three unmentioned tools by hand; the point is not to do that by hand again.
 
+## [Unreleased]
+
+### Fixed
+- **`fetch_alphafold` did not work for any accession.** It built the model URL from a hardcoded `AF-{accession}-F1-model_v4.cif` template. AlphaFold DB has since moved to v6 and *removes* retired versions, so every one of those URLs now 404s — the feature shipped in v1.3.0 and resolved for nothing. It also assumed the filename is keyed by accession, which is untrue for some entries: SARS-CoV-2 spike (P0DTC2) is served as `AF-0000000365840314-model_v1.cif`, so no accession-based filename exists for it in any version.
+
+  The file URL is now asked for rather than constructed, via AlphaFold DB's prediction API, which handles version drift, non-accession entry IDs and multi-fragment proteins. `model_version` becomes an optional pin that bypasses the lookup, and defaults to unset.
+
+  Every test for this code mocked `urlopen`, so they proved the URL was *built* correctly and never that it *existed*. A `network`-marked test now resolves and fetches a real model; it is deselected by default so CI stays offline-safe (`pytest -m network` to run it, worth doing before a release).
+- A malformed accession returned a raw `HTTP 400 Bad Request`; it now says which accession failed and what one looks like.
+
 ## [1.4.0] - 2026-08-07
 
 MCPymol could make pictures but could not answer questions with numbers. This
