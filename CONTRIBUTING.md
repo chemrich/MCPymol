@@ -51,13 +51,27 @@ bypass the hooks in a pinch — CI will still catch it.
 uv run pytest tests/
 ```
 
-The suite mocks PyMOL and the socket layer, so you don't need PyMOL installed to run it. If you're touching the bridge protocol (`send_request` framing in `server.py`, the `PyMOLSocketServer` loop in `plugin.py`), please also test against a real PyMOL.
+The suite mocks PyMOL and the socket layer, so you don't need PyMOL installed to run it. If you're touching the bridge protocol (`send_request` framing in `bridge.py`, the `PyMOLSocketServer` loop in `plugin.py`), please also test against a real PyMOL — and note `tests/test_bridge_roundtrip.py`, which runs the real bridge against the real listener over a socket rather than a mock.
 
 ## When you add a new MCP tool
 
 - Give it a docstring an LLM can use. State expected argument vocabularies (valid representation names, palette names, etc.) inline. Mention compatible/related tools when relevant.
 - If the tool exists to drive a *view*, add an entry to the view table in `README.md` and include an example prompt.
-- Add a test in `tests/test_server.py` (or `test_auto_wrappers.py` for one-shot primitives). Mocking `mcpymol.server.send_request` is the typical pattern.
+- Put it in the module that owns its concern: `views.py` for a `*_view` preset, `analysis.py` for something that reports numbers, `primitives.py` for a thin `pymol.cmd` wrapper, `structures.py` for loading and introspection. `server.py` is a re-export facade — add the new name to its import block and `__all__`, which `tests/test_package_layout.py` enforces.
+- Document every parameter with `Annotated[str, Field(description="...")]`. FastMCP builds the JSON schema from the signature, so a description in the docstring never reaches the client; tests fail if a parameter has none.
+- Add a test in the file matching the module (`tests/test_contacts.py`, `tests/test_rendering.py`, and so on).
+
+**Patch `send_request` where the code looks it up, not on the facade.** Each
+module does `from mcpymol.bridge import send_request`, which binds its own
+name, so:
+
+```python
+@patch("mcpymol.views.send_request")        # correct — the module under test
+@patch("mcpymol.server.send_request")       # WRONG — rebinds only the facade
+```
+
+Patching `mcpymol.server` leaves the real function in place for every module
+that actually calls it, so the test hits a live socket instead of the mock.
 
 ## Style
 

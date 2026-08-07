@@ -5,6 +5,19 @@ All notable changes to MCPymol will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **`CONTRIBUTING.md` recommended a test pattern that does not work.** It told contributors to mock `mcpymol.server.send_request`; after the v1.3.0 package split that rebinds only the facade's name, leaving every module still calling the real socket — the exact trap that broke 74 tests during the split. It now shows the correct target and explains why.
+- Docs still pointed at `server.py` for the bridge protocol and for "after editing", both of which moved when the package was split.
+- README claimed 340+ tests (actually 469) and ~60 primitives (actually ~85, of 120 tools).
+- `load_structure` was documented nowhere, so opening a local PDB/mmCIF — a built model, a docking pose, an MD frame — was undiscoverable. `fetch_alphafold` and `count_atoms` were likewise unnamed.
+
+### Added
+- **Configuration section in the README.** Six of nine `MCPYMOL_*` environment variables were undocumented, including every timeout introduced in v1.3.0. All nine now have a table entry saying what they do and what the default is.
+- Troubleshooting rows for the failure modes introduced since v1.2.1: files not appearing when PyMOL and the bridge are on different machines, oversized renders, AlphaFold entries with no model at a given version, blank views from empty selections, and slow-operation timeouts.
+- `tests/test_docs.py` keeps these true. An environment variable added in code but not the README, a headline tool missing from the README or the skill, a doc that sends readers to `server.py` for implementation, or a `CONTRIBUTING` that stops warning about facade patching — each now fails CI. Written after this audit found six undocumented variables and three unmentioned tools by hand; the point is not to do that by hand again.
+
 ## [1.4.0] - 2026-08-07
 
 MCPymol could make pictures but could not answer questions with numbers. This

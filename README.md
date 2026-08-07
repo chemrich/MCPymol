@@ -10,9 +10,10 @@ PyMOL is great, but its syntax is famously obscure — and despite the name, it 
 
 - **A vocabulary the LLM understands.** Tools like `fetch_structure`, `ligand_view`, `interface_view`, `mutation_view`, `conservation_view` do high-level setup in one call: pick the biological assembly, hide solvent, color sensibly, label the right residues, draw the right H-bonds.
 - **Renders the model can see.** `render` ray-traces and hands the image straight back, so the assistant can look at what it made and fix it — rather than writing a PNG it has no way to inspect.
-- **~60 PyMOL primitives** exposed as individual tools (`show`, `hide`, `color`, `select`, `distance`, `align`, `spectrum`, …) so the model can compose finer motions when the high-level tools don't quite fit.
-- **Predicted structures.** A UniProt accession fetches from AlphaFold DB and colors by pLDDT confidence in the official palette.
-- **Scene introspection.** `list_objects`, `list_chains`, `list_ligands` let the model check what's actually loaded before guessing.
+- **~85 PyMOL primitives** exposed as individual tools (`show`, `hide`, `color`, `select`, `distance`, `align`, `spectrum`, …) so the model can compose finer motions when the high-level tools don't quite fit. 120 tools in total, every parameter documented in the tool schema.
+- **Predicted structures.** A UniProt accession fetches from AlphaFold DB and colors by pLDDT confidence in the official palette — via `fetch_structure` or `fetch_alphafold` directly.
+- **Scene introspection.** `list_objects`, `list_chains`, `list_ligands` and `structure_info` let the model check what's actually loaded before guessing, and `count_atoms` catches a selection that matches nothing — otherwise invisible until the render comes out blank.
+- **Your own files too.** `load_structure` opens a local PDB/mmCIF — a model you built, a docking pose, an MD frame — through the same prep and styling as a fetched entry.
 - **Smart structure prep.** Fetching a PDB code grabs the biological assembly when one exists, then runs a BFS heuristic over chain–chain contacts (`multimer_cutoff`, default 8 Å) so sprawling functional multimers like the CRP pentamer or ferritin cage stay whole while crystallographic copies get dropped. Waters and crystallization additives are hidden automatically.
 - **Two-process bridge.** PyMOL's GUI has its own Python; MCPymol works by running a tiny TCP listener *inside* PyMOL plus a separate FastMCP server *outside* it.
 
@@ -50,6 +51,7 @@ Organised by the question, not the tool.
 | What *is* this structure — resolution, method, organism? | `structure_info` |
 | What's the sequence, and how does it map to the residue numbering? | `get_sequence` |
 | What's loaded / what chains / what ligands? | `list_objects`, `list_chains`, `list_ligands` |
+| Can I open my own file rather than a PDB code? | `load_structure` |
 | What holds this ligand in its pocket, and how tightly? | `contact_report`, then `ligand_view` to see it |
 | How big is this interface, and which residues matter? | `interface_report`, then `interface_view` |
 | Where do these two structures differ? | `superposition_view` |
@@ -158,6 +160,29 @@ gemini mcp add mcpymol /absolute/path/to/MCPymol/.venv/bin/mcpymol
 
 If your network blocks PyPI, you may also need to tweak the repository URLs inside `uv.lock` to match your internal mirror.
 
+## Configuration
+
+Everything is optional; the defaults are what the tools are tuned for. Set them
+before launching PyMOL and the bridge.
+
+| Variable | Default | What it does |
+| --- | --- | --- |
+| `MCPYMOL_PORT` | `9876` | Bridge ↔ plugin TCP port. Must match on **both** sides. |
+| `MCPYMOL_RECV_TIMEOUT` | `30` s | How long the plugin waits for one complete request before answering with an error. Bounds how long a stalled client can hold the single-threaded accept loop. |
+| `MCPYMOL_MAX_REQUEST_BYTES` | `8388608` | Largest single request the plugin will accept. |
+| `MCPYMOL_SLOW_OP_TIMEOUT` | `600` s | Socket budget for operations that legitimately take minutes — `ray`, `png`, `save`, `mpng`, `draw`. |
+| `MCPYMOL_MAX_IMAGE_BYTES` | `5000000` | Above this, `render` returns the file path instead of inlining the image. |
+| `MCPYMOL_PB_TIMEOUT` | `600` s | Wall-clock ceiling on the external `apbs` / `pdb2pqr` processes. |
+| `MCPYMOL_MMSEQS_URL` | ColabFold public API | MMseqs2 server for `conservation_view`. Point at an internal one to avoid the public queue. |
+| `MCPYMOL_ALPHAFOLD_URL` | AlphaFold DB | Template URL for predicted-model downloads. |
+| `MCPYMOL_RCSB_URL` | RCSB data API | Base URL for the metadata `structure_info` reports. |
+
+```bash
+MCPYMOL_PORT=9867 open -a PyMOL       # macOS
+MCPYMOL_PORT=9867 uv run mcpymol      # bridge
+```
+
+
 ## Troubleshooting
 
 | Symptom | Likely cause | Fix |
@@ -167,6 +192,11 @@ If your network blocks PyPI, you may also need to tweak the repository URLs insi
 | Long `get_fastastr` / `get_chains` calls fail with a JSON parse error | You're on a pre-2026-05 version of MCPymol that capped recv() at 8 KB | Pull main — the bridge now drains the response in full |
 | `conservation_view` is slow | First call hits the ColabFold MMseqs2 API (30 s–few min); subsequent calls for the same sequence hit a local cache | If you have an internal MMseqs2 server, set `MCPYMOL_MMSEQS_URL` |
 | `poisson_boltzmann_view` fails | `apbs` or `pdb2pqr` missing | `brew install brewsci/bio/apbs` and `pip install pdb2pqr` |
+| A tool reports a file *"did not appear"* | PyMOL and the bridge are on different machines — they exchange files through the filesystem | Run both on the same host |
+| `render` returns a size message instead of an image | The PNG exceeded the inline limit; base64 inflates it by a third | Ask for a smaller `width`/`height`, or raise `MCPYMOL_MAX_IMAGE_BYTES` |
+| `fetch_structure`/`fetch_alphafold` says *"No AlphaFold model"* | The accession is valid but AlphaFold DB has no model at that version | Try another `model_version`, or check the accession |
+| A view comes out blank | The selection matched no atoms | `count_atoms` on the selection before building the scene |
+| A long operation returns *"Socket connection failed: timed out"* | Something slower than its budget | Raise `MCPYMOL_SLOW_OP_TIMEOUT` (renders, saves) or `MCPYMOL_PB_TIMEOUT` (APBS) |
 
 ## Tests
 
@@ -174,7 +204,7 @@ If your network blocks PyPI, you may also need to tweak the repository URLs insi
 PYTHONPATH=src uv run pytest tests/
 ```
 
-The suite mocks the socket layer and PyMOL's `cmd` module, so it runs without a PyMOL install. 340+ tests cover the socket payloads, the bridge framing, the conservation pipeline (A3M parsing, Shannon entropy, MMseqs2 mocking, MSA→B-factor mapping), the mesh-repair paths, and every view. `tests/test_bridge_roundtrip.py` additionally runs the real bridge against the real plugin listener over TCP on an ephemeral port, so the wire format is checked against itself rather than against a mock.
+The suite mocks the socket layer and PyMOL's `cmd` module, so it runs without a PyMOL install. 469 tests cover the socket payloads, the bridge framing, the conservation pipeline (A3M parsing, Shannon entropy, MMseqs2 mocking, MSA→B-factor mapping), the mesh-repair paths, and every view. `tests/test_bridge_roundtrip.py` additionally runs the real bridge against the real plugin listener over TCP on an ephemeral port, so the wire format is checked against itself rather than against a mock.
 
 ### Layout
 
