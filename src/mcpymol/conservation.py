@@ -14,6 +14,9 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from typing import Annotated
+
+from pydantic import Field
 
 from mcpymol.app import mcp
 from mcpymol.bridge import send_request
@@ -189,13 +192,40 @@ def _compute_shannon_entropy(msa: list[list[str]]) -> list[float]:
 
 @mcp.tool()
 def conservation_view(
-    obj_name: str,
-    selection: str = "all",
-    server_url: str | None = None,
-    use_env: bool = True,
-    chain: str | None = None,
-    scale: str = "relative",
-    force_refresh: bool = False,
+    obj_name: Annotated[str, Field(description='PyMOL object name (e.g. "1ubq")')],
+    selection: Annotated[
+        str, Field(description='PyMOL selection to analyze (default "all")')
+    ] = "all",
+    server_url: Annotated[
+        str | None,
+        Field(
+            description="Override the MMseqs2 server URL (defaults to ColabFold public API, or MCPYMOL_MMSEQS_URL env var)"
+        ),
+    ] = None,
+    use_env: Annotated[
+        bool,
+        Field(
+            description="Search environmental databases in addition to UniRef (default True, gives deeper MSAs)"
+        ),
+    ] = True,
+    chain: Annotated[
+        str | None,
+        Field(
+            description="Specific chain ID to analyze. If None, uses the first protein chain found."
+        ),
+    ] = None,
+    scale: Annotated[
+        str,
+        Field(
+            description='Color scaling mode. "relative" (default) maps the color gradient to the actual min/max entropy range of this protein, maximizing visual contrast. "absolute" uses the full theoretical entropy range (0 to log2(20)), useful when comparing conservation across different proteins.'
+        ),
+    ] = "relative",
+    force_refresh: Annotated[
+        bool,
+        Field(
+            description="If True, bypass the cache and re-fetch the MSA from the MMseqs2 server even if scores are cached."
+        ),
+    ] = False,
 ) -> str:
     """
     Colors the structure by evolutionary conservation using Shannon entropy.
@@ -215,23 +245,6 @@ def conservation_view(
     NOTE: The first call makes an external API call and may take 30 seconds
     to several minutes depending on the server and sequence length.
     Subsequent calls for the same sequence are instant.
-
-    Args:
-        obj_name: PyMOL object name (e.g. "1ubq")
-        selection: PyMOL selection to analyze (default "all")
-        server_url: Override the MMseqs2 server URL (defaults to ColabFold
-                    public API, or MCPYMOL_MMSEQS_URL env var)
-        use_env: Search environmental databases in addition to UniRef
-                 (default True, gives deeper MSAs)
-        chain: Specific chain ID to analyze. If None, uses the first
-               protein chain found.
-        scale: Color scaling mode. "relative" (default) maps the color
-               gradient to the actual min/max entropy range of this protein,
-               maximizing visual contrast. "absolute" uses the full
-               theoretical entropy range (0 to log2(20)), useful when
-               comparing conservation across different proteins.
-        force_refresh: If True, bypass the cache and re-fetch the MSA from
-                       the MMseqs2 server even if scores are cached.
     """
     # 1. Determine which chain to use
     if chain is None:

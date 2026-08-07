@@ -13,6 +13,9 @@ import re
 import tempfile
 import urllib.error
 import urllib.request
+from typing import Annotated
+
+from pydantic import Field
 
 from mcpymol.app import mcp
 from mcpymol.bridge import send_request
@@ -174,7 +177,21 @@ def _download_alphafold(accession: str, version: int, fragment: int = 1) -> tupl
 
 @mcp.tool()
 def fetch_structure(
-    pdb_code: str, obj_name: str | None = None, multimer_cutoff: float = DEFAULT_MULTIMER_CUTOFF
+    pdb_code: Annotated[
+        str,
+        Field(
+            description='4-letter PDB code (e.g. "1abc"), or an AlphaFold identifier (e.g. "P69905", "af-P69905").'
+        ),
+    ],
+    obj_name: Annotated[
+        str | None, Field(description="Optional custom name for the object in PyMOL")
+    ] = None,
+    multimer_cutoff: Annotated[
+        float,
+        Field(
+            description="Distance (A) between chains to keep them in the same multimer. Default 8.0A is suitable for most functional assemblies."
+        ),
+    ] = DEFAULT_MULTIMER_CUTOFF,
 ) -> str:
     """
     Fetches a protein structure from the PDB, or a predicted model from AlphaFold DB.
@@ -184,13 +201,6 @@ def fetch_structure(
 
     A UniProt accession or an ``AF-`` prefixed identifier routes to AlphaFold DB
     instead and is coloured by pLDDT confidence — see :func:`fetch_alphafold`.
-
-    Args:
-        pdb_code: 4-letter PDB code (e.g. "1abc"), or an AlphaFold identifier
-            (e.g. "P69905", "af-P69905").
-        obj_name: Optional custom name for the object in PyMOL
-        multimer_cutoff: Distance (A) between chains to keep them in the same multimer.
-                         Default 8.0A is suitable for most functional assemblies.
     """
     accession = _alphafold_accession(pdb_code)
     if accession is not None:
@@ -215,16 +225,17 @@ def fetch_structure(
 
 @mcp.tool()
 def load_structure(
-    file_path: str, obj_name: str, multimer_cutoff: float = DEFAULT_MULTIMER_CUTOFF
+    file_path: Annotated[str, Field(description="Path to the structure file (PDB, MMCIF, etc.)")],
+    obj_name: Annotated[str, Field(description="Name for the object in PyMOL")],
+    multimer_cutoff: Annotated[
+        float,
+        Field(
+            description="Distance (A) between chains to keep them in the same multimer. Default 8.0A is suitable for most functional assemblies."
+        ),
+    ] = DEFAULT_MULTIMER_CUTOFF,
 ) -> str:
     """
     Loads a structure from a local file path and applies the BFS multimer heuristic.
-
-    Args:
-        file_path: Path to the structure file (PDB, MMCIF, etc.)
-        obj_name: Name for the object in PyMOL
-        multimer_cutoff: Distance (A) between chains to keep them in the same multimer.
-                         Default 8.0A is suitable for most functional assemblies.
     """
     send_request("do", args=["reinitialize"])
     send_request("set", args=["mouse_wheel_scale", "0.1"])
@@ -241,10 +252,24 @@ def load_structure(
 
 @mcp.tool()
 def fetch_alphafold(
-    uniprot_id: str,
-    obj_name: str | None = None,
-    model_version: int = DEFAULT_ALPHAFOLD_VERSION,
-    fragment: int = 1,
+    uniprot_id: Annotated[
+        str,
+        Field(
+            description='UniProt accession (e.g. "P69905" for human haemoglobin alpha). An "AF-" prefix is accepted and stripped.'
+        ),
+    ],
+    obj_name: Annotated[
+        str | None, Field(description="Optional custom name for the object in PyMOL.")
+    ] = None,
+    model_version: Annotated[
+        int, Field(description="AlphaFold DB model version. 4 is current.")
+    ] = DEFAULT_ALPHAFOLD_VERSION,
+    fragment: Annotated[
+        int,
+        Field(
+            description="Fragment number for long proteins split across models (F1, F2, …). Most entries only have F1."
+        ),
+    ] = 1,
 ) -> str:
     """
     Fetches a predicted structure from AlphaFold DB by UniProt accession.
@@ -257,14 +282,6 @@ def fetch_alphafold(
     Note that pLDDT rides in the B-factor column, so ``bfactor_view`` and
     ``putty_view`` will mis-colour these models (they assume low = rigid,
     which is backwards for confidence). Use ``plddt_view`` instead.
-
-    Args:
-        uniprot_id: UniProt accession (e.g. "P69905" for human haemoglobin
-            alpha). An "AF-" prefix is accepted and stripped.
-        obj_name: Optional custom name for the object in PyMOL.
-        model_version: AlphaFold DB model version. 4 is current.
-        fragment: Fragment number for long proteins split across models
-            (F1, F2, …). Most entries only have F1.
     """
     accession = _alphafold_accession(uniprot_id) or uniprot_id.strip().upper()
     name = obj_name if obj_name else f"AF_{accession}"
@@ -359,7 +376,15 @@ def _rcsb_metadata(pdb_id: str) -> dict:
 
 
 @mcp.tool()
-def structure_info(obj_name: str, pdb_id: str | None = None) -> str:
+def structure_info(
+    obj_name: Annotated[str, Field(description='PyMOL object to describe (e.g. "1hsg").')],
+    pdb_id: Annotated[
+        str | None,
+        Field(
+            description="PDB code to look up, if the object was renamed and its name no longer matches the entry."
+        ),
+    ] = None,
+) -> str:
     """
     Summarises what a loaded structure actually is, in one call.
 
@@ -371,11 +396,6 @@ def structure_info(obj_name: str, pdb_id: str | None = None) -> str:
 
     Metadata lookup is best-effort — it is skipped silently if the object is
     not named after a PDB entry, or the API is unreachable.
-
-    Args:
-        obj_name: PyMOL object to describe (e.g. "1hsg").
-        pdb_id: PDB code to look up, if the object was renamed and its name
-            no longer matches the entry.
     """
     lines: list[str] = []
 
@@ -447,7 +467,12 @@ def structure_info(obj_name: str, pdb_id: str | None = None) -> str:
 
 
 @mcp.tool()
-def get_sequence(obj_name: str, chain: str | None = None) -> str:
+def get_sequence(
+    obj_name: Annotated[str, Field(description='PyMOL object (e.g. "1hsg").')],
+    chain: Annotated[
+        str | None, Field(description="Chain to extract. Omit for every chain in the object.")
+    ] = None,
+) -> str:
     """
     Returns the amino-acid sequence of a loaded structure, in FASTA.
 
@@ -456,10 +481,6 @@ def get_sequence(obj_name: str, chain: str | None = None) -> str:
     rarely starts at 1, so "residue 50" in a paper and position 50 in the
     sequence are usually different residues — and unmodelled loops leave gaps
     in the structure that the sequence alone does not reveal.
-
-    Args:
-        obj_name: PyMOL object (e.g. "1hsg").
-        chain: Chain to extract. Omit for every chain in the object.
     """
     selection = f"({obj_name}) and polymer.protein"
     if chain:
@@ -518,7 +539,11 @@ _SESSION_SUFFIXES = (".pse", ".pse.gz")
 
 
 @mcp.tool()
-def save_session(filename: str) -> str:
+def save_session(
+    filename: Annotated[
+        str, Field(description="Path to write. A ``.pse`` extension is added if missing.")
+    ],
+) -> str:
     """
     Saves the entire PyMOL session to a .pse file.
 
@@ -529,9 +554,6 @@ def save_session(filename: str) -> str:
 
     Unlike ``save``, which writes bare coordinates, this preserves the whole
     visual state.
-
-    Args:
-        filename: Path to write. A ``.pse`` extension is added if missing.
     """
     path = os.path.abspath(os.path.expanduser(filename.strip()))
     if not path.lower().endswith(_SESSION_SUFFIXES):
@@ -555,7 +577,12 @@ def save_session(filename: str) -> str:
 
 
 @mcp.tool()
-def load_session(filename: str, merge: bool = False) -> str:
+def load_session(
+    filename: Annotated[str, Field(description="Path to the .pse file to open.")],
+    merge: Annotated[
+        bool, Field(description="Add to the current session rather than replacing it.")
+    ] = False,
+) -> str:
     """
     Restores a PyMOL session from a .pse file.
 
@@ -563,10 +590,6 @@ def load_session(filename: str, merge: bool = False) -> str:
     the file in PyMOL would. Set ``merge=True`` to add its objects to the
     current session instead, which is how you get two saved scenes side by
     side — though note that objects with the same name will collide.
-
-    Args:
-        filename: Path to the .pse file to open.
-        merge: Add to the current session rather than replacing it.
     """
     path = os.path.abspath(os.path.expanduser(filename.strip()))
     if not os.path.exists(path):
@@ -610,8 +633,13 @@ def list_objects() -> str:
 
 
 @mcp.tool()
-def list_chains(obj_name: str = "all") -> str:
-    """Lists the chain IDs present in an object (or in all objects).
+def list_chains(
+    obj_name: Annotated[
+        str, Field(description="Object to inspect. Defaults to every loaded object.")
+    ] = "all",
+) -> str:
+    """
+    Lists the chain IDs present in an object (or in all objects).
 
     Useful before calling :func:`interface_view`, :func:`conservation_view`
     or any tool that needs a specific chain ID.
@@ -626,8 +654,11 @@ def list_chains(obj_name: str = "all") -> str:
 
 
 @mcp.tool()
-def list_ligands(obj_name: str) -> str:
-    """Lists the small-molecule (organic) ligand residue names in an object.
+def list_ligands(
+    obj_name: Annotated[str, Field(description="Object to inspect for organic ligands.")],
+) -> str:
+    """
+    Lists the small-molecule (organic) ligand residue names in an object.
 
     Call this before :func:`ligand_view`, :func:`pocket_view`, or
     :func:`pharmacophore_view` when you don't already know the ligand's

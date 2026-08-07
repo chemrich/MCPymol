@@ -7,6 +7,9 @@ so a hinge motion or a loop rearrangement is visible at a glance.
 """
 
 import json
+from typing import Annotated
+
+from pydantic import Field
 
 from mcpymol.app import mcp
 from mcpymol.bridge import send_request
@@ -72,10 +75,22 @@ def _resi_sort_key(resi: str) -> tuple[int, str]:
 
 @mcp.tool()
 def superposition_view(
-    mobile: str,
-    target: str,
-    method: str = "super",
-    max_deviation: float | None = None,
+    mobile: Annotated[str, Field(description='Object to move and color (e.g. "1ake").')],
+    target: Annotated[
+        str, Field(description='Object to superpose onto and leave in place (e.g. "4ake").')
+    ],
+    method: Annotated[
+        str,
+        Field(
+            description='"super" (default) is sequence-independent and handles low identity or different folds; "align" uses a sequence alignment first and is better for near-identical sequences.'
+        ),
+    ] = "super",
+    max_deviation: Annotated[
+        float | None,
+        Field(
+            description="Angstrom value mapped to full red. Defaults to the largest observed shift, which maximises contrast; set it explicitly to compare two different pairs on one scale."
+        ),
+    ] = None,
 ) -> str:
     """
     Superposes two structures and colors the mobile one by per-residue shift.
@@ -89,16 +104,6 @@ def superposition_view(
     Best on two states of the same protein — apo vs holo, open vs closed, a
     mutant against wild type. Residues are paired by chain and residue number,
     falling back to residue number alone when the two use different chain IDs.
-
-    Args:
-        mobile: Object to move and color (e.g. "1ake").
-        target: Object to superpose onto and leave in place (e.g. "4ake").
-        method: "super" (default) is sequence-independent and handles low
-            identity or different folds; "align" uses a sequence alignment
-            first and is better for near-identical sequences.
-        max_deviation: Angstrom value mapped to full red. Defaults to the
-            largest observed shift, which maximises contrast; set it
-            explicitly to compare two different pairs on one scale.
     """
     if method not in ("super", "align"):
         return f"Error: method must be 'super' or 'align', got {method!r}."
