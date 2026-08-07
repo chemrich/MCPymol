@@ -24,10 +24,21 @@ from mcpymol.pdbtext import parse_atoms, residue_order
 # AlphaFold DB serves predicted models by UniProt accession.  PyMOL's own
 # cmd.fetch only knows the RCSB, so these are downloaded here and loaded from
 # disk.
+# AlphaFold DB's prediction API returns the authoritative file URL for an
+# accession. Asking it beats constructing a filename: the database renumbers
+# its model version periodically (v4 was current in 2024, v6 by 2026) and
+# *removes* the old ones, and some entries — notably the SARS-CoV-2 proteome —
+# are keyed by an internal numeric ID rather than the accession at all, so
+# AF-{acc}-F1-model_v{n} does not exist for them in any version.
+ALPHAFOLD_API_URL = os.environ.get(
+    "MCPYMOL_ALPHAFOLD_API_URL", "https://alphafold.ebi.ac.uk/api/prediction/{acc}"
+)
+
+# Only used when a caller pins model_version explicitly, which bypasses the
+# API lookup.
 ALPHAFOLD_URL = os.environ.get(
     "MCPYMOL_ALPHAFOLD_URL", "https://alphafold.ebi.ac.uk/files/AF-{acc}-F{frag}-model_v{ver}.cif"
 )
-DEFAULT_ALPHAFOLD_VERSION = 4
 
 # RCSB's data API supplies the metadata PyMOL does not keep: title, method,
 # resolution, release date, source organism.
@@ -149,18 +160,71 @@ def _alphafold_accession(identifier: str) -> str | None:
     return upper if _UNIPROT_RE.match(ident) else None
 
 
-def _download_alphafold(accession: str, version: int, fragment: int = 1) -> tuple[str | None, str]:
-    """Download an AlphaFold model to a temp file. Returns (path, message)."""
-    url = ALPHAFOLD_URL.format(acc=accession, frag=fragment, ver=version)
+def _resolve_alphafold_url(accession: str, fragment: int = 1) -> tuple[str | None, str]:
+    """Ask AlphaFold DB for the model file URL. Returns (url, message)."""
+    api = ALPHAFOLD_API_URL.format(acc=accession)
+    try:
+        with urllib.request.urlopen(api, timeout=30) as resp:
+            entries = json.loads(resp.read().decode())
+    except urllib.error.HTTPError as e:
+        # 400 is what the API returns for a malformed accession, 404/422 for a
+        # well-formed one it has no model for. Both are the caller's problem to
+        # fix and neither is worth surfacing as a raw HTTP code.
+        if e.code in (400, 404, 422):
+            return None, (
+                f"AlphaFold DB has no prediction for '{accession}'. Check the UniProt "
+                f"accession (e.g. P69905) — note that not every protein has a model."
+            )
+        return None, f"AlphaFold DB returned HTTP {e.code} for {accession}: {e.reason}"
+    except (urllib.error.URLError, TimeoutError) as e:
+        return None, f"Could not reach AlphaFold DB ({api}): {e}"
+    except ValueError as e:
+        return None, f"AlphaFold DB returned an unreadable response for {accession}: {e}"
+
+    if not entries:
+        return None, f"AlphaFold DB has no prediction for '{accession}'."
+
+    # Long proteins are split into fragments; entries come back in order.
+    index = max(0, fragment - 1)
+    if index >= len(entries):
+        return None, (
+            f"AlphaFold DB has {len(entries)} fragment(s) for '{accession}', "
+            f"so fragment {fragment} does not exist."
+        )
+
+    url = entries[index].get("cifUrl") or entries[index].get("pdbUrl")
+    if not url:
+        return None, f"AlphaFold DB returned no model file URL for '{accession}'."
+    return url, ""
+
+
+def _download_alphafold(
+    accession: str, version: int | None = None, fragment: int = 1
+) -> tuple[str | None, str]:
+    """Download an AlphaFold model to a temp file. Returns (path, message).
+
+    ``version`` pins a specific model version, which skips the API lookup and
+    builds the legacy filename. Leave it unset to let the database say which
+    file is current — versions are retired, so a pin that worked last year may
+    404 today.
+    """
+    if version is None:
+        url, error = _resolve_alphafold_url(accession, fragment)
+        if url is None:
+            return None, error
+    else:
+        url = ALPHAFOLD_URL.format(acc=accession, frag=fragment, ver=version)
+
     try:
         with urllib.request.urlopen(url, timeout=60) as resp:
             data = resp.read()
     except urllib.error.HTTPError as e:
         if e.code == 404:
+            pinned = f" (model_v{version})" if version is not None else ""
             return None, (
-                f"No AlphaFold model for '{accession}' (model_v{version}). Check the "
-                f"UniProt accession, or try another model_version — the DB is "
-                f"versioned and older entries are not always rebuilt."
+                f"No AlphaFold model file for '{accession}'{pinned} at {url}. "
+                f"Model versions are retired as the database is rebuilt; omit "
+                f"model_version to use whichever is current."
             )
         return None, f"AlphaFold DB returned HTTP {e.code} for {accession}: {e.reason}"
     except (urllib.error.URLError, TimeoutError) as e:
@@ -262,8 +326,13 @@ def fetch_alphafold(
         str | None, Field(description="Optional custom name for the object in PyMOL.")
     ] = None,
     model_version: Annotated[
-        int, Field(description="AlphaFold DB model version. 4 is current.")
-    ] = DEFAULT_ALPHAFOLD_VERSION,
+        int | None,
+        Field(
+            description="Pin a specific AlphaFold model version. Leave unset (the "
+            "default) to use whichever version the database currently serves — "
+            "old versions are retired and stop resolving."
+        ),
+    ] = None,
     fragment: Annotated[
         int,
         Field(
@@ -308,7 +377,11 @@ def fetch_alphafold(
     from mcpymol.views import plddt_view
 
     summary = plddt_view(obj_name=name)
-    return f"Fetched AlphaFold model AF-{accession}-F{fragment} (v{model_version}) as '{name}'.\n{summary}"
+    version_note = f" (pinned v{model_version})" if model_version is not None else ""
+    return (
+        f"Fetched AlphaFold model for {accession}, fragment {fragment}{version_note}, "
+        f"as '{name}'.\n{summary}"
+    )
 
 
 def _int_result(action: str, args: list) -> int | None:

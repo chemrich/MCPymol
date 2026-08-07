@@ -174,7 +174,8 @@ before launching PyMOL and the bridge.
 | `MCPYMOL_MAX_IMAGE_BYTES` | `5000000` | Above this, `render` returns the file path instead of inlining the image. |
 | `MCPYMOL_PB_TIMEOUT` | `600` s | Wall-clock ceiling on the external `apbs` / `pdb2pqr` processes. |
 | `MCPYMOL_MMSEQS_URL` | ColabFold public API | MMseqs2 server for `conservation_view`. Point at an internal one to avoid the public queue. |
-| `MCPYMOL_ALPHAFOLD_URL` | AlphaFold DB | Template URL for predicted-model downloads. |
+| `MCPYMOL_ALPHAFOLD_API_URL` | AlphaFold DB prediction API | Where `fetch_alphafold` asks which model file is current. |
+| `MCPYMOL_ALPHAFOLD_URL` | AlphaFold DB files | Legacy filename template, used only when you pin `model_version` explicitly. |
 | `MCPYMOL_RCSB_URL` | RCSB data API | Base URL for the metadata `structure_info` reports. |
 
 ```bash

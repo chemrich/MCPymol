@@ -206,8 +206,8 @@ from mcpymol.structures import (
     _PDB_ID_RE,
     _SESSION_SUFFIXES,
     _UNIPROT_RE,
+    ALPHAFOLD_API_URL,
     ALPHAFOLD_URL,
-    DEFAULT_ALPHAFOLD_VERSION,
     DEFAULT_MULTIMER_CUTOFF,
     RCSB_DATA_URL,
     _alphafold_accession,
@@ -217,6 +217,7 @@ from mcpymol.structures import (
     _int_result,
     _rcsb_get,
     _rcsb_metadata,
+    _resolve_alphafold_url,
     fetch_alphafold,
     fetch_structure,
     get_sequence,
@@ -250,9 +251,9 @@ from mcpymol.views import (
 )
 
 __all__ = [
+    "ALPHAFOLD_API_URL",
     "ALPHAFOLD_URL",
     "AROMATIC_CENTROID_MAX",
-    "DEFAULT_ALPHAFOLD_VERSION",
     "DEFAULT_MULTIMER_CUTOFF",
     "DEFAULT_RENDER_HEIGHT",
     "DEFAULT_RENDER_WIDTH",
@@ -325,6 +326,7 @@ __all__ = [
     "_resi_sort_key",
     "_residue_class",
     "_residue_sasa",
+    "_resolve_alphafold_url",
     "_ring_systems",
     "_run_mmseqs2",
     "_stacking_interactions",

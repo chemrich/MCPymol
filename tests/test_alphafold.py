@@ -1,13 +1,17 @@
 """Tests for AlphaFold DB fetching and pLDDT confidence colouring."""
 
+import json
+import os
 import urllib.error
-from unittest.mock import patch
+import urllib.request
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from mcpymol.structures import (
     _alphafold_accession,
     _download_alphafold,
+    _resolve_alphafold_url,
     fetch_alphafold,
     fetch_structure,
 )
@@ -85,64 +89,175 @@ def test_fetch_structure_still_uses_the_pdb_for_pdb_codes(mock_sr, mock_af):
     assert "fetch" in [c.args[0] for c in mock_sr.call_args_list]
 
 
-# ── download ─────────────────────────────────────────────────────────────────
+# ── URL resolution ───────────────────────────────────────────────────────────
+#
+# The filename is asked for, not constructed. AlphaFold DB renumbers its model
+# version periodically and *removes* the old files (v4 was current in 2024, v6
+# by 2026), and some entries — the SARS-CoV-2 proteome among them — are keyed
+# by an internal numeric ID rather than the accession. A hardcoded
+# AF-{acc}-F1-model_v4 shipped in v1.3.0 and resolved for nothing at all.
+
+
+def _api_response(*urls):
+    """urlopen stand-in returning an AlphaFold prediction API payload."""
+    payload = json.dumps([{"cifUrl": u} for u in urls]).encode()
+    resp = MagicMock()
+    resp.read.return_value = payload
+    ctx = MagicMock()
+    ctx.__enter__.return_value = resp
+    return ctx
 
 
 @patch("mcpymol.structures.urllib.request.urlopen")
-def test_download_writes_a_temp_file(mock_open):
-    mock_open.return_value.__enter__.return_value.read.return_value = b"data_AF\n"
+def test_resolve_asks_the_api_for_the_url(mock_open):
+    mock_open.return_value = _api_response(
+        "https://alphafold.ebi.ac.uk/files/AF-P69905-F1-model_v6.cif"
+    )
 
-    path, err = _download_alphafold("P69905", 4)
+    url, err = _resolve_alphafold_url("P69905")
 
     assert err == ""
-    assert path is not None
-    with open(path, "rb") as fh:
-        assert fh.read() == b"data_AF\n"
-    import os
-
-    os.unlink(path)
-    assert "P69905" in mock_open.call_args[0][0]
-    assert "model_v4" in mock_open.call_args[0][0]
+    assert url.endswith("AF-P69905-F1-model_v6.cif")
+    assert "api/prediction/P69905" in mock_open.call_args[0][0]
 
 
 @patch("mcpymol.structures.urllib.request.urlopen")
-def test_download_explains_a_404(mock_open):
-    """The overwhelmingly common failure: a valid-looking accession AlphaFold
-    has no model for."""
-    mock_open.side_effect = urllib.error.HTTPError("u", 404, "Not Found", {}, None)
+def test_resolve_handles_a_non_accession_entry_id(mock_open):
+    """SARS-CoV-2 spike (P0DTC2) is served under an internal numeric ID, so no
+    accession-based filename exists for it in any version."""
+    mock_open.return_value = _api_response(
+        "https://alphafold.ebi.ac.uk/files/AF-0000000365840314-model_v1.cif"
+    )
 
-    path, err = _download_alphafold("P00000", 4)
+    url, err = _resolve_alphafold_url("P0DTC2")
 
-    assert path is None
-    assert "No AlphaFold model for 'P00000'" in err
-    assert "model_version" in err
+    assert err == ""
+    assert "0000000365840314" in url
 
 
 @patch("mcpymol.structures.urllib.request.urlopen")
-def test_download_reports_other_http_errors(mock_open):
+def test_resolve_picks_the_requested_fragment(mock_open):
+    mock_open.return_value = _api_response("first.cif", "second.cif", "third.cif")
+
+    url, _err = _resolve_alphafold_url("P12345", fragment=2)
+
+    assert url == "second.cif"
+
+
+@patch("mcpymol.structures.urllib.request.urlopen")
+def test_resolve_reports_a_missing_fragment(mock_open):
+    mock_open.return_value = _api_response("only.cif")
+
+    url, err = _resolve_alphafold_url("P12345", fragment=3)
+
+    assert url is None
+    assert "1 fragment(s)" in err
+
+
+@pytest.mark.parametrize("code", [400, 404, 422])
+@patch("mcpymol.structures.urllib.request.urlopen")
+def test_resolve_explains_an_unknown_accession(mock_open, code):
+    """400 is a malformed accession, 404/422 a valid one with no model; neither
+    is worth surfacing as a raw HTTP code."""
+    mock_open.side_effect = urllib.error.HTTPError("u", code, "nope", {}, None)
+
+    url, err = _resolve_alphafold_url("NOPE")
+
+    assert url is None
+    assert "no prediction for 'NOPE'" in err
+
+
+@patch("mcpymol.structures.urllib.request.urlopen")
+def test_resolve_reports_other_http_errors(mock_open):
     mock_open.side_effect = urllib.error.HTTPError("u", 503, "Service Unavailable", {}, None)
 
-    path, err = _download_alphafold("P69905", 4)
+    url, err = _resolve_alphafold_url("P69905")
 
-    assert path is None
+    assert url is None
     assert "HTTP 503" in err
 
 
 @patch("mcpymol.structures.urllib.request.urlopen")
-def test_download_reports_unreachable_db(mock_open):
-    mock_open.side_effect = urllib.error.URLError("no route to host")
+def test_resolve_reports_an_unreachable_api(mock_open):
+    mock_open.side_effect = urllib.error.URLError("offline")
 
-    path, err = _download_alphafold("P69905", 4)
+    url, err = _resolve_alphafold_url("P69905")
 
-    assert path is None
+    assert url is None
     assert "Could not reach AlphaFold DB" in err
 
 
 @patch("mcpymol.structures.urllib.request.urlopen")
-def test_download_rejects_an_empty_body(mock_open):
+def test_resolve_handles_an_empty_prediction_list(mock_open):
+    mock_open.return_value = _api_response()
+
+    url, err = _resolve_alphafold_url("P69905")
+
+    assert url is None
+    assert "no prediction" in err
+
+
+# ── download ─────────────────────────────────────────────────────────────────
+
+
+@patch("mcpymol.structures._resolve_alphafold_url")
+@patch("mcpymol.structures.urllib.request.urlopen")
+def test_download_writes_a_temp_file(mock_open, mock_resolve):
+    mock_resolve.return_value = ("https://example/AF-P69905-F1-model_v6.cif", "")
+    mock_open.return_value.__enter__.return_value.read.return_value = b"data_AF\n"
+
+    path, err = _download_alphafold("P69905")
+
+    assert err == ""
+    with open(path, "rb") as fh:
+        assert fh.read() == b"data_AF\n"
+    os.unlink(path)
+
+
+@patch("mcpymol.structures._resolve_alphafold_url")
+def test_download_propagates_a_resolution_failure(mock_resolve):
+    mock_resolve.return_value = (None, "AlphaFold DB has no prediction for 'X'.")
+
+    path, err = _download_alphafold("X")
+
+    assert path is None
+    assert "no prediction" in err
+
+
+@patch("mcpymol.structures._resolve_alphafold_url")
+@patch("mcpymol.structures.urllib.request.urlopen")
+def test_download_skips_the_api_when_a_version_is_pinned(mock_open, mock_resolve):
+    """An explicit model_version is an override, so it must not be silently
+    replaced by whatever the database currently serves."""
+    mock_open.return_value.__enter__.return_value.read.return_value = b"data_AF\n"
+
+    path, err = _download_alphafold("P69905", version=4)
+
+    assert err == ""
+    mock_resolve.assert_not_called()
+    assert "model_v4" in mock_open.call_args[0][0]
+    os.unlink(path)
+
+
+@patch("mcpymol.structures._resolve_alphafold_url")
+@patch("mcpymol.structures.urllib.request.urlopen")
+def test_download_explains_a_retired_version(mock_open, mock_resolve):
+    mock_resolve.return_value = ("https://example/model.cif", "")
+    mock_open.side_effect = urllib.error.HTTPError("u", 404, "Not Found", {}, None)
+
+    path, err = _download_alphafold("P69905")
+
+    assert path is None
+    assert "retired" in err
+
+
+@patch("mcpymol.structures._resolve_alphafold_url")
+@patch("mcpymol.structures.urllib.request.urlopen")
+def test_download_rejects_an_empty_body(mock_open, mock_resolve):
+    mock_resolve.return_value = ("https://example/model.cif", "")
     mock_open.return_value.__enter__.return_value.read.return_value = b""
 
-    path, err = _download_alphafold("P69905", 4)
+    path, err = _download_alphafold("P69905")
 
     assert path is None
     assert "empty file" in err
@@ -153,23 +268,29 @@ def test_download_rejects_an_empty_body(mock_open):
 
 @patch("mcpymol.views.send_request")
 @patch("mcpymol.structures.send_request")
+@patch("mcpymol.structures._resolve_alphafold_url")
 @patch("mcpymol.structures.urllib.request.urlopen")
-def test_fetch_alphafold_loads_and_colours_by_plddt(mock_open, mock_sr, mock_views_sr):
+def test_fetch_alphafold_loads_and_colours_by_plddt(
+    mock_open, mock_resolve, mock_sr, mock_views_sr
+):
+    mock_resolve.return_value = ("https://example/model.cif", "")
     mock_open.return_value.__enter__.return_value.read.return_value = b"data_AF\n"
     mock_sr.side_effect = _sr_ok
     mock_views_sr.side_effect = _sr_with_bfactors([95.0, 92.0, 60.0])
 
     result = fetch_alphafold(uniprot_id="P69905")
 
-    assert "Fetched AlphaFold model AF-P69905-F1 (v4) as 'AF_P69905'" in result
+    assert "Fetched AlphaFold model for P69905, fragment 1, as 'AF_P69905'" in result
     assert "pLDDT confidence" in result  # plddt_view ran
     assert "load" in [c.args[0] for c in mock_sr.call_args_list]
 
 
 @patch("mcpymol.views.send_request")
 @patch("mcpymol.structures.send_request")
+@patch("mcpymol.structures._resolve_alphafold_url")
 @patch("mcpymol.structures.urllib.request.urlopen")
-def test_fetch_alphafold_cleans_up_the_download(mock_open, mock_sr, mock_views_sr):
+def test_fetch_alphafold_cleans_up_the_download(mock_open, mock_resolve, mock_sr, mock_views_sr):
+    mock_resolve.return_value = ("https://example/model.cif", "")
     import os
 
     mock_open.return_value.__enter__.return_value.read.return_value = b"data_AF\n"
@@ -183,19 +304,22 @@ def test_fetch_alphafold_cleans_up_the_download(mock_open, mock_sr, mock_views_s
 
 
 @patch("mcpymol.structures.send_request")
+@patch("mcpymol.structures._resolve_alphafold_url")
 @patch("mcpymol.structures.urllib.request.urlopen")
-def test_fetch_alphafold_propagates_download_failure(mock_open, mock_sr):
-    mock_open.side_effect = urllib.error.HTTPError("u", 404, "Not Found", {}, None)
+def test_fetch_alphafold_propagates_download_failure(mock_open, mock_resolve, mock_sr):
+    mock_resolve.return_value = (None, "AlphaFold DB has no prediction for 'P00000'.")
 
     result = fetch_alphafold(uniprot_id="P00000")
 
-    assert "No AlphaFold model" in result
+    assert "no prediction for 'P00000'" in result
     mock_sr.assert_not_called()
 
 
 @patch("mcpymol.structures.send_request")
+@patch("mcpymol.structures._resolve_alphafold_url")
 @patch("mcpymol.structures.urllib.request.urlopen")
-def test_fetch_alphafold_reports_a_load_failure(mock_open, mock_sr):
+def test_fetch_alphafold_reports_a_load_failure(mock_open, mock_resolve, mock_sr):
+    mock_resolve.return_value = ("https://example/model.cif", "")
     mock_open.return_value.__enter__.return_value.read.return_value = b"data_AF\n"
 
     def fake(action, args=None, kwargs=None, **_ignored):
@@ -213,8 +337,11 @@ def test_fetch_alphafold_reports_a_load_failure(mock_open, mock_sr):
 
 @patch("mcpymol.views.send_request")
 @patch("mcpymol.structures.send_request")
+@patch("mcpymol.structures._resolve_alphafold_url")
 @patch("mcpymol.structures.urllib.request.urlopen")
-def test_fetch_alphafold_honours_version_and_fragment(mock_open, mock_sr, mock_views_sr):
+def test_fetch_alphafold_honours_version_and_fragment(
+    mock_open, mock_resolve, mock_sr, mock_views_sr
+):
     mock_open.return_value.__enter__.return_value.read.return_value = b"data_AF\n"
     mock_sr.side_effect = _sr_ok
     mock_views_sr.side_effect = _sr_with_bfactors([90.0])
@@ -223,7 +350,8 @@ def test_fetch_alphafold_honours_version_and_fragment(mock_open, mock_sr, mock_v
 
     url = mock_open.call_args[0][0]
     assert "F2" in url and "model_v3" in url
-    assert "AF-P69905-F2 (v3)" in result
+    assert "fragment 2 (pinned v3)" in result
+    mock_resolve.assert_not_called()  # an explicit pin bypasses the API
 
 
 # ── _read_ca_bfactors ────────────────────────────────────────────────────────
@@ -336,3 +464,26 @@ def test_plddt_view_is_registered_as_a_tool():
 
     names = {t.name for t in asyncio.run(mcp.list_tools())}
     assert {"plddt_view", "fetch_alphafold"} <= names
+
+
+# ── live contract ────────────────────────────────────────────────────────────
+
+
+@pytest.mark.network
+def test_alphafold_api_contract_is_still_what_we_assume():
+    """Hits AlphaFold DB for real.
+
+    Every other test here mocks urlopen, which is why v1.3.0 shipped a
+    hardcoded model_v4 URL that resolved for nothing: the mocks proved the URL
+    was *built* correctly, never that it *existed*. Opt-in via
+    `pytest -m network` so CI stays offline-safe, but run it before a release.
+    """
+    url, err = _resolve_alphafold_url("P69905")
+
+    assert err == "", err
+    assert url and url.startswith("https://alphafold.ebi.ac.uk/files/")
+    assert url.endswith((".cif", ".pdb"))
+
+    with urllib.request.urlopen(url, timeout=60) as resp:
+        head = resp.read(512)
+    assert head, "model file was empty"
