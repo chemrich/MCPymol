@@ -350,3 +350,186 @@ def _kind_rank(kind: str) -> int:
         return _INTERACTION_ORDER.index(kind)
     except ValueError:
         return len(_INTERACTION_ORDER)
+
+
+# ── Interface burial ─────────────────────────────────────────────────────────
+#
+# Buried surface area is the standard measure of how much of a complex is
+# actually complex. Convention: total buried = SASA(A alone) + SASA(B alone) -
+# SASA(AB), and the "interface area" quoted in papers is half of that, i.e.
+# the area contributed by one side.
+
+# Interpretation thresholds for a *per-side* interface area, from surveys of
+# the PDB (Janin et al.; Krissinel & Henrick). These are guidance, not a
+# verdict — small biological interfaces and large crystal contacts both exist.
+_CRYSTAL_CONTACT_MAX_AREA = 400.0
+_LARGE_INTERFACE_MIN_AREA = 1000.0
+
+# A residue is counted as part of the interface once it buries this much.
+_INTERFACE_RESIDUE_MIN_DELTA = 1.0
+
+_HYDROPHOBIC_RESIDUES = {"ALA", "VAL", "LEU", "ILE", "MET", "PHE", "TRP", "PRO", "GLY", "CYS"}
+_CHARGED_RESIDUES = {"ASP", "GLU", "LYS", "ARG"}
+
+
+def _residue_sasa(selection: str) -> dict[tuple[str, str], tuple[str, float]] | None:
+    """Per-residue SASA for a selection, as (chain, resi) -> (resn, area).
+
+    ``get_area(load_b=1)`` writes each atom's SASA into the B-factor column,
+    so one area calculation plus one PDB dump yields the whole per-residue
+    breakdown — rather than one round trip per residue.
+    """
+    area = send_request(
+        "get_area", args=[selection], kwargs={"state": 1, "load_b": 1}, timeout=180.0
+    )
+    if area.get("status") == "error":
+        return None
+
+    dump = send_request("get_pdbstr", args=[selection], timeout=180.0)
+    if dump.get("status") == "error":
+        return None
+
+    per_residue: dict[tuple[str, str], tuple[str, float]] = {}
+    for atom in parse_atoms(dump.get("result") or ""):
+        resn, total = per_residue.get(atom.residue_key, (atom.resn, 0.0))
+        per_residue[atom.residue_key] = (resn, total + atom.bfactor)
+    return per_residue
+
+
+def _residue_class(resn: str) -> str:
+    if resn in _CHARGED_RESIDUES:
+        return "charged"
+    if resn in _HYDROPHOBIC_RESIDUES:
+        return "hydrophobic"
+    return "polar"
+
+
+@mcp.tool()
+def interface_report(
+    obj_name: str,
+    chain_a: str,
+    chain_b: str,
+    max_residues: int = 15,
+) -> str:
+    """
+    Measures how large a protein-protein interface is, and which residues form it.
+
+    Reports buried surface area — the standard measure of how much of a
+    complex is actually complex — by comparing each chain's solvent-accessible
+    area free and bound. Also ranks the residues by how much surface each
+    buries, and breaks the interface down by residue chemistry.
+
+    Interpretation: a per-side area under ~400 A^2 is usually a crystal packing
+    contact rather than a biological interface, while over ~1000 A^2 indicates
+    a substantial, likely specific association. These are guides from PDB-wide
+    surveys, not a verdict — small biological interfaces exist.
+
+    For the interactions themselves — which pairs hydrogen bond, which form
+    salt bridges — use ``contact_report`` on the same two chains.
+
+    Args:
+        obj_name: PyMOL object holding the complex (e.g. "1brs").
+        chain_a: First chain ID (e.g. "A").
+        chain_b: Second chain ID (e.g. "D").
+        max_residues: How many of the most-buried residues to list per chain.
+    """
+    if chain_a == chain_b:
+        return f"Error: chain_a and chain_b are both '{chain_a}'; pick two different chains."
+
+    # SASA is meaningless without the solvent-accessible dot mode, and the
+    # default density is too coarse for per-residue numbers.
+    send_request("set", args=["dot_solvent", "1"])
+    send_request("set", args=["dot_density", "3"])
+
+    free_a, free_b, bound = "_iface_free_a", "_iface_free_b", "_iface_bound"
+    try:
+        for tmp, sel in (
+            (free_a, f"({obj_name}) and chain {chain_a} and polymer"),
+            (free_b, f"({obj_name}) and chain {chain_b} and polymer"),
+            (bound, f"({obj_name}) and chain {chain_a}+{chain_b} and polymer"),
+        ):
+            send_request("delete", args=[tmp])
+            res = send_request("create", args=[tmp, sel])
+            if res.get("status") == "error":
+                return f"Error isolating '{sel}': {res.get('error')}"
+
+        unbound = {
+            chain_a: _residue_sasa(free_a),
+            chain_b: _residue_sasa(free_b),
+        }
+        complexed = {
+            chain_a: _residue_sasa(f"{bound} and chain {chain_a}"),
+            chain_b: _residue_sasa(f"{bound} and chain {chain_b}"),
+        }
+    finally:
+        for tmp in (free_a, free_b, bound):
+            send_request("delete", args=[tmp])
+
+    for chain, values in list(unbound.items()) + list(complexed.items()):
+        if values is None:
+            return f"Error computing surface area for chain {chain} of '{obj_name}'."
+        if not values:
+            return (
+                f"Chain {chain} of '{obj_name}' has no polymer atoms. "
+                f"Check the chain IDs with list_chains."
+            )
+
+    buried: dict[str, list[tuple[str, str, float]]] = {}
+    totals: dict[str, float] = {}
+    for chain in (chain_a, chain_b):
+        rows = []
+        for key, (resn, free_area) in unbound[chain].items():  # type: ignore[union-attr]
+            bound_area = (complexed[chain] or {}).get(key, (resn, free_area))[1]
+            delta = free_area - bound_area
+            if delta >= _INTERFACE_RESIDUE_MIN_DELTA:
+                rows.append((resn, key[1], delta))
+        rows.sort(key=lambda r: r[2], reverse=True)
+        buried[chain] = rows
+        totals[chain] = sum(r[2] for r in rows)
+
+    total_buried = totals[chain_a] + totals[chain_b]
+    per_side = total_buried / 2.0
+
+    if per_side < 1.0:
+        return (
+            f"Chains {chain_a} and {chain_b} of '{obj_name}' bury no measurable "
+            f"surface — they are not in contact."
+        )
+
+    if per_side < _CRYSTAL_CONTACT_MAX_AREA:
+        verdict = "small enough to be a crystal packing contact rather than a biological interface"
+    elif per_side >= _LARGE_INTERFACE_MIN_AREA:
+        verdict = "a large interface, typical of a specific and possibly obligate complex"
+    else:
+        verdict = "a typical size for a specific but transient protein-protein interface"
+
+    lines = [
+        f"Interface between chains {chain_a} and {chain_b} of {obj_name}:",
+        f"  Buried surface area: {per_side:,.0f} A^2 per side ({total_buried:,.0f} A^2 total).",
+        f"  That is {verdict}.",
+        f"  Interface residues: {len(buried[chain_a])} in chain {chain_a}, "
+        f"{len(buried[chain_b])} in chain {chain_b}.",
+    ]
+
+    composition: dict[str, float] = {}
+    for chain in (chain_a, chain_b):
+        for resn, _resi, delta in buried[chain]:
+            kind = _residue_class(resn)
+            composition[kind] = composition.get(kind, 0.0) + delta
+    if composition and total_buried:
+        parts = [
+            f"{100.0 * v / total_buried:.0f}% {k}"
+            for k, v in sorted(composition.items(), key=lambda kv: -kv[1])
+        ]
+        lines.append(f"  Composition by buried area: {', '.join(parts)}.")
+
+    for chain in (chain_a, chain_b):
+        rows = buried[chain][:max_residues]
+        if not rows:
+            continue
+        listed = ", ".join(f"{resn}{resi} ({delta:.0f} A^2)" for resn, resi, delta in rows)
+        omitted = len(buried[chain]) - len(rows)
+        suffix = f", and {omitted} more" if omitted > 0 else ""
+        lines.append(f"  Chain {chain} hot spots: {listed}{suffix}.")
+
+    return "\n".join(lines)
