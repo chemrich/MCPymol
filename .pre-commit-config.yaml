@@ -1,8 +1,68 @@
-# Run `pre-commit install` once after cloning to enable these hooks.
-# See CONTRIBUTING.md.
+# Local gates that mirror CI, so a formatting slip is caught before it becomes
+# a red pipeline (and, in a stacked branch, a rebase of everything above it).
+#
+# Run `pre-commit install` once after cloning. See CONTRIBUTING.md.
+#
+# Why the linters run through `uv run` as `language: system` rather than
+# pre-commit's own ruff/mypy repos: those would pin their own tool versions in
+# this file, giving the project two sources of truth that drift apart until a
+# hook passes locally and CI fails (or worse, the reverse). Going through uv
+# means the hooks use exactly the versions in uv.lock — the same ones CI
+# installs.
+
+default_install_hook_types: [pre-commit, pre-push]
+
 repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      # Whitespace and newline hygiene, which otherwise shows up as noise in
+      # unrelated diffs.
+      - id: trailing-whitespace
+        # Markdown uses two trailing spaces as a hard line break.
+        args: [--markdown-linebreak-ext=md]
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      # Config files that break the build if malformed.
+      - id: check-yaml
+      - id: check-toml
+      # Things that should never reach a commit.
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: debug-statements
+      - id: check-added-large-files
+        # Structures and renders are gitignored; this catches the ones that
+        # slip past, since a stray PDB or PNG is easy to add and hard to remove.
+        args: [--maxkb=512]
+
   - repo: local
     hooks:
+      - id: ruff-check
+        name: ruff check
+        entry: uv run ruff check --force-exclude --fix
+        language: system
+        types_or: [python, pyi]
+        require_serial: true
+
+      - id: ruff-format
+        name: ruff format
+        entry: uv run ruff format --force-exclude
+        language: system
+        types_or: [python, pyi]
+        require_serial: true
+
+      - id: mypy
+        name: mypy
+        # mypy reads `files` and its settings from pyproject.toml, so it runs
+        # over the whole package rather than the staged subset — passing
+        # filenames would silently override that config.
+        entry: uv run mypy
+        language: system
+        pass_filenames: false
+        files: ^(src/.*\.py|pyproject\.toml)$
+        require_serial: true
+
       - id: uv-lock-check
         name: uv.lock in sync with pyproject.toml
         # Mirrors the CI "Lockfile in sync" job: blocks the commit if the
@@ -11,3 +71,13 @@ repos:
         language: system
         files: ^(pyproject\.toml|uv\.lock)$
         pass_filenames: false
+
+      - id: pytest
+        name: pytest
+        # Deliberately pre-push, not pre-commit: the suite takes ~16 s, which
+        # is too slow to pay on every commit but unremarkable on a push.
+        entry: uv run pytest -q
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
+        require_serial: true
