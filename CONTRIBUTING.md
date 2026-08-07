@@ -32,6 +32,37 @@ after a push. `pre-commit install` wires up both stages in one go.
 **On push:** the full `pytest` suite. It takes about 16 seconds — too slow to
 pay on every commit, unremarkable on a push.
 
+## The two opt-in suites
+
+Both are deselected by default so CI passes offline and without PyMOL. Run
+them before a release.
+
+```bash
+pytest -m network   # AlphaFold DB's API still returns what we assume
+pytest -m live      # every tool, called once against a running PyMOL
+```
+
+**`-m live` clears the PyMOL session it connects to.** Save your work first.
+It skips cleanly if no plugin is listening.
+
+It exists because the mocked suite asserts the payload we *send*, which cannot
+tell you whether PyMOL will accept it — and every wiring bug this project has
+shipped lived in that gap: seven tools calling `cmd` functions that do not
+exist, `render(ray_trace=False)` writing blank images, an AlphaFold URL that
+stopped resolving. All passed the mocked suite.
+
+It deliberately does **not** assert "no tool errors". Plenty of tools error
+honestly without the right context — `isomesh` needs a map, `symexp` needs
+crystal symmetry, `h_fill` needs an atom picked in the GUI. It fails only on
+response signatures that mean the wrapper is *misconfigured* rather than
+misapplied: an unresolvable action name, an argument in a numeric slot, a
+missing positional. A domain error passes; a broken wrapper cannot.
+
+Arguments come from a table keyed on parameter *name*, so a newly added tool is
+swept automatically. A tool needing a parameter the table cannot supply fails
+with instructions, and anything genuinely unsuitable goes in `EXCLUDED` with a
+stated reason.
+
 Two things worth knowing:
 
 - The `ruff` and `mypy` hooks run through `uv run`, so they use exactly the

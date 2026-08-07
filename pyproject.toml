@@ -78,9 +78,12 @@ testpaths = ["tests"]
 pythonpath = ["src"]
 # Network tests are opt-in (`pytest -m network`): CI must pass offline, but
 # these check contracts with external APIs that mocks cannot catch drifting.
-addopts = "-m 'not network'"
+# Both extra suites are opt-in: CI must pass offline and without PyMOL, but
+# these check contracts that mocks cannot — external APIs, and PyMOL itself.
+addopts = "-m 'not network and not live'"
 markers = [
     "network: hits a real external API; run before a release",
+    "live: drives a running PyMOL; CLEARS ITS SESSION. `pytest -m live`",
 ]
 
 [tool.ruff]

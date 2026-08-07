@@ -45,8 +45,14 @@ _OPENGL_UNAVAILABLE_NOTE = (
 )
 
 # Below this many distinct bytes in the decompressed pixel stream, an image is
-# effectively one flat colour. A heuristic, but a decisive one: real renders
-# are nowhere near it.
+# one flat colour — nothing rendered at all.
+#
+# Deliberately narrow. It does *not* catch a structure that rendered correctly
+# but is framed from far away, which reads as a dark frame with a bright dot
+# (~21 distinct values at 400x300). Widening the threshold to cover that would
+# start rejecting legitimately sparse renders, and bad framing is a camera
+# problem rather than a rendering one — tests/test_live.py checks the viewport
+# can frame an object before it trusts any render.
 _BLANK_IMAGE_MAX_DISTINCT_BYTES = 8
 
 
