@@ -6,7 +6,13 @@ from unittest.mock import patch
 import pytest
 
 from mcpymol.pdbtext import Atom, parse_atoms, residue_order
-from mcpymol.structures import _rcsb_metadata, get_sequence, structure_info
+from mcpymol.structures import (
+    _rcsb_metadata,
+    fetch_structure,
+    get_sequence,
+    load_structure,
+    structure_info,
+)
 
 
 def _atom_line(resi=1, chain="A", name="CA", resn="ALA", x=1.0, y=2.0, z=3.0, b=50.0, het=False):
@@ -372,3 +378,42 @@ def test_new_tools_are_registered(name):
     from mcpymol.server import mcp
 
     assert name in {t.name for t in asyncio.run(mcp.list_tools())}
+
+
+# ── loading more than one structure ──────────────────────────────────────────
+
+
+@patch("mcpymol.structures._rcsb_metadata")
+@patch("mcpymol.structures.send_request")
+def test_fetch_structure_clears_the_session_by_default(mock_sr, mock_meta):
+    mock_sr.side_effect = _sr_structure(chains=("A",))
+    mock_meta.return_value = {}
+
+    fetch_structure(pdb_code="1ubq")
+
+    dos = [c.kwargs["args"][0] for c in mock_sr.call_args_list if c.args[0] == "do"]
+    assert "reinitialize" in dos
+
+
+@patch("mcpymol.structures._rcsb_metadata")
+@patch("mcpymol.structures.send_request")
+def test_fetch_structure_can_add_to_the_session(mock_sr, mock_meta):
+    """Without this, comparing two structures is impossible: the second fetch
+    wipes the first, so superposition_view has nothing to compare."""
+    mock_sr.side_effect = _sr_structure(chains=("A",))
+    mock_meta.return_value = {}
+
+    fetch_structure(pdb_code="4ake", replace=False)
+
+    dos = [c.kwargs["args"][0] for c in mock_sr.call_args_list if c.args[0] == "do"]
+    assert "reinitialize" not in dos
+
+
+@patch("mcpymol.structures.send_request")
+def test_load_structure_can_add_to_the_session(mock_sr):
+    mock_sr.side_effect = _sr_structure(chains=("A",))
+
+    load_structure(file_path="/tmp/model.pdb", obj_name="model", replace=False)
+
+    dos = [c.kwargs["args"][0] for c in mock_sr.call_args_list if c.args[0] == "do"]
+    assert "reinitialize" not in dos

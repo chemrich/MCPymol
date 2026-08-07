@@ -23,6 +23,7 @@ TOOL_MODULES = [
     "mcpymol.printing",
     "mcpymol.rendering",
     "mcpymol.structures",
+    "mcpymol.style",
     "mcpymol.views",
 ]
 

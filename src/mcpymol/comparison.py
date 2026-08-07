@@ -14,6 +14,7 @@ from pydantic import Field
 from mcpymol.app import mcp
 from mcpymol.bridge import send_request
 from mcpymol.pdbtext import distance3d, parse_atoms, residue_order
+from mcpymol.style import black_background
 
 # Deviations above this are almost always a domain-scale motion rather than
 # local jitter; used only to pick a sensible default colour ceiling.
@@ -104,6 +105,14 @@ def superposition_view(
     Best on two states of the same protein — apo vs holo, open vs closed, a
     mutant against wild type. Residues are paired by chain and residue number,
     falling back to residue number alone when the two use different chain IDs.
+
+    Both structures have to be loaded first, and ``fetch_structure`` clears the
+    session by default — so fetch the second one with ``replace=False`` or it
+    will replace the first. If either entry is a multimer, compare single
+    chains (``create`` one object per chain): superposing one dimer onto
+    another fits the assembly rather than the fold, which inflates the RMSD
+    dramatically. 4AKE against 1AKE gives 18.5 A as deposited dimers and
+    2.1 A chain-to-chain.
     """
     if method not in ("super", "align"):
         return f"Error: method must be 'super' or 'align', got {method!r}."
@@ -187,7 +196,7 @@ def superposition_view(
         "do",
         args=[f"spectrum b, blue_white_red, ({mobile}) and polymer, minimum=0, maximum={ceiling}"],
     )
-    send_request("do", args=["bg_color black"])
+    black_background()
     send_request("zoom", args=[f"({mobile}) or ({target})"])
 
     worst = sorted(pairs, key=lambda r: r[2], reverse=True)[:_TOP_N_SHIFTED]

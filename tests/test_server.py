@@ -455,8 +455,9 @@ def test_cinematic_view(mock_sr):
     assert "Cinematic view" in result
     acts = _actions(mock_sr)
     assert "show" in acts
-    assert "do" in acts
     assert "set" in acts
+    # The background moved into style.set_background, so it is no longer
+    # visible on this module's send_request; test_rendering covers it.
 
 
 @patch("mcpymol.views.send_request")

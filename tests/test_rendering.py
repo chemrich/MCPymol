@@ -282,3 +282,52 @@ def test_turntable_creates_the_output_directory(mock_sr, tmp_path):
     turntable(frames=2, out_dir=str(target))
 
     assert target.is_dir()
+
+
+# ── scene background ─────────────────────────────────────────────────────────
+
+
+def test_black_background_sets_both_settings():
+    """bg_color alone leaves an alpha channel, so a ray-traced PNG comes out
+    transparent — which reads as white wherever the image is used. Every view
+    preset except the ghost-heart style had exactly that bug."""
+    from mcpymol.style import black_background
+
+    with patch("mcpymol.style.send_request") as mock_sr:
+        mock_sr.return_value = {"status": "success", "result": "OK"}
+        black_background()
+
+    calls = [(c.args[0], tuple(c.kwargs["args"])) for c in mock_sr.call_args_list]
+    assert ("do", ("bg_color black",)) in calls
+    assert ("set", ("opaque_background", "1")) in calls
+
+
+def test_no_view_sets_a_background_without_making_it_opaque():
+    """Guards the whole class of bug rather than one instance: a preset that
+    reaches for bg_color directly has skipped the opaque_background half."""
+    import pathlib
+
+    src = pathlib.Path(__file__).resolve().parent.parent / "src" / "mcpymol"
+    offenders = [
+        path.name
+        for path in src.glob("*.py")
+        if path.name != "style.py" and 'args=["bg_color' in path.read_text()
+    ]
+
+    assert not offenders, (
+        f"{offenders} set bg_color directly; use style.set_background() so the "
+        f"render is actually opaque"
+    )
+
+
+def test_a_non_black_background_is_also_made_opaque():
+    """textbook_view wants white, not black — and had the identical bug."""
+    from mcpymol.style import set_background
+
+    with patch("mcpymol.style.send_request") as mock_sr:
+        mock_sr.return_value = {"status": "success", "result": "OK"}
+        set_background("white")
+
+    calls = [(c.args[0], tuple(c.kwargs["args"])) for c in mock_sr.call_args_list]
+    assert ("do", ("bg_color white",)) in calls
+    assert ("set", ("opaque_background", "1")) in calls

@@ -74,7 +74,7 @@ def test_fetch_structure_routes_uniprot_to_alphafold(mock_sr, mock_af):
     result = fetch_structure(pdb_code="P69905")
 
     assert result == "fetched"
-    mock_af.assert_called_once_with(uniprot_id="P69905", obj_name=None)
+    mock_af.assert_called_once_with(uniprot_id="P69905", obj_name=None, replace=True)
     mock_sr.assert_not_called()  # never touched the RCSB
 
 
