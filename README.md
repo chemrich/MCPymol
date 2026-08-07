@@ -294,7 +294,13 @@ Pipeline: extract the chain's sequence → submit to MMseqs2 (ColabFold public A
 
 Magenta = conserved, white = moderate, cyan = variable. First call takes 30 s – few minutes depending on sequence length; results are cached in memory by sequence, so re-running on the same protein (or changing only the color scale) is instant.
 
-> Color 1ubq by conservation
+> Color lysozyme (1LYZ) by conservation
+
+![Lysozyme (1LYZ) coloured by evolutionary conservation from a 5,507-sequence alignment](assets/conservation_view.png)
+
+Lysozyme against 5,507 homologues. The variable surface loops go cyan while the
+core and the substrate-binding cleft stay magenta — conservation tracking
+function, which is the whole reason to compute it.
 
 ### `crosslink_view` — disulfides & metal coordination
 
@@ -334,11 +340,18 @@ White cartoon + surface with heavy ray-trace contours. The cel-shaded look kicks
 
 > Make 4HHB look like a textbook illustration
 
+![Haemoglobin (4HHB) rendered in the cel-shaded textbook style](assets/textbook_view.png)
+
 ### `cinematic_view` — fog and shadows
 
 Depth-cueing + fog + soft shadows on a black background. Best on big assemblies — ribosomes, capsids, nucleosomes — where you want a sense of scale. Run `ray` for the full effect.
 
-> Give me a cinematic view of the ribosome
+> Give me a cinematic view of GroEL
+
+![GroEL (1GRL) down its seven-fold axis with depth cueing and shadows](assets/cinematic_view.png)
+
+Depth cueing needs scale to pay off — this is one GroEL ring down its
+seven-fold axis. On a small globular protein the effect is mostly lost.
 
 ### `pointillist_view` — starfield surface
 
@@ -407,6 +420,26 @@ hydrophobic contacts rather than being mis-called as stacking.
 
 > What holds MK1 in the HIV protease pocket?
 
+```
+26 residue pairs in contact within 4.0 A between '1hsg and resn MK1' and '1hsg and polymer':
+
+  B/MK1902     -- B/ASP25       2.63 A  hydrogen bond, polar contact, contact (8 atom contacts)
+  B/MK1902     -- A/ASP25       2.77 A  hydrogen bond, contact (8 atom contacts)
+  B/MK1902     -- B/GLY27       3.03 A  hydrogen bond, polar contact, contact (8 atom contacts)
+  B/MK1902     -- B/ASP29       3.06 A  hydrogen bond, polar contact, contact (6 atom contacts)
+  B/MK1902     -- A/GLY48       3.15 A  hydrophobic, contact (6 atom contacts)
+  B/MK1902     -- B/VAL32       3.32 A  hydrophobic (2 atom contacts)
+  ... and 20 more pairs (raise max_pairs to see).
+
+Interaction types across all pairs: 20 hydrophobic, 14 contact, 5 hydrogen bond, 4 polar contact.
+```
+
+Both copies of the catalytic Asp25 — one from each chain of the protease dimer —
+hydrogen bond the inhibitor at 2.63 and 2.77 Å. That is the interaction the drug
+was designed to make, read straight off the structure. It is the same pocket the
+`ligand_view` image above shows; the picture and the numbers are two views of one
+question.
+
 ### `interface_report` — how big is this interface
 
 Buried surface area from ΔSASA (free minus bound), the per-side figure papers
@@ -419,12 +452,39 @@ likely specific association. Guidance from PDB-wide surveys, not a verdict.
 
 > How big is the barnase–barstar interface in 1BRS?
 
+```
+Interface between chains A and D of 1brs:
+  Buried surface area: 777 A^2 per side (1,553 A^2 total).
+  That is a typical size for a specific but transient protein-protein interface.
+  Interface residues: 22 in chain A, 19 in chain D.
+  Composition by buried area: 41% charged, 32% polar, 28% hydrophobic.
+  Chain A hot spots: ARG59 (154 A^2), HIS102 (107 A^2), ARG83 (78 A^2), GLU60 (69 A^2), ...
+  Chain D hot spots: ASP35 (120 A^2), TYR29 (97 A^2), ASP39 (86 A^2), TRP44 (75 A^2), ...
+```
+
+Barnase–barstar is the textbook electrostatically-driven interface, and the
+numbers say so unprompted: 41% of the buried area is charged, and the hot spots
+it ranks — Arg59/His102 on barnase, Asp35/Asp39/Trp44 on barstar — are the
+residues the mutagenesis literature identifies.
+
 ### `structure_info` and `get_sequence` — what am I looking at
 
 `structure_info` combines what PyMOL knows (chains, counts, ligands, states,
 space group) with RCSB entry metadata (title, method, resolution, release date,
 source organism), and flags a probable AlphaFold model when the B-factor column
 looks like pLDDT.
+
+```
+1hsg — CRYSTAL STRUCTURE AT 1.9 ANGSTROMS RESOLUTION OF HUMAN IMMUNODEFICIENCY
+VIRUS (HIV) II PROTEASE COMPLEXED WITH L-735,524, AN ORALLY BIOAVAILABLE
+INHIBITOR OF THE HIV PROTEASES
+  X-RAY DIFFRACTION, 2.00 A resolution, released 1996-04-03
+  Source: Human immunodeficiency virus 1
+  1,686 atoms, 198 residues, 127 waters
+  Chains (2): A, B
+  Ligands in '1hsg': MK1
+  Space group P 21 21 2, cell 59.6 x 87.1 x 46.7 A
+```
 
 `get_sequence` returns FASTA — plus the two things the sequence alone hides and
 that routinely cause mistakes: the **numbering offset** (PDB numbering rarely
@@ -498,8 +558,14 @@ for print rigidity. Tune `spine_radius` for more or less reinforcement.
 ```
 print_ribbon_view(obj_name="1ema")
 print_export(obj_name="1ema", groups="1ema=(1ema or 1ema_spine)",
-             method="voxel", voxel_pitch=0.2)
+             representation="cartoon", method="voxel", voxel_pitch=0.2)
 ```
+
+![GFP (1EMA) as chunky print-ready ribbons with the reinforcing backbone spine](assets/print_ribbon_view.png)
+
+GFP's β-barrel with the chunky arrows applied. The bulges running along each
+strand are the spine tube passing through — the internal rebar, visible before
+it gets fused into one solid on export.
 
 ## The name
 

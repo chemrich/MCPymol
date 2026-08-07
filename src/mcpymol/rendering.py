@@ -34,6 +34,47 @@ _PNG_APPEAR_TIMEOUT = 60.0
 # complete rather than still being written.
 _PNG_EOF = b"IEND\xae\x42\x60\x82"
 
+# PyMOL's OpenGL frame grab (cmd.png with ray=0) needs the GUI thread, and the
+# plugin dispatches on a socket worker thread — so over this bridge it writes a
+# blank image rather than failing. The unshaded fast path is therefore not
+# reachable here at all, whatever the caller asks for.
+_OPENGL_UNAVAILABLE_NOTE = (
+    "Note: the fast unshaded path (ray_trace=False) writes a blank image over "
+    "the MCPymol bridge — PyMOL's OpenGL capture needs its GUI thread, and the "
+    "plugin runs off it. Ray-traced instead."
+)
+
+# Below this many distinct bytes in the decompressed pixel stream, an image is
+# effectively one flat colour. A heuristic, but a decisive one: real renders
+# are nowhere near it.
+_BLANK_IMAGE_MAX_DISTINCT_BYTES = 8
+
+
+def _looks_blank(png: bytes) -> bool:
+    """True if a PNG is essentially a single flat colour.
+
+    Catches the two ways a render comes back empty: the OpenGL path writing
+    nothing, and a scene where everything is hidden or the selection matched
+    no atoms. Counts distinct bytes in the decompressed pixel stream — for a
+    uniform image the filtered rows are uniform too, so the count stays tiny.
+    """
+    import struct
+    import zlib
+
+    idat, offset = b"", 8
+    try:
+        while offset + 8 <= len(png):
+            length = struct.unpack(">I", png[offset : offset + 4])[0]
+            if png[offset + 4 : offset + 8] == b"IDAT":
+                idat += png[offset + 8 : offset + 8 + length]
+            offset += 12 + length
+        if not idat:
+            return False
+        raw = zlib.decompress(idat)
+    except (struct.error, zlib.error):
+        return False
+    return len(set(raw)) <= _BLANK_IMAGE_MAX_DISTINCT_BYTES
+
 
 def _read_complete_png(path: str, timeout: float | None = None) -> bytes | None:
     """Return the PNG's bytes once it is fully written, or None on timeout.
@@ -93,6 +134,9 @@ def render(
     if width < 1 or height < 1:
         return f"Error: width and height must be positive, got {width}x{height}."
 
+    note = "" if ray_trace else f" {_OPENGL_UNAVAILABLE_NOTE}"
+    ray_trace = True  # see _OPENGL_UNAVAILABLE_NOTE
+
     if filename is not None:
         path = os.path.abspath(os.path.expanduser(filename))
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
@@ -119,6 +163,14 @@ def render(
                 f"PyMOL reported success but no complete PNG appeared at {path} "
                 f"within {_PNG_APPEAR_TIMEOUT:.0f}s. If PyMOL is running on a "
                 f"different machine than this bridge, they cannot exchange files."
+            )
+
+        if _looks_blank(data):
+            return (
+                f"Rendered {width}x{height}, but the image is a single flat colour — "
+                f"nothing was visible. Check that an object is loaded and enabled "
+                f"(list_objects), and that your selection matches atoms "
+                f"(count_atoms).{note}"
             )
 
         if len(data) > MAX_INLINE_IMAGE_BYTES:
@@ -153,8 +205,13 @@ def turntable(
     width: Annotated[int, Field(description="Frame width in pixels.")] = 800,
     height: Annotated[int, Field(description="Frame height in pixels.")] = 600,
     ray_trace: Annotated[
-        bool, Field(description="Ray-trace each frame (slow, publication quality).")
-    ] = False,
+        bool,
+        Field(
+            description="Kept for compatibility and ignored — every frame is "
+            "ray-traced, because PyMOL's unshaded OpenGL capture does not work "
+            "over this bridge."
+        ),
+    ] = True,
 ) -> str:
     """
     Renders a full 360° rotation as a numbered PNG sequence.
@@ -163,12 +220,17 @@ def turntable(
     frame per step, ready to assemble into a GIF or MP4 (e.g.
     ``ffmpeg -i turntable_0000.png out.mp4``).
 
-    Ray-tracing every frame is slow — 36 ray-traced frames of a large assembly
-    can take an hour — so this defaults to the fast OpenGL renderer. Turn it on
-    only for a final render.
+    Every frame is ray-traced, which is slow — 36 frames of a large assembly
+    can take an hour, so start with few frames and a small width/height. The
+    unshaded OpenGL renderer would be far faster but does not work over this
+    bridge (it needs PyMOL's GUI thread), and silently produced blank frames
+    until this was found.
     """
     if frames < 2:
         return f"Error: frames must be at least 2, got {frames}."
+
+    note = "" if ray_trace else f" {_OPENGL_UNAVAILABLE_NOTE}"
+    ray_trace = True  # see _OPENGL_UNAVAILABLE_NOTE
 
     out_dir = os.path.abspath(os.path.expanduser(out_dir))
     os.makedirs(out_dir, exist_ok=True)
@@ -196,10 +258,9 @@ def turntable(
             return f"Error writing frame {i}: {res.get('error')}"
         written.append(path)
 
-    renderer = "ray-traced" if ray_trace else "OpenGL"
     return (
-        f"Wrote {len(written)} {renderer} frames ({step:.1f}° apart) to {out_dir} as "
+        f"Wrote {len(written)} ray-traced frames ({step:.1f}° apart) to {out_dir} as "
         f"{prefix}_0000.png … {prefix}_{frames - 1:04d}.png. Assemble with:\n"
         f"  ffmpeg -framerate 24 -i {os.path.join(out_dir, prefix)}_%04d.png "
-        f"-pix_fmt yuv420p {prefix}.mp4"
+        f"-pix_fmt yuv420p {prefix}.mp4{note}"
     )

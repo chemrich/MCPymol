@@ -38,3 +38,4 @@ main.py
 *.gif
 *.png
 !assets/*.png
+!assets/*.gif
