@@ -41,6 +41,30 @@ The plugin half runs inside PyMOL and dispatches to `pymol.cmd`. The bridge half
 
 Tip: if the model isn't sure what's loaded, ask it to *list the objects* — it'll call `list_objects` and ground itself before guessing names.
 
+## What can I ask?
+
+Organised by the question, not the tool.
+
+| Question | Tool |
+| --- | --- |
+| What *is* this structure — resolution, method, organism? | `structure_info` |
+| What's the sequence, and how does it map to the residue numbering? | `get_sequence` |
+| What's loaded / what chains / what ligands? | `list_objects`, `list_chains`, `list_ligands` |
+| What holds this ligand in its pocket, and how tightly? | `contact_report`, then `ligand_view` to see it |
+| How big is this interface, and which residues matter? | `interface_report`, then `interface_view` |
+| Where do these two structures differ? | `superposition_view` |
+| How far apart / what angle / how much surface? | `distance`, `angle`, `dihedral`, `sasa`, `rms_cur` |
+| Which parts are conserved? Flexible? Confident? | `conservation_view`, `bfactor_view`, `plddt_view` |
+| What does it look like? | `render` — returns the image, so the model can see it |
+| Can I keep this scene? | `save_session` / `load_session` |
+| Can I print it? | `print_ribbon_view` + `print_export` |
+
+The pattern that works best: **report first, then draw.** `contact_report` tells
+you Asp30 makes a salt bridge at 2.7 Å; `ligand_view` then shows you where it
+sits. Asking only for the picture gets you a picture you have to interpret
+yourself.
+
+
 ## Installation
 
 There are two halves to wire up: the **native plugin** (runs inside PyMOL) and the **MCP bridge** (runs outside, and is what your AI assistant launches).
@@ -304,6 +328,59 @@ Superposes `mobile` onto `target`, then colors the mobile structure by how far e
 An RMSD alone tells you a structure moved; this tells you where.
 
 > Superpose 1AKE onto 4AKE and show me where it moves
+
+## Analysis — answers with numbers
+
+The view presets draw interactions; these report them. Both matter, and they
+compose: run the report to get the numbers for your figure legend, run the view
+to make the figure.
+
+### `contact_report` — what touches what
+
+Lists contacting residue pairs closest first, with the minimum heavy-atom
+distance, how many atoms are involved, and a classification: salt bridge,
+hydrogen bond, hydrophobic, polar contact, or π-stacking (parallel vs T-shaped
+from the interplanar angle).
+
+```
+contact_report("1hsg and resn MK1", "1hsg and polymer")
+```
+
+Criteria are heavy-atom distances — salt bridge ≤ 4.0 Å between charged
+sidechain tips, H-bond ≤ 3.5 Å between N/O pairs, hydrophobic ≤ 4.5 Å between
+C/S, ring centroids ≤ 5.5 Å — because crystal structures usually have no
+hydrogens. A reported hydrogen bond is therefore a donor–acceptor pair with
+plausible geometry, not one verified against a hydrogen position.
+
+Ring perception needs bond orders, which a PDB dump doesn't carry, so aromatics
+are detected for the standard aromatic amino acids only; ligand rings show up as
+hydrophobic contacts rather than being mis-called as stacking.
+
+> What holds MK1 in the HIV protease pocket?
+
+### `interface_report` — how big is this interface
+
+Buried surface area from ΔSASA (free minus bound), the per-side figure papers
+quote, a ranking of residues by how much surface each buries, and a breakdown by
+residue chemistry.
+
+It also interprets the number: under ~400 Å² per side is usually crystal
+packing rather than a biological interface; over ~1000 Å² is a substantial,
+likely specific association. Guidance from PDB-wide surveys, not a verdict.
+
+> How big is the barnase–barstar interface in 1BRS?
+
+### `structure_info` and `get_sequence` — what am I looking at
+
+`structure_info` combines what PyMOL knows (chains, counts, ligands, states,
+space group) with RCSB entry metadata (title, method, resolution, release date,
+source organism), and flags a probable AlphaFold model when the B-factor column
+looks like pLDDT.
+
+`get_sequence` returns FASTA — plus the two things the sequence alone hides and
+that routinely cause mistakes: the **numbering offset** (PDB numbering rarely
+starts at 1, so "residue 50" in a paper and position 50 in the sequence are
+usually different residues) and **chain breaks** where loops went unmodelled.
 
 ## Rendering and sessions
 
