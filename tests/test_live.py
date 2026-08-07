@@ -257,7 +257,6 @@ EXCLUDED: dict[str, str] = {
     "full_screen": "toggles the PyMOL window into fullscreen, which is not recoverable headlessly",
     "cd": "changes PyMOL's working directory, which would misdirect later file writes",
     "turntable": "ray-traces a frame sequence; exercised by the journey tests",
-    "quit": "would end the session",
 }
 
 
@@ -268,10 +267,34 @@ def _tool_functions() -> dict[str, object]:
     return {t.name: mcp._tool_manager.get_tool(t.name).fn for t in asyncio.run(mcp.list_tools())}
 
 
-def _arguments_for(fn, tmp_path) -> dict:
-    """Build a plausible argument set from the parameter names."""
-    import inspect
+def _base_type(annotation):
+    """The concrete type behind `int`, `str | None`, `Annotated[float, ...]`."""
+    import typing
 
+    for candidate in typing.get_args(annotation) or (annotation,):
+        if candidate is not type(None):
+            return candidate
+    return str
+
+
+def _coerce(value, annotation):
+    """Match the declared type. The tools are typed now — handing "120" to an
+    int parameter fails inside the tool, which would look like a wiring bug and
+    is really a harness bug."""
+    target = _base_type(annotation)
+    if target in (int, float, bool) and isinstance(value, str):
+        return target(value)
+    if target is str and not isinstance(value, str):
+        return str(value)
+    return value
+
+
+def _arguments_for(fn, tmp_path) -> dict:
+    """Build a plausible argument set from the parameter names and types."""
+    import inspect
+    import typing
+
+    hints = typing.get_type_hints(fn, include_extras=False)
     args = {}
     for name, param in inspect.signature(fn).parameters.items():
         if name in ("filename",):
@@ -281,7 +304,7 @@ def _arguments_for(fn, tmp_path) -> dict:
         elif name in DEFAULTS:
             value = DEFAULTS[name]
             if value is not None:
-                args[name] = value
+                args[name] = _coerce(value, hints.get(name, str))
         elif param.default is not inspect.Parameter.empty:
             continue  # optional and unknown: let the default stand
         else:
