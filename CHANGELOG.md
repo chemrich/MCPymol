@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `load_structure` was documented nowhere, so opening a local PDB/mmCIF — a built model, a docking pose, an MD frame — was undiscoverable. `fetch_alphafold` and `count_atoms` were likewise unnamed.
 
 ### Added
+- README figures for `plddt_view` (AlphaFold spike, P0DTC2) and `superposition_view` (adenylate kinase 4AKE/1AKE). Both were produced through the tools themselves, which is how the two bugs above were found.
 - **Configuration section in the README.** Six of nine `MCPYMOL_*` environment variables were undocumented, including every timeout introduced in v1.3.0. All nine now have a table entry saying what they do and what the default is.
 - Troubleshooting rows for the failure modes introduced since v1.2.1: files not appearing when PyMOL and the bridge are on different machines, oversized renders, AlphaFold entries with no model at a given version, blank views from empty selections, and slow-operation timeouts.
 - `tests/test_docs.py` keeps these true. An environment variable added in code but not the README, a headline tool missing from the README or the skill, a doc that sends readers to `server.py` for implementation, or a `CONTRIBUTING` that stops warning about facade patching — each now fails CI. Written after this audit found six undocumented variables and three unmentioned tools by hand; the point is not to do that by hand again.
@@ -21,6 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **Every view preset rendered with a transparent background.** They set `bg_color` but never `opaque_background`, so ray-traced output kept an alpha channel: correct in the viewport, transparent in the PNG, which appears white wherever the image is used. 16 of 17 presets were affected, `textbook_view` included (its background is white rather than black, and had the identical bug). Backgrounds now go through `style.set_background()`, and a test fails if any module reaches for `bg_color` directly.
+- **`superposition_view` was unreachable through the documented workflow.** `fetch_structure` calls `reinitialize`, so fetching a second structure wiped the first — leaving nothing to compare, for a tool whose only purpose is comparing two structures. All three loaders (`fetch_structure`, `load_structure`, `fetch_alphafold`) take `replace=False` to add to the session instead of clearing it.
 - **`fetch_alphafold` did not work for any accession.** It built the model URL from a hardcoded `AF-{accession}-F1-model_v4.cif` template. AlphaFold DB has since moved to v6 and *removes* retired versions, so every one of those URLs now 404s — the feature shipped in v1.3.0 and resolved for nothing. It also assumed the filename is keyed by accession, which is untrue for some entries: SARS-CoV-2 spike (P0DTC2) is served as `AF-0000000365840314-model_v1.cif`, so no accession-based filename exists for it in any version.
 
   The file URL is now asked for rather than constructed, via AlphaFold DB's prediction API, which handles version drift, non-accession entry IDs and multi-fragment proteins. `model_version` becomes an optional pin that bypasses the lookup, and defaults to unset.

@@ -20,6 +20,7 @@ from pydantic import Field
 from mcpymol.app import mcp
 from mcpymol.bridge import send_request
 from mcpymol.pdbtext import parse_atoms, residue_order
+from mcpymol.style import black_background
 
 # AlphaFold DB serves predicted models by UniProt accession.  PyMOL's own
 # cmd.fetch only knows the RCSB, so these are downloaded here and loaded from
@@ -80,8 +81,7 @@ def _apply_ghost_heart(name: str):
             green = _GHOST_HEART_GREENS[i % len(_GHOST_HEART_GREENS)]
             send_request("color", args=[green, f"{name} and chain {chain} and polymer.protein"])
     send_request("set", args=["transparency", "0.6", name])
-    send_request("do", args=["bg_color black"])
-    send_request("set", args=["opaque_background", "1"])
+    black_background()
 
     # Organic cofactors/ligands: sticks, colored by atom with lightblue carbons
     send_request("show", args=["sticks", f"({name}) and organic"])
@@ -256,6 +256,14 @@ def fetch_structure(
             description="Distance (A) between chains to keep them in the same multimer. Default 8.0A is suitable for most functional assemblies."
         ),
     ] = DEFAULT_MULTIMER_CUTOFF,
+    replace: Annotated[
+        bool,
+        Field(
+            description="Clear the session first, so this is the only structure "
+            "loaded. Pass False to add to what is already loaded — which is how "
+            "you get two structures into one session for superposition_view."
+        ),
+    ] = True,
 ) -> str:
     """
     Fetches a protein structure from the PDB, or a predicted model from AlphaFold DB.
@@ -268,11 +276,12 @@ def fetch_structure(
     """
     accession = _alphafold_accession(pdb_code)
     if accession is not None:
-        return fetch_alphafold(uniprot_id=accession, obj_name=obj_name)
+        return fetch_alphafold(uniprot_id=accession, obj_name=obj_name, replace=replace)
 
     name = obj_name if obj_name else pdb_code
 
-    send_request("do", args=["reinitialize"])
+    if replace:
+        send_request("do", args=["reinitialize"])
     send_request("set", args=["mouse_wheel_scale", "0.1"])
     send_request("delete", args=[name])
 
@@ -297,11 +306,20 @@ def load_structure(
             description="Distance (A) between chains to keep them in the same multimer. Default 8.0A is suitable for most functional assemblies."
         ),
     ] = DEFAULT_MULTIMER_CUTOFF,
+    replace: Annotated[
+        bool,
+        Field(
+            description="Clear the session first, so this is the only structure "
+            "loaded. Pass False to add to what is already loaded — which is how "
+            "you get two structures into one session for superposition_view."
+        ),
+    ] = True,
 ) -> str:
     """
     Loads a structure from a local file path and applies the BFS multimer heuristic.
     """
-    send_request("do", args=["reinitialize"])
+    if replace:
+        send_request("do", args=["reinitialize"])
     send_request("set", args=["mouse_wheel_scale", "0.1"])
     send_request("delete", args=[obj_name])
     res = send_request("load", args=[file_path, obj_name])
@@ -339,6 +357,14 @@ def fetch_alphafold(
             description="Fragment number for long proteins split across models (F1, F2, …). Most entries only have F1."
         ),
     ] = 1,
+    replace: Annotated[
+        bool,
+        Field(
+            description="Clear the session first, so this is the only structure "
+            "loaded. Pass False to add to what is already loaded — which is how "
+            "you get two structures into one session for superposition_view."
+        ),
+    ] = True,
 ) -> str:
     """
     Fetches a predicted structure from AlphaFold DB by UniProt accession.
@@ -360,7 +386,8 @@ def fetch_alphafold(
         return error
 
     try:
-        send_request("do", args=["reinitialize"])
+        if replace:
+            send_request("do", args=["reinitialize"])
         send_request("set", args=["mouse_wheel_scale", "0.1"])
         send_request("delete", args=[name])
 

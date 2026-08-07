@@ -13,6 +13,7 @@ from pydantic import Field
 from mcpymol.app import mcp
 from mcpymol.bridge import send_request
 from mcpymol.pdbtext import parse_atoms
+from mcpymol.style import black_background, set_background
 
 # Wall-clock ceiling for the external APBS/PDB2PQR binaries.  Without one a
 # wedged solver hangs the whole MCP server, since tool calls are synchronous.
@@ -72,7 +73,7 @@ def ligand_view(
     send_request("set", args=["label_color", "white"])
     send_request("set", args=["label_size", "14"])
 
-    send_request("do", args=["bg_color black"])
+    black_background()
     send_request("zoom", args=[lig_sel, "8"])
     send_request("do", args=[f"origin {lig_sel}"])
 
@@ -95,7 +96,7 @@ def bfactor_view(
     send_request("hide", args=["everything", obj_name])
     send_request("show", args=["cartoon", obj_name])
     send_request("do", args=[f"spectrum b, blue_white_red, {obj_name}"])
-    send_request("do", args=["bg_color black"])
+    black_background()
     send_request("center", args=[obj_name])
     send_request("do", args=[f"origin {obj_name}"])
 
@@ -159,7 +160,7 @@ def plddt_view(
             sel += f" and b < {_PLDDT_BANDS[i + 1][1]}"
         send_request("color", args=[color_name, sel])
 
-    send_request("do", args=["bg_color black"])
+    black_background()
     send_request("center", args=[obj_name])
     send_request("do", args=[f"origin {obj_name}"])
 
@@ -243,7 +244,7 @@ def interface_view(
     send_request("set", args=["dash_gap", "0.3", "iface_hbonds"])
     send_request("set", args=["dash_width", "3", "iface_hbonds"])
 
-    send_request("do", args=["bg_color black"])
+    black_background()
     send_request("center", args=[obj_name])
     send_request("do", args=[f"origin {obj_name}"])
 
@@ -283,7 +284,7 @@ def putty_view(
     send_request("do", args=[f"util.cbaw ({obj_name}) and organic"])
     send_request("color", args=["yellow", f"({obj_name}) and organic and elem C"])
 
-    send_request("do", args=["bg_color black"])
+    black_background()
     send_request("orient", args=[obj_name])
     return f"Putty view applied to {obj_name}. Tube width and color scale with B-factor (blue=rigid, red=flexible)."
 
@@ -324,7 +325,7 @@ def hydrophobic_surface_view(
     send_request("do", args=[f"util.cbaw ({obj_name}) and organic"])
     send_request("color", args=["yellow", f"({obj_name}) and organic and elem C"])
 
-    send_request("do", args=["bg_color black"])
+    black_background()
     send_request("orient", args=[obj_name])
     return f"Hydrophobic surface view applied to {obj_name}. Orange=hydrophobic, white=polar, skyblue=positive, salmon=negative."
 
@@ -389,7 +390,7 @@ def electrostatic_view(
     send_request("do", args=[f"util.cbaw ({obj_name}) and organic"])
     send_request("color", args=["yellow", f"({obj_name}) and organic and elem C"])
 
-    send_request("do", args=["bg_color black"])
+    black_background()
     send_request("orient", args=[obj_name])
     return f"Electrostatic view applied to {obj_name} (mode={mode}). Red=negative, white=neutral, blue=positive (pKa-based approximation)."
 
@@ -501,7 +502,7 @@ def poisson_boltzmann_view(
         send_request("do", args=[f"util.cbaw ({obj_name}) and organic"])
         send_request("color", args=["yellow", f"({obj_name}) and organic and elem C"])
 
-        send_request("do", args=["bg_color black"])
+        black_background()
         send_request("orient", args=[obj_name])
 
     return f"Poisson-Boltzmann electrostatic surface applied to {obj_name}. Red=negative, white=neutral, blue=positive (±20 kT/e)."
@@ -568,7 +569,7 @@ def crosslink_view(
     send_request("set", args=["dash_width", "3", f"{obj_name}_metalcoord"])
     send_request("set", args=["dash_gap", "0.2", f"{obj_name}_metalcoord"])
 
-    send_request("do", args=["bg_color black"])
+    black_background()
     send_request("orient", args=[obj_name])
     return f"Crosslink view applied to {obj_name}. Yellow=disulfide bonds (CYS), orange=metal coordination."
 
@@ -642,7 +643,7 @@ def pocket_view(
     send_request("hide", args=["labels", f"{obj_name}_pocket_hbonds"])
     send_request("set", args=["dash_width", "2.5", f"{obj_name}_pocket_hbonds"])
 
-    send_request("do", args=["bg_color black"])
+    black_background()
     send_request("zoom", args=[lig, "6"])
     return (
         f"Pocket view applied: {resn} binding site in {obj_name}. "
@@ -723,7 +724,7 @@ def pharmacophore_view(
     send_request("hide", args=["labels", f"{obj_name}_pharm_hbonds"])
     send_request("set", args=["dash_width", "2.5", f"{obj_name}_pharm_hbonds"])
 
-    send_request("do", args=["bg_color black"])
+    black_background()
     send_request("zoom", args=[lig, "6"])
     return (
         f"Pharmacophore view applied to {resn} in {obj_name}. "
@@ -797,7 +798,7 @@ def mutation_view(
     send_request("do", args=[f"util.cbaw ({obj_name}) and organic"])
     send_request("color", args=["yellow", f"({obj_name}) and organic and elem C"])
 
-    send_request("do", args=["bg_color black"])
+    black_background()
     send_request("zoom", args=[mut_residues, "8"])
     return f"Mutation view applied to {obj_name}. Magenta = {', '.join(parsed)}."
 
@@ -817,7 +818,7 @@ def textbook_view(
     send_request("hide", args=["everything", obj_name])
 
     # White background for print/textbook style
-    send_request("do", args=["bg_color white"])
+    set_background("white")
 
     # Show main structure as white cartoon and surface
     send_request("show", args=["cartoon", f"({obj_name}) and polymer.protein"])
@@ -863,7 +864,7 @@ def cinematic_view(
     send_request("show", args=["surface", f"({obj_name}) and polymer.protein"])
 
     # Dramatic deep black background
-    send_request("do", args=["bg_color black"])
+    black_background()
 
     # Enable fog and depth cueing
     send_request("set", args=["depth_cue", "1"])
@@ -897,7 +898,7 @@ def pointillist_view(
     are shown as bright yellow spheres (stars) embedded in the cloud.
     """
     send_request("hide", args=["everything", obj_name])
-    send_request("do", args=["bg_color black"])
+    black_background()
 
     # The "Starfield" point cloud
     send_request("show", args=["dots", f"({obj_name}) and polymer.protein"])

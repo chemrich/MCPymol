@@ -20,6 +20,7 @@ from pydantic import Field
 
 from mcpymol.app import mcp
 from mcpymol.bridge import send_request
+from mcpymol.style import black_background
 
 # MMseqs2 server for evolutionary conservation (ColabFold public API by default)
 MMSEQS_URL = os.environ.get("MCPYMOL_MMSEQS_URL", "https://api.colabfold.com")
@@ -347,7 +348,7 @@ def conservation_view(
     send_request("color", args=["gray50", other_chains_sel])
     send_request("set", args=["cartoon_transparency", "0.5", other_chains_sel])
 
-    send_request("do", args=["bg_color black"])
+    black_background()
     send_request("center", args=[obj_name])
     send_request("do", args=[f"origin {obj_name}"])
 

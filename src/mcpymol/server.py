@@ -229,6 +229,7 @@ from mcpymol.structures import (
     save_session,
     structure_info,
 )
+from mcpymol.style import black_background, set_background
 from mcpymol.views import (
     _PB_SUBPROCESS_TIMEOUT,
     _PLDDT_BANDS,
@@ -337,6 +338,7 @@ __all__ = [
     "as_tool",
     "backward",
     "bfactor_view",
+    "black_background",
     "bond",
     "cartoon",
     "cd",
@@ -425,6 +427,7 @@ __all__ = [
     "sculpt_iterate",
     "select",
     "send_request",
+    "set_background",
     "set_setting",
     "set_symmetry",
     "show",

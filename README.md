@@ -350,7 +350,13 @@ Colors a predicted model by pLDDT in AlphaFold's official palette: dark blue >90
 
 pLDDT is stored in the B-factor column, which is why `bfactor_view` and `putty_view` render these models backwards — they read low B as *rigid*, whereas low pLDDT means the model doesn't know. `plddt_view` warns if the B-factors don't look like pLDDT at all.
 
-> Get the AlphaFold model for P69905
+> Get the AlphaFold model for P0DTC2
+
+![pLDDT confidence of the AlphaFold SARS-CoV-2 spike model (P0DTC2)](assets/plddt_view.png)
+
+Mean pLDDT 67.1 across 1273 residues — 7% very high, 49% confident, 20% low,
+24% very low. The orange tails are the point: AlphaFold is telling you it does
+not know where they go, and no amount of rendering makes that a structure.
 
 ### `superposition_view` — where two structures differ
 
@@ -358,7 +364,19 @@ Superposes `mobile` onto `target`, then colors the mobile structure by how far e
 
 An RMSD alone tells you a structure moved; this tells you where.
 
-> Superpose 1AKE onto 4AKE and show me where it moves
+> Superpose 4AKE onto 1AKE and show me where it moves
+
+![Adenylate kinase open (4AKE) superposed on closed (1AKE), coloured by per-residue shift](assets/superposition_view.png)
+
+Adenylate kinase, open against closed: the core fits at 2.07 Å RMSD while
+residues 145–152 move up to 24 Å. That is the LID domain closing over the
+substrate, and it is the whole reason to colour by deviation rather than quote
+one number.
+
+Both structures have to be loaded at once, and `fetch_structure` clears the
+session by default — fetch the second with `replace=False`. Compare single
+chains when the entries are multimers: superposing one dimer onto another fits
+the assembly rather than the fold, which reports 18.5 Å for this same pair.
 
 ## Analysis — answers with numbers
 
