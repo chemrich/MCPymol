@@ -5,6 +5,33 @@ All notable changes to MCPymol will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-08-07
+
+MCPymol could make pictures but could not answer questions with numbers. This
+release closes that gap.
+
+### Added
+- **`contact_report`** — lists contacting residue pairs across two selections, closest first, with the minimum heavy-atom distance, the number of atom contacts, and a classification: salt bridge, hydrogen bond, hydrophobic, polar contact, or π-stacking (parallel vs T-shaped by interplanar angle). Criteria are heavy-atom distances, documented and pinned by tests, since crystal structures usually have no hydrogens — so a reported hydrogen bond is a donor–acceptor pair with plausible geometry, not one verified against a hydrogen position. Neighbour search uses a uniform grid, keeping cost linear in atom count; a property test asserts it finds exactly what a brute-force scan does. Ring perception needs bond orders that a PDB dump does not carry, so aromatics cover the standard aromatic amino acids only and ligand rings are reported as hydrophobic rather than mis-called as stacking.
+- **`interface_report`** — buried surface area from ΔSASA (free minus bound, halved for the per-side figure papers quote), residues ranked by how much surface each buries, and a breakdown by residue chemistry. Interprets the number against PDB-wide survey thresholds: under ~400 Å² per side is usually crystal packing, over ~1000 Å² a substantial and likely specific association. Uses `get_area(load_b=1)`, which writes per-atom SASA into the B-factor column, so the whole per-residue breakdown costs one area calculation and one dump rather than hundreds of round trips — and sets `dot_solvent=1` first, without which the numbers are wrong but plausible-looking.
+- **`structure_info`** — what a structure actually is, in one call: chains, atom/residue/water counts, ligands, states and space group from PyMOL, plus title, method, resolution, release date and source organism from the RCSB data API. Best-effort metadata: skipped for objects not named after a PDB entry, degrading to "no metadata" when the network is unavailable. Flags a probable predicted model when the B-factor column looks like pLDDT.
+- **`get_sequence`** — there was previously no way to get a sequence out of MCPymol at all. Returns FASTA plus the two things the sequence hides and that routinely cause silent mistakes: the numbering offset (PDB numbering rarely starts at 1, so "residue 50" in a paper and position 50 in the sequence are usually different residues) and chain breaks where loops went unmodelled.
+- **`sasa`**, **`rms_cur`**, **`count_atoms`** — value-returning primitives. `count_atoms` in particular catches an empty selection, which is otherwise invisible until the render comes out blank.
+- New `mcpymol.pdbtext` module for parsing the PDB dumps that are the only way to read data back out of PyMOL, and `mcpymol.analysis` for the reporting tools.
+
+### Fixed
+- **Measurements discarded their results.** `cmd.distance`, `angle` and `dihedral` all return the quantity they measure; the wrappers threw it away and returned "Measured distance between 'X' and 'Y' as 'd1'" or "Executed angle successfully." So you could ask MCPymol to measure something and it would draw the measurement without telling you the number. All three now report the value. PyMOL's -1 "nothing matched" sentinel is reported as a failure rather than as a measurement of -1 — but only for quantities that cannot be negative, since -57.8° is an ordinary α-helical phi.
+
+### Changed
+- 68 primitive wrappers gained `Args:` documentation. FastMCP builds the JSON schema from the signature, so these do not become per-property `description` fields, but the docstring *is* the tool description — so the model now sees what `spectrum`'s `expression` accepts, what `clip`'s `mode` means, and what `mset`'s specification syntax is, instead of guessing from parameter names.
+- README reorganised around the question being asked rather than the tool being called, with a "What can I ask?" index and a new Analysis section. The mcpymol-guide skill leads with report-first-then-draw.
+- `views._read_ca_bfactors` and `comparison._parse_ca_coords` now delegate to `pdbtext.parse_atoms`, which additionally handles missing element columns, insertion codes and truncated lines. The two `_distance` implementations are unified on `pdbtext.distance3d`.
+
+### Note on dependencies
+The optional `analysis` extra was considered and deliberately not added. For this scope nothing earned it: per-residue SASA comes from PyMOL in two round trips via `get_area(load_b=1)`, and contact search is a spatial-grid problem where numpy would add a second code path for no measurable gain. The core stays dependency-free.
+
+### Tests
+- 346 → 465.
+
 ## [1.3.0] - 2026-08-07
 
 ### Added

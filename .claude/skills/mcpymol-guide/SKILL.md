@@ -16,6 +16,35 @@ high-level tools (`fetch_structure`, the `*_view` presets, `show`/`color`/
 transparency, H-bonds and labels in one call. Reach for
 `execute_pymol_command` only when no dedicated tool covers the need.
 
+## Report first, then draw
+
+The presets make pictures; the report tools answer questions with numbers.
+When the user asks *why* or *how much* — what holds this ligand, how big is
+this interface, where do these differ — run the report and quote the numbers,
+then apply the matching view if a picture helps. Answering a quantitative
+question with only a rendering leaves the user to measure it themselves.
+
+| The question | Reach for |
+| --- | --- |
+| What is this structure? | `structure_info` |
+| What is the sequence / numbering / where are the gaps? | `get_sequence` |
+| What contacts what, and how tightly? | `contact_report` -> `ligand_view` |
+| How big is this interface, which residues matter? | `interface_report` -> `interface_view` |
+| Where do two structures differ? | `superposition_view` |
+| How far / what angle / how much area? | `distance`, `angle`, `dihedral`, `sasa`, `rms_cur` |
+| Does my selection match anything? | `count_atoms` |
+
+`contact_report` classification is heavy-atom geometry (no hydrogens assumed):
+salt bridge <= 4.0 A, H-bond <= 3.5 A between N/O, hydrophobic <= 4.5 A,
+ring centroids <= 5.5 A. Report it as such — a "hydrogen bond" here is a
+donor-acceptor pair with plausible geometry, not one verified against a
+hydrogen. Aromatic detection covers the standard aromatic amino acids only;
+ligand rings appear as hydrophobic contacts.
+
+`interface_report` gives buried surface area per side. Under ~400 A^2 usually
+means crystal packing rather than a real interface; over ~1000 A^2 means a
+substantial, likely specific association. Say which regime the number is in.
+
 ## Core workflow
 
 0. **Predicted structures.** `fetch_structure` also accepts a UniProt
@@ -32,7 +61,9 @@ transparency, H-bonds and labels in one call. Reach for
    `list_chains(obj_name)`, `list_ligands(obj_name)` instead of guessing
    object names, chain IDs, or 3-letter ligand codes.
 3. **Apply a view preset** (below) or build the scene manually.
-4. **Render with `render()`** — it ray-traces and returns the image directly,
+4. **Check a selection with `count_atoms`** before building a scene on it —
+   an empty selection is invisible until the render comes out blank.
+5. **Render with `render()`** — it ray-traces and returns the image directly,
    so you can see the result and iterate. Prefer it over `ray` + `png`, which
    only leave a file on disk. Pass `ray_trace=False` for a fast unshaded
    check of a selection or orientation, and keep the width/height modest —
