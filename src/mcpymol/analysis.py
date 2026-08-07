@@ -13,6 +13,9 @@ actual hydrogen position.
 """
 
 import math
+from typing import Annotated
+
+from pydantic import Field
 
 from mcpymol.app import mcp
 from mcpymol.bridge import send_request
@@ -235,11 +238,26 @@ def _fetch_atoms(selection: str, include_water: bool, include_hydrogen: bool) ->
 
 @mcp.tool()
 def contact_report(
-    selection1: str,
-    selection2: str,
-    cutoff: float = 4.0,
-    max_pairs: int = 40,
-    include_water: bool = False,
+    selection1: Annotated[str, Field(description='One side, e.g. "1hsg and resn MK1" (a ligand).')],
+    selection2: Annotated[str, Field(description='The other side, e.g. "1hsg and polymer".')],
+    cutoff: Annotated[
+        float,
+        Field(
+            description="Maximum heavy-atom separation to count as a contact, in Angstrom. 4.0 captures the interactions above; raise toward 5.0 for a looser survey."
+        ),
+    ] = 4.0,
+    max_pairs: Annotated[
+        int,
+        Field(
+            description="How many residue pairs to list, closest first. The count of any omitted pairs is always reported."
+        ),
+    ] = 40,
+    include_water: Annotated[
+        bool,
+        Field(
+            description="Include waters, for water-mediated contacts. Off by default, as ordered waters otherwise dominate the list."
+        ),
+    ] = False,
 ) -> str:
     """
     Lists the residues in contact across two selections, with distances and types.
@@ -257,17 +275,6 @@ def contact_report(
     centroids (classified parallel or T-shaped by interplanar angle). A
     reported hydrogen bond is therefore a donor-acceptor pair with plausible
     geometry, not one verified against a hydrogen position.
-
-    Args:
-        selection1: One side, e.g. "1hsg and resn MK1" (a ligand).
-        selection2: The other side, e.g. "1hsg and polymer".
-        cutoff: Maximum heavy-atom separation to count as a contact, in
-            Angstrom. 4.0 captures the interactions above; raise toward 5.0
-            for a looser survey.
-        max_pairs: How many residue pairs to list, closest first. The count of
-            any omitted pairs is always reported.
-        include_water: Include waters, for water-mediated contacts. Off by
-            default, as ordered waters otherwise dominate the list.
     """
     if cutoff <= 0:
         return f"Error: cutoff must be positive, got {cutoff}."
@@ -406,10 +413,12 @@ def _residue_class(resn: str) -> str:
 
 @mcp.tool()
 def interface_report(
-    obj_name: str,
-    chain_a: str,
-    chain_b: str,
-    max_residues: int = 15,
+    obj_name: Annotated[str, Field(description='PyMOL object holding the complex (e.g. "1brs").')],
+    chain_a: Annotated[str, Field(description='First chain ID (e.g. "A").')],
+    chain_b: Annotated[str, Field(description='Second chain ID (e.g. "D").')],
+    max_residues: Annotated[
+        int, Field(description="How many of the most-buried residues to list per chain.")
+    ] = 15,
 ) -> str:
     """
     Measures how large a protein-protein interface is, and which residues form it.
@@ -426,12 +435,6 @@ def interface_report(
 
     For the interactions themselves — which pairs hydrogen bond, which form
     salt bridges — use ``contact_report`` on the same two chains.
-
-    Args:
-        obj_name: PyMOL object holding the complex (e.g. "1brs").
-        chain_a: First chain ID (e.g. "A").
-        chain_b: Second chain ID (e.g. "D").
-        max_residues: How many of the most-buried residues to list per chain.
     """
     if chain_a == chain_b:
         return f"Error: chain_a and chain_b are both '{chain_a}'; pick two different chains."

@@ -85,3 +85,58 @@ def test_no_module_was_left_behind():
     found = {f"mcpymol.{m.name}" for m in pkgutil.iter_modules(mcpymol.__path__)}
     unreferenced = found - set(TOOL_MODULES) - standalone
     assert not unreferenced, f"module(s) not wired into the server: {sorted(unreferenced)}"
+
+
+# ── tool schema quality ──────────────────────────────────────────────────────
+
+
+def _all_tools():
+    import asyncio
+
+    from mcpymol.app import mcp
+
+    return asyncio.run(mcp.list_tools())
+
+
+def test_every_parameter_has_a_schema_description():
+    """Parameter docs must live on the parameter, not only in the docstring.
+
+    FastMCP builds the JSON schema from the signature, so an Args: block never
+    reaches inputSchema.properties[].description — the model would be left
+    inferring arguments from names. Descriptions come from
+    Annotated[..., Field(description=...)].
+    """
+    undocumented = [
+        f"{tool.name}.{param}"
+        for tool in _all_tools()
+        for param, spec in (tool.inputSchema.get("properties") or {}).items()
+        if not spec.get("description")
+    ]
+
+    assert not undocumented, f"parameters missing a schema description: {undocumented}"
+
+
+def test_every_tool_has_a_description():
+    missing = [t.name for t in _all_tools() if not (t.description or "").strip()]
+
+    assert not missing, f"tools with no description: {missing}"
+
+
+def test_no_tool_still_carries_an_args_block():
+    """Args: in a docstring is now duplicated state — the signature owns
+    parameter docs, so a leftover block will drift out of sync."""
+    stale = [t.name for t in _all_tools() if "Args:" in (t.description or "")]
+
+    assert not stale, f"tools with a leftover Args: block: {stale}"
+
+
+def test_descriptions_are_substantive():
+    """A one-word description is not documentation."""
+    thin = [
+        f"{tool.name}.{param}"
+        for tool in _all_tools()
+        for param, spec in (tool.inputSchema.get("properties") or {}).items()
+        if len(spec.get("description", "")) < 15
+    ]
+
+    assert not thin, f"parameters with a too-short description: {thin}"

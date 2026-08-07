@@ -6,6 +6,9 @@ compose a dozen primitives to get a usable picture.
 """
 
 import os
+from typing import Annotated
+
+from pydantic import Field
 
 from mcpymol.app import mcp
 from mcpymol.bridge import send_request
@@ -17,7 +20,12 @@ _PB_SUBPROCESS_TIMEOUT = float(os.environ.get("MCPYMOL_PB_TIMEOUT", 600.0))
 
 
 @mcp.tool()
-def ligand_view(obj_name: str, ligand_resn: str) -> str:
+def ligand_view(
+    obj_name: Annotated[str, Field(description='PyMOL object name (e.g. "1abc")')],
+    ligand_resn: Annotated[
+        str, Field(description='3-letter residue name of the ligand (e.g. "ATP", "HEM", "LIG")')
+    ],
+) -> str:
     """
     Shows a binding-site view focused on a ligand.
 
@@ -25,10 +33,6 @@ def ligand_view(obj_name: str, ligand_resn: str) -> str:
     of the ligand) shown as sticks with element coloring and lightblue carbons.
     Ligand shown as thick sticks with yellow carbons. H-bonds drawn as yellow
     dashes. Pocket residues labeled. View zooms to the ligand.
-
-    Args:
-        obj_name: PyMOL object name (e.g. "1abc")
-        ligand_resn: 3-letter residue name of the ligand (e.g. "ATP", "HEM", "LIG")
     """
     lig_sel = f"({obj_name}) and resn {ligand_resn}"
     pocket_sel = f"byres (({obj_name}) and polymer.protein and ({lig_sel} around 5))"
@@ -78,16 +82,15 @@ def ligand_view(obj_name: str, ligand_resn: str) -> str:
 
 
 @mcp.tool()
-def bfactor_view(obj_name: str) -> str:
+def bfactor_view(
+    obj_name: Annotated[str, Field(description='PyMOL object name (e.g. "1abc")')],
+) -> str:
     """
     Colors the structure by crystallographic B-factor (temperature factor).
 
     Blue = rigid/ordered (low B), white = intermediate, red = flexible/disordered
     (high B). Useful for identifying dynamic loops, disordered termini, and
     rigid structural cores. Shown as cartoon on black background.
-
-    Args:
-        obj_name: PyMOL object name (e.g. "1abc")
     """
     send_request("hide", args=["everything", obj_name])
     send_request("show", args=["cartoon", obj_name])
@@ -123,7 +126,9 @@ def _read_ca_bfactors(obj_name: str) -> list[float] | None:
 
 
 @mcp.tool()
-def plddt_view(obj_name: str) -> str:
+def plddt_view(
+    obj_name: Annotated[str, Field(description='PyMOL object name (e.g. "AF_P69905")')],
+) -> str:
     """
     Colors an AlphaFold model by pLDDT confidence, using the official palette.
 
@@ -135,9 +140,6 @@ def plddt_view(obj_name: str) -> str:
     AlphaFold stores pLDDT in the B-factor column, which is why ``bfactor_view``
     and ``putty_view`` get these models backwards: they assume low = rigid,
     whereas low pLDDT = low confidence. Use this instead for predicted models.
-
-    Args:
-        obj_name: PyMOL object name (e.g. "AF_P69905")
     """
     scores = _read_ca_bfactors(obj_name)
     if scores is None:
@@ -186,18 +188,17 @@ def plddt_view(obj_name: str) -> str:
 
 
 @mcp.tool()
-def interface_view(obj_name: str, chain_a: str, chain_b: str) -> str:
+def interface_view(
+    obj_name: Annotated[str, Field(description='PyMOL object name (e.g. "1abc")')],
+    chain_a: Annotated[str, Field(description='First chain ID (e.g. "A")')],
+    chain_b: Annotated[str, Field(description='Second chain ID (e.g. "B")')],
+) -> str:
     """
     Highlights the protein-protein binding interface between two chains.
 
     Chain A shown in marine blue, chain B in salmon. Interface residues (within
     4Å of the partner chain) shown as a solid surface patch with sticks.
     H-bonds across the interface drawn as yellow dashes.
-
-    Args:
-        obj_name: PyMOL object name (e.g. "1abc")
-        chain_a: First chain ID (e.g. "A")
-        chain_b: Second chain ID (e.g. "B")
     """
     sel_a = f"({obj_name}) and chain {chain_a} and polymer.protein"
     sel_b = f"({obj_name}) and chain {chain_b} and polymer.protein"
@@ -253,7 +254,9 @@ def interface_view(obj_name: str, chain_a: str, chain_b: str) -> str:
 
 
 @mcp.tool()
-def putty_view(obj_name: str) -> str:
+def putty_view(
+    obj_name: Annotated[str, Field(description='PyMOL object name (e.g. "1abc")')],
+) -> str:
     """
     Visualizes protein flexibility using a putty (tube-width) representation.
 
@@ -261,9 +264,6 @@ def putty_view(obj_name: str) -> str:
     thin/blue = rigid/ordered regions, thick/red = flexible/disordered regions.
     A 70%-transparent surface is shown, also colored by B-factor.
     Organic ligands are shown as sticks with yellow carbons. Black background.
-
-    Args:
-        obj_name: PyMOL object name (e.g. "1abc")
     """
     send_request("hide", args=["everything", obj_name])
     send_request("show", args=["cartoon", f"({obj_name}) and polymer.protein"])
@@ -289,7 +289,9 @@ def putty_view(obj_name: str) -> str:
 
 
 @mcp.tool()
-def hydrophobic_surface_view(obj_name: str) -> str:
+def hydrophobic_surface_view(
+    obj_name: Annotated[str, Field(description='PyMOL object name (e.g. "1abc")')],
+) -> str:
     """
     Colors the molecular surface by amino acid hydrophobicity.
 
@@ -299,9 +301,6 @@ def hydrophobic_surface_view(obj_name: str) -> str:
     salmon = negatively charged (ASP, GLU).
     A white cartoon is shown beneath a semi-transparent surface.
     Organic ligands shown as sticks with yellow carbons.
-
-    Args:
-        obj_name: PyMOL object name (e.g. "1abc")
     """
     send_request("hide", args=["everything", obj_name])
     send_request("show", args=["cartoon", f"({obj_name}) and polymer.protein"])
@@ -331,7 +330,15 @@ def hydrophobic_surface_view(obj_name: str) -> str:
 
 
 @mcp.tool()
-def electrostatic_view(obj_name: str, mode: str = "atomic") -> str:
+def electrostatic_view(
+    obj_name: Annotated[str, Field(description='PyMOL object name (e.g. "1abc")')],
+    mode: Annotated[
+        str,
+        Field(
+            description='Charge assignment strategy. "atomic" (default) — charges assigned only to terminal charged atoms (e.g. ARG NH1/NH2/NE, LYS NZ, ASP OD1/OD2, GLU OE1/OE2, HIS ND1/NE2). Produces localized color at charge centers with natural falloff to white. "residue" — charges assigned uniformly to all atoms in each charged residue. Produces saturated patches; useful for quickly locating charged regions.'
+        ),
+    ] = "atomic",
+) -> str:
     """
     Colors the molecular surface by approximate residue-based electrostatics.
 
@@ -341,15 +348,6 @@ def electrostatic_view(obj_name: str, mode: str = "atomic") -> str:
 
     For a more accurate Poisson-Boltzmann electrostatic surface, use
     poisson_boltzmann_view (requires APBS and PDB2PQR to be installed).
-
-    Args:
-        obj_name: PyMOL object name (e.g. "1abc")
-        mode: Charge assignment strategy.
-            "atomic" (default) — charges assigned only to terminal charged atoms
-            (e.g. ARG NH1/NH2/NE, LYS NZ, ASP OD1/OD2, GLU OE1/OE2, HIS ND1/NE2).
-            Produces localized color at charge centers with natural falloff to white.
-            "residue" — charges assigned uniformly to all atoms in each charged residue.
-            Produces saturated patches; useful for quickly locating charged regions.
     """
     send_request("hide", args=["everything", obj_name])
     send_request("show", args=["cartoon", f"({obj_name}) and polymer.protein"])
@@ -397,7 +395,9 @@ def electrostatic_view(obj_name: str, mode: str = "atomic") -> str:
 
 
 @mcp.tool()
-def poisson_boltzmann_view(obj_name: str) -> str:
+def poisson_boltzmann_view(
+    obj_name: Annotated[str, Field(description='PyMOL object name (e.g. "1abc")')],
+) -> str:
     """
     Colors the molecular surface by true Poisson-Boltzmann electrostatic potential.
 
@@ -409,9 +409,6 @@ def poisson_boltzmann_view(obj_name: str) -> str:
     Requires APBS and PDB2PQR to be installed on the system:
         brew install brewsci/bio/apbs
         pip install pdb2pqr
-
-    Args:
-        obj_name: PyMOL object name (e.g. "1abc")
     """
     import os
     import subprocess
@@ -511,7 +508,9 @@ def poisson_boltzmann_view(obj_name: str) -> str:
 
 
 @mcp.tool()
-def crosslink_view(obj_name: str) -> str:
+def crosslink_view(
+    obj_name: Annotated[str, Field(description='PyMOL object name (e.g. "1abc")')],
+) -> str:
     """
     Highlights structural cross-links: disulfide bonds, metals, and their coordination.
 
@@ -519,9 +518,6 @@ def crosslink_view(obj_name: str) -> str:
     shown as yellow sticks, labeled by residue. Disulfide bonds drawn as yellow
     dashes. Metal ions shown as orange spheres. Metal coordination bonds drawn
     as dashed lines to nearby protein atoms. Black background.
-
-    Args:
-        obj_name: PyMOL object name (e.g. "1abc")
     """
     send_request("hide", args=["everything", obj_name])
     send_request("show", args=["cartoon", f"({obj_name}) and polymer.protein"])
@@ -578,7 +574,10 @@ def crosslink_view(obj_name: str) -> str:
 
 
 @mcp.tool()
-def pocket_view(obj_name: str, resn: str) -> str:
+def pocket_view(
+    obj_name: Annotated[str, Field(description='PyMOL object name (e.g. "1abc")')],
+    resn: Annotated[str, Field(description='Ligand residue name (e.g. "ATP", "LIG", "ANP")')],
+) -> str:
     """
     Visualizes the binding pocket cavity around a ligand as a colored surface.
 
@@ -588,10 +587,6 @@ def pocket_view(obj_name: str, resn: str) -> str:
     are shown as sticks. The ligand is shown as yellow sticks. H-bonds between
     the ligand and pocket are drawn as cyan dashes. The protein backbone is
     shown as a thin grey cartoon for context.
-
-    Args:
-        obj_name: PyMOL object name (e.g. "1abc")
-        resn: Ligand residue name (e.g. "ATP", "LIG", "ANP")
     """
     lig = f"({obj_name}) and resn {resn}"
     pocket_sel = f"({obj_name}) and polymer.protein and byres ({lig} around 5)"
@@ -657,7 +652,10 @@ def pocket_view(obj_name: str, resn: str) -> str:
 
 
 @mcp.tool()
-def pharmacophore_view(obj_name: str, resn: str) -> str:
+def pharmacophore_view(
+    obj_name: Annotated[str, Field(description='PyMOL object name (e.g. "1abc")')],
+    resn: Annotated[str, Field(description='Ligand residue name (e.g. "ATP", "LIG", "ANP")')],
+) -> str:
     """
     Colors a ligand by pharmacophore feature type.
 
@@ -669,10 +667,6 @@ def pharmacophore_view(obj_name: str, resn: str) -> str:
     sticks with CA labels. The pocket is shown as a semi-transparent grey
     surface for cavity context. The protein backbone is shown as a thin grey
     cartoon.
-
-    Args:
-        obj_name: PyMOL object name (e.g. "1abc")
-        resn: Ligand residue name (e.g. "ATP", "LIG", "ANP")
     """
     lig = f"({obj_name}) and resn {resn}"
     pocket_sel = f"({obj_name}) and polymer.protein and byres ({lig} around 5)"
@@ -739,7 +733,12 @@ def pharmacophore_view(obj_name: str, resn: str) -> str:
 
 
 @mcp.tool()
-def mutation_view(obj_name: str, mutations: str) -> str:
+def mutation_view(
+    obj_name: Annotated[str, Field(description='PyMOL object name (e.g. "1abc")')],
+    mutations: Annotated[
+        str, Field(description='Comma-separated mutation list (e.g. "A123G,V45L,T200S")')
+    ],
+) -> str:
     """
     Highlights mutated residues on the protein structure.
 
@@ -751,10 +750,6 @@ def mutation_view(obj_name: str, mutations: str) -> str:
 
     Mutation format: <wildtype_aa><resi><mutant_aa>, e.g. "A123G" (Ala→Gly
     at position 123). Chain can optionally be prefixed: "A:A123G".
-
-    Args:
-        obj_name: PyMOL object name (e.g. "1abc")
-        mutations: Comma-separated mutation list (e.g. "A123G,V45L,T200S")
     """
     import re
 
@@ -808,7 +803,9 @@ def mutation_view(obj_name: str, mutations: str) -> str:
 
 
 @mcp.tool()
-def textbook_view(obj_name: str) -> str:
+def textbook_view(
+    obj_name: Annotated[str, Field(description='PyMOL object name (e.g. "1abc")')],
+) -> str:
     """
     Configures PyMOL for a crisp, cel-shaded illustrative look ("Textbook Illustration").
 
@@ -816,9 +813,6 @@ def textbook_view(obj_name: str) -> str:
     black outlines, ideal for presentations or textbook-style diagrams. It hides
     the interior complexities, showing a solid white cartoon and surface with heavy
     black edge contours. Ligands are styled similarly as opaque white sticks with outlines.
-
-    Args:
-        obj_name: PyMOL object name (e.g. "1abc")
     """
     send_request("hide", args=["everything", obj_name])
 
@@ -853,7 +847,9 @@ def textbook_view(obj_name: str) -> str:
 
 
 @mcp.tool()
-def cinematic_view(obj_name: str) -> str:
+def cinematic_view(
+    obj_name: Annotated[str, Field(description='PyMOL object name (e.g. "1abc")')],
+) -> str:
     """
     Configures PyMOL for a depth-cued, cinematic look with dramatic lighting.
 
@@ -861,9 +857,6 @@ def cinematic_view(obj_name: str) -> str:
     The core of the structure emerges from a dark background, making massive
     complexes (like ribosomes or viral capsids) look dramatic and imposing.
     Protein uses standard coloring but with altered material properties.
-
-    Args:
-        obj_name: PyMOL object name (e.g. "1abc")
     """
     # Restore basic representation if not present
     send_request("show", args=["cartoon", f"({obj_name}) and polymer.protein"])
@@ -892,7 +885,9 @@ def cinematic_view(obj_name: str) -> str:
 
 
 @mcp.tool()
-def pointillist_view(obj_name: str) -> str:
+def pointillist_view(
+    obj_name: Annotated[str, Field(description='PyMOL object name (e.g. "1abc")')],
+) -> str:
     """
     Renders the structure as an artistic, abstract pointillist/starfield cloud.
 
@@ -900,9 +895,6 @@ def pointillist_view(obj_name: str) -> str:
     the solvent-accessible surface, resembling a galaxy or pointillist painting.
     The protein backbone is hidden to emphasize the scattered volume. Ligands
     are shown as bright yellow spheres (stars) embedded in the cloud.
-
-    Args:
-        obj_name: PyMOL object name (e.g. "1abc")
     """
     send_request("hide", args=["everything", obj_name])
     send_request("do", args=["bg_color black"])

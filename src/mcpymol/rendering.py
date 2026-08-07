@@ -9,8 +9,10 @@ image content.
 import os
 import tempfile
 import time
+from typing import Annotated
 
 from mcp.server.fastmcp import Image
+from pydantic import Field
 
 from mcpymol.app import mcp
 from mcpymol.bridge import _SLOW_OP_TIMEOUT, send_request
@@ -60,10 +62,22 @@ def _read_complete_png(path: str, timeout: float | None = None) -> bytes | None:
 # string, which is not a shape pydantic can build an output model for.
 @mcp.tool(structured_output=False)
 def render(
-    width: int = DEFAULT_RENDER_WIDTH,
-    height: int = DEFAULT_RENDER_HEIGHT,
-    ray_trace: bool = True,
-    filename: str | None = None,
+    width: Annotated[
+        int, Field(description="Image width in pixels. Larger costs render time and context.")
+    ] = DEFAULT_RENDER_WIDTH,
+    height: Annotated[int, Field(description="Image height in pixels.")] = DEFAULT_RENDER_HEIGHT,
+    ray_trace: Annotated[
+        bool,
+        Field(
+            description="Ray-trace for publication quality (default), or take a fast unshaded viewport grab."
+        ),
+    ] = True,
+    filename: Annotated[
+        str | None,
+        Field(
+            description="Optional path to also keep the PNG at. Without it the render goes to a temporary file that is cleaned up afterwards."
+        ),
+    ] = None,
 ) -> Image | str:
     """
     Renders the current scene and returns the image, so you can see it.
@@ -75,14 +89,6 @@ def render(
     Ray-tracing gives shadows and smooth surfaces but takes seconds to minutes
     on a large assembly; set ``ray_trace=False`` for a fast, flat OpenGL
     snapshot when you only need to confirm a selection or orientation.
-
-    Args:
-        width: Image width in pixels. Larger costs render time and context.
-        height: Image height in pixels.
-        ray_trace: Ray-trace for publication quality (default), or take a
-            fast unshaded viewport grab.
-        filename: Optional path to also keep the PNG at. Without it the
-            render goes to a temporary file that is cleaned up afterwards.
     """
     if width < 1 or height < 1:
         return f"Error: width and height must be positive, got {width}x{height}."
@@ -134,13 +140,21 @@ def render(
 
 @mcp.tool()
 def turntable(
-    obj_name: str = "all",
-    frames: int = 36,
-    out_dir: str = ".",
-    prefix: str = "turntable",
-    width: int = 800,
-    height: int = 600,
-    ray_trace: bool = False,
+    obj_name: Annotated[
+        str, Field(description="Object to centre the rotation on (default: the whole scene).")
+    ] = "all",
+    frames: Annotated[
+        int, Field(description="Number of frames over the full 360°. 36 gives 10° steps.")
+    ] = 36,
+    out_dir: Annotated[str, Field(description="Directory to write the PNG sequence into.")] = ".",
+    prefix: Annotated[
+        str, Field(description="Filename prefix; frames are ``<prefix>_0000.png`` and up.")
+    ] = "turntable",
+    width: Annotated[int, Field(description="Frame width in pixels.")] = 800,
+    height: Annotated[int, Field(description="Frame height in pixels.")] = 600,
+    ray_trace: Annotated[
+        bool, Field(description="Ray-trace each frame (slow, publication quality).")
+    ] = False,
 ) -> str:
     """
     Renders a full 360° rotation as a numbered PNG sequence.
@@ -152,15 +166,6 @@ def turntable(
     Ray-tracing every frame is slow — 36 ray-traced frames of a large assembly
     can take an hour — so this defaults to the fast OpenGL renderer. Turn it on
     only for a final render.
-
-    Args:
-        obj_name: Object to centre the rotation on (default: the whole scene).
-        frames: Number of frames over the full 360°. 36 gives 10° steps.
-        out_dir: Directory to write the PNG sequence into.
-        prefix: Filename prefix; frames are ``<prefix>_0000.png`` and up.
-        width: Frame width in pixels.
-        height: Frame height in pixels.
-        ray_trace: Ray-trace each frame (slow, publication quality).
     """
     if frames < 2:
         return f"Error: frames must be at least 2, got {frames}."

@@ -7,7 +7,9 @@ group in the shared coordinate frame.
 """
 
 import os
-from typing import cast
+from typing import Annotated, cast
+
+from pydantic import Field
 
 from mcpymol.app import mcp
 from mcpymol.bridge import send_request
@@ -165,7 +167,15 @@ def _repair_to_stl(
 
 
 @mcp.tool()
-def print_ribbon_view(obj_name: str, spine_radius: float = 0.9) -> str:
+def print_ribbon_view(
+    obj_name: Annotated[str, Field(description='PyMOL object name (e.g. "1abc").')],
+    spine_radius: Annotated[
+        float,
+        Field(
+            description="Radius (A) of the continuous backbone tube. Larger values give more internal reinforcement. Default 0.9."
+        ),
+    ] = 0.9,
+) -> str:
     """
     Chunky β-arrow ribbons plus a continuous backbone "spine", tuned for
     rigid, gap-free 3D printing.
@@ -185,11 +195,6 @@ def print_ribbon_view(obj_name: str, spine_radius: float = 0.9) -> str:
                       groups="<obj>=(<obj> or <obj>_spine)",
                       representation="cartoon",
                       method="voxel", voxel_pitch=0.2)
-
-    Args:
-        obj_name: PyMOL object name (e.g. "1abc").
-        spine_radius: Radius (A) of the continuous backbone tube. Larger
-                      values give more internal reinforcement. Default 0.9.
     """
     spine = f"{obj_name}_spine"
 
@@ -239,13 +244,37 @@ def print_ribbon_view(obj_name: str, spine_radius: float = 0.9) -> str:
 
 @mcp.tool()
 def print_export(
-    obj_name: str,
-    groups: str,
-    out_dir: str = ".",
-    method: str = "auto",
-    voxel_pitch: float = 0.7,
-    poisson_depth: int = 10,
-    representation: str = "surface",
+    obj_name: Annotated[str, Field(description='PyMOL object to export (e.g. "1abc").')],
+    groups: Annotated[
+        str,
+        Field(
+            description='Semicolon-separated ``label=selection`` pairs, one per colour. Example: "protein=polymer.protein; nucleic=polymer.nucleic".'
+        ),
+    ],
+    out_dir: Annotated[
+        str, Field(description="Directory for the STL files (default: current directory).")
+    ] = ".",
+    method: Annotated[
+        str,
+        Field(
+            description='"auto" (light cleanup if the export is already watertight, else poisson with voxel fallback), "poisson" (keeps detail, best for bulky chains), or "voxel" (robust for thin nucleic acids).'
+        ),
+    ] = "auto",
+    voxel_pitch: Annotated[
+        float,
+        Field(
+            description="Voxel size in Angstrom for the voxel method. Smaller keeps more detail; 0.7 keeps a ~10 A helix intact."
+        ),
+    ] = 0.7,
+    poisson_depth: Annotated[
+        int, Field(description="Screened-Poisson octree depth; higher = more detail.")
+    ] = 10,
+    representation: Annotated[
+        str,
+        Field(
+            description='What geometry to export. "surface" (default, unchanged) isolates each group as its own temp object and exports its molecular surface. "cartoon" exports the *currently displayed* cartoon geometry of the real objects, preserving per-residue rep flags and per-object cartoon type (e.g. a `cartoon tube` spine from :func:`print_ribbon_view`). In cartoon mode each group must name whole object(s) — one colour per object (e.g. "1abc or 1abc_spine") — and groups are isolated by toggling object visibility, no temp objects.'
+        ),
+    ] = "surface",
 ) -> str:
     """
     Exports a structure as watertight STL files ready for multi-colour 3D printing.
@@ -258,30 +287,6 @@ def print_export(
 
     Requires the optional ``print`` extra (trimesh, pymeshlab); see the install
     hint returned if the libraries are missing.
-
-    Args:
-        obj_name: PyMOL object to export (e.g. "1abc").
-        groups: Semicolon-separated ``label=selection`` pairs, one per colour.
-                Example: "protein=polymer.protein; nucleic=polymer.nucleic".
-        out_dir: Directory for the STL files (default: current directory).
-        method: "auto" (light cleanup if the export is already watertight,
-                else poisson with voxel fallback), "poisson" (keeps detail,
-                best for bulky chains), or "voxel" (robust for thin nucleic
-                acids).
-        voxel_pitch: Voxel size in Angstrom for the voxel method. Smaller keeps
-                     more detail; 0.7 keeps a ~10 A helix intact.
-        poisson_depth: Screened-Poisson octree depth; higher = more detail.
-        representation: What geometry to export. "surface" (default,
-                        unchanged) isolates each group as its own temp
-                        object and exports its molecular surface. "cartoon"
-                        exports the *currently displayed* cartoon geometry of
-                        the real objects, preserving per-residue rep flags
-                        and per-object cartoon type (e.g. a `cartoon tube`
-                        spine from :func:`print_ribbon_view`). In cartoon
-                        mode each group must name whole object(s) — one
-                        colour per object (e.g. "1abc or 1abc_spine") — and
-                        groups are isolated by toggling object visibility, no
-                        temp objects.
     """
     try:
         import trimesh  # noqa: F401
