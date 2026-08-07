@@ -16,6 +16,7 @@ import mcpymol.server as server
 TOOL_MODULES = [
     "mcpymol.bridge",
     "mcpymol.comparison",
+    "mcpymol.pdbtext",
     "mcpymol.conservation",
     "mcpymol.primitives",
     "mcpymol.printing",
