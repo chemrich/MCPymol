@@ -91,7 +91,43 @@ def send_request(
         }
 
 
-def _call(_action: str, /, *, _timeout: float = _DEFAULT_TIMEOUT, **values: str | None) -> str:
+def format_measurement(
+    label: str, value, unit: str, name: str | None = None, signed: bool = False
+) -> str:
+    """Render a numeric PyMOL result as an answer rather than an acknowledgement.
+
+    ``cmd.distance`` / ``angle`` / ``dihedral`` / ``get_area`` all *return* the
+    quantity they measure, and the wrappers used to discard it — so asking
+    MCPymol to measure something got you a drawing and no number.
+
+    PyMOL signals "nothing matched" by returning -1, which is worth saying
+    plainly rather than reporting as a measurement of -1.  That inference is
+    only valid for quantities that cannot be negative, though: set ``signed``
+    for dihedrals, where -57.8 deg is an ordinary alpha-helical phi and not a
+    failure at all.
+    """
+    stored = f" (stored as '{name}')" if name else ""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return f"{label} was performed{stored}, but PyMOL returned no numeric value ({value!r})."
+
+    if not signed and number < 0:
+        return (
+            f"{label} failed{stored}: PyMOL returned {number:g}, which means the "
+            f"selections matched no atoms, or no pair fell within the cutoff."
+        )
+    return f"{label}: {number:.2f} {unit}{stored}."
+
+
+def _call(
+    _action: str,
+    /,
+    *,
+    _timeout: float = _DEFAULT_TIMEOUT,
+    _measures: tuple[str, str] | tuple[str, str, bool] | None = None,
+    **values: str | None,
+) -> str:
     """Forward a primitive PyMOL command and report the outcome.
 
     This is the shared body of every thin ``pymol.cmd`` wrapper below.  Each
@@ -106,6 +142,10 @@ def _call(_action: str, /, *, _timeout: float = _DEFAULT_TIMEOUT, **values: str 
     send just the height without PyMOL reading it *as* the width.  The wrappers
     used to do exactly that, silently.  A gap now returns an error naming the
     parameters instead of quietly producing a wrong render.
+
+    ``_measures`` is ``(label, unit)`` — or ``(label, unit, signed)`` — for
+    commands that return a quantity; with it, the result is reported as a
+    number instead of "Executed ... successfully".
     """
     names = list(values)
     args = [values[n] for n in names]
@@ -127,4 +167,8 @@ def _call(_action: str, /, *, _timeout: float = _DEFAULT_TIMEOUT, **values: str 
     res = send_request(_action, args=args, timeout=_timeout)
     if res.get("status") == "error":
         return res.get("error", "Unknown error")
+    if _measures is not None:
+        label, unit = _measures[0], _measures[1]
+        signed = bool(_measures[2]) if len(_measures) > 2 else False
+        return format_measurement(label, res.get("result"), unit, values.get("name"), signed)
     return f"Executed {_action} successfully."
