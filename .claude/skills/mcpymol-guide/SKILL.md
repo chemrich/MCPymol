@@ -33,6 +33,7 @@ question with only a rendering leaves the user to measure it themselves.
 | Where do two structures differ? | `superposition_view` |
 | How far / what angle / how much area? | `distance`, `angle`, `dihedral`, `sasa`, `rms_cur` |
 | Does my selection match anything? | `count_atoms` |
+| Occupancy / altloc / per-atom B-factor? | `atom_properties` |
 
 `contact_report` classification is heavy-atom geometry (no hydrogens assumed):
 salt bridge <= 4.0 A, H-bond <= 3.5 A between N/O, hydrophobic <= 4.5 A,

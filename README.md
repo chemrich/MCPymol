@@ -52,6 +52,7 @@ Organised by the question, not the tool.
 | What's the sequence, and how does it map to the residue numbering? | `get_sequence` |
 | What's loaded / what chains / what ligands? | `list_objects`, `list_chains`, `list_ligands` |
 | Can I open my own file rather than a PDB code? | `load_structure` |
+| What are this atom's occupancy / altloc / B-factor? | `atom_properties` |
 | What holds this ligand in its pocket, and how tightly? | `contact_report`, then `ligand_view` to see it |
 | How big is this interface, and which residues matter? | `interface_report`, then `interface_view` |
 | Where do these two structures differ? | `superposition_view` |
@@ -485,6 +486,23 @@ INHIBITOR OF THE HIV PROTEASES
   Ligands in '1hsg': MK1
   Space group P 21 21 2, cell 59.6 x 87.1 x 46.7 A
 ```
+
+`atom_properties` reads properties that live on individual *atoms* rather than
+residues or objects — occupancy, alternate conformations, per-atom B-factor,
+formal charge. Nothing else reaches them: the PyMOL call that exposes them
+returns an object that cannot cross the bridge, so the plugin flattens it on
+the way out.
+
+```
+2 atoms in '1hsg and resi 25':
+
+  chain  resi  resn  name  b      q
+  A      25    ASP   OD1   18.42  1.00
+  A      25    ASP   OD2   21.07  0.50
+```
+
+That 0.50 is the tool's reason to exist: a sidechain modelled in two
+conformations, invisible to every per-residue view.
 
 `get_sequence` returns FASTA — plus the two things the sequence alone hides and
 that routinely cause mistakes: the **numbering offset** (PDB numbering rarely

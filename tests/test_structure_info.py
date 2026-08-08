@@ -8,6 +8,7 @@ import pytest
 from mcpymol.pdbtext import Atom, parse_atoms, residue_order
 from mcpymol.structures import (
     _rcsb_metadata,
+    atom_properties,
     fetch_structure,
     get_sequence,
     load_structure,
@@ -541,3 +542,114 @@ def test_settings_are_reset_without_deleting_objects(mock_sr, mock_meta):
 
     dos = [c.kwargs["args"][0] for c in mock_sr.call_args_list if c.args[0] == "do"]
     assert "reinitialize settings" in dos
+
+
+# ── atom_properties ──────────────────────────────────────────────────────────
+#
+# The only route to properties that live on atoms rather than residues or
+# objects: occupancy, altloc, per-atom B-factor. cmd.get_model returns a chempy
+# object that does not survive JSON, so the plugin's iterate_to_list action is
+# what makes them reachable at all.
+
+
+def _sr_atoms(rows, status="success"):
+    def fake(action, args=None, kwargs=None, **_ignored):
+        if action == "iterate_to_list":
+            if status == "error":
+                return {"status": "error", "error": "invalid selection"}
+            return {"status": "success", "result": rows}
+        return {"status": "success", "result": "OK"}
+
+    return fake
+
+
+@patch("mcpymol.structures.send_request")
+def test_atom_properties_renders_a_table(mock_sr):
+    mock_sr.side_effect = _sr_atoms(
+        [["A", "25", "ASP", "OD1", 18.42, 1.0], ["A", "25", "ASP", "OD2", 21.07, 0.5]]
+    )
+
+    result = atom_properties(selection="1hsg and resi 25")
+
+    assert "2 atoms" in result
+    assert "OD1" in result and "OD2" in result
+    assert "18.42" in result  # floats rendered to 2 dp
+    assert "0.50" in result  # partial occupancy is the point of the tool
+
+
+@patch("mcpymol.structures.send_request")
+def test_atom_properties_passes_the_requested_fields(mock_sr):
+    mock_sr.side_effect = _sr_atoms([["A", 0.5]])
+
+    atom_properties(selection="x", properties="chain, q")
+
+    call = next(c for c in mock_sr.call_args_list if c.args[0] == "iterate_to_list")
+    assert call.kwargs["args"][1] == "chain, q"
+
+
+@patch("mcpymol.structures.send_request")
+def test_atom_properties_tolerates_untidy_field_lists(mock_sr):
+    mock_sr.side_effect = _sr_atoms([["A", 0.5]])
+
+    atom_properties(selection="x", properties=" chain , q ,")
+
+    call = next(c for c in mock_sr.call_args_list if c.args[0] == "iterate_to_list")
+    assert call.kwargs["args"][1] == "chain, q"
+
+
+@patch("mcpymol.structures.send_request")
+def test_atom_properties_shows_blanks_rather_than_swallowing_them(mock_sr):
+    """An empty chain or altloc is information, not absence."""
+    mock_sr.side_effect = _sr_atoms([["", "1", "ALA", "CA", 0.0, 1.0]])
+
+    result = atom_properties(selection="x")
+
+    assert "-" in result
+
+
+@patch("mcpymol.structures.send_request")
+def test_atom_properties_caps_output_but_says_so(mock_sr):
+    mock_sr.side_effect = _sr_atoms([["A", str(i)] for i in range(100)])
+
+    result = atom_properties(selection="x", properties="chain, resi", max_atoms=5)
+
+    assert "100 atoms" in result
+    assert "and 95 more atoms" in result
+
+
+@patch("mcpymol.structures.send_request")
+def test_atom_properties_reports_an_empty_selection(mock_sr):
+    mock_sr.side_effect = _sr_atoms([])
+
+    result = atom_properties(selection="chain Z")
+
+    assert "No atoms matched" in result
+    assert "count_atoms" in result
+
+
+@patch("mcpymol.structures.send_request")
+def test_atom_properties_propagates_errors(mock_sr):
+    mock_sr.side_effect = _sr_atoms([], status="error")
+
+    assert "Error reading" in atom_properties(selection="nope")
+
+
+@pytest.mark.parametrize("bad", ["", "  ", " , , "])
+@patch("mcpymol.structures.send_request")
+def test_atom_properties_rejects_an_empty_property_list(mock_sr, bad):
+    assert "no properties requested" in atom_properties(selection="x", properties=bad)
+    mock_sr.assert_not_called()
+
+
+@patch("mcpymol.structures.send_request")
+def test_atom_properties_rejects_a_nonsense_cap(mock_sr):
+    assert "at least 1" in atom_properties(selection="x", max_atoms=0)
+    mock_sr.assert_not_called()
+
+
+def test_atom_properties_is_registered():
+    import asyncio
+
+    from mcpymol.server import mcp
+
+    assert "atom_properties" in {t.name for t in asyncio.run(mcp.list_tools())}
