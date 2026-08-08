@@ -82,7 +82,13 @@ def test_importing_server_pulls_in_every_tool_module():
 def test_no_module_was_left_behind():
     """Every module in the package is either imported by the facade or a
     deliberate standalone (the in-PyMOL plugin, the __main__ shim)."""
-    standalone = {"mcpymol.plugin", "mcpymol.__main__", "mcpymol.app", "mcpymol.server"}
+    standalone = {
+        "mcpymol.plugin",
+        "mcpymol.__main__",
+        "mcpymol.app",
+        "mcpymol.server",
+        "mcpymol.cli",
+    }
     found = {f"mcpymol.{m.name}" for m in pkgutil.iter_modules(mcpymol.__path__)}
     unreferenced = found - set(TOOL_MODULES) - standalone
     assert not unreferenced, f"module(s) not wired into the server: {sorted(unreferenced)}"

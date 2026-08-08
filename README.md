@@ -74,28 +74,31 @@ There are two halves to wire up: the **native plugin** (runs inside PyMOL) and t
 
 ### 1. Start the native plugin
 
-Open PyMOL, then in the PyMOL command line:
-
-```pymol
-run /path/to/MCPymol/src/mcpymol/plugin.py
-```
-
-You should see `MCPymol Native Plugin listening on 127.0.0.1:9876`.
-
-To auto-load it on every PyMOL launch, add this to `~/.pymolrc.py`:
-
-```python
-from pymol import cmd
-
-cmd.do("run /absolute/path/to/MCPymol/src/mcpymol/plugin.py")
-```
-
-**Changing the port.** Set `MCPYMOL_PORT` before launching **both** PyMOL and the bridge:
+The plugin runs *inside* PyMOL, which has its own Python interpreter — it
+cannot import the installed package, so it is loaded from a file path. Let
+MCPymol find that path for you:
 
 ```bash
-MCPYMOL_PORT=9867 open -a PyMOL       # macOS
-MCPYMOL_PORT=9867 uv run mcpymol      # bridge
+uv run mcpymol --install-plugin
 ```
+
+That adds a small managed block to `~/.pymolrc.py`, so PyMOL loads the plugin
+on every launch. Restart PyMOL and you should see:
+
+```
+MCPymol Native Plugin listening on 127.0.0.1:9876
+```
+
+Re-run it after upgrading MCPymol — the block embeds a path into one
+installation and is rewritten, not duplicated. `mcpymol --uninstall-plugin`
+removes it and leaves the rest of your `.pymolrc.py` alone.
+
+If you would rather wire it up yourself, `mcpymol --plugin-path` prints the
+path, and you can `run` it from the PyMOL command line or add your own line to
+`~/.pymolrc.py`.
+
+**Changing the port.** Set `MCPYMOL_PORT` before launching **both** PyMOL and
+the bridge — see [Configuration](#configuration).
 
 ### 2. Register the bridge with your AI assistant
 
