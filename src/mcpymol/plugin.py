@@ -129,14 +129,39 @@ def _error_bytes(message: str) -> bytes:
     return json.dumps({"status": "error", "error": message}).encode("utf-8")
 
 
+def _jsonable(value):
+    """Best-effort conversion of a PyMOL return value into JSON-able data.
+
+    Several ``pymol.cmd`` functions return numpy arrays — ``get_coords`` and
+    ``get_atom_coords`` among them.  Without this they fall through to the
+    repr fallback below and reach the client as a *string* that merely looks
+    like data: a ``success`` response carrying something no caller can use.
+    Converting here keeps the repr fallback for genuinely opaque objects
+    (chempy models, handles) where a repr really is the best available.
+    """
+    if value is None or isinstance(value, (str, bytes, bool, int, float)):
+        return value
+    tolist = getattr(value, "tolist", None)  # numpy arrays and scalars
+    if callable(tolist):
+        try:
+            return tolist()
+        except Exception:
+            return value
+    if isinstance(value, dict):
+        return {k: _jsonable(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return [_jsonable(v) for v in value]
+    return value
+
+
 def _dumps_response(response: dict) -> bytes:
     """Serialize a response, degrading gracefully rather than failing to reply.
 
     ``pymol.cmd`` functions are free to return objects json knows nothing about
     (chempy models, numpy arrays, opaque handles).  Letting ``json.dumps``
     raise would send the client nothing at all, which it can only report as an
-    empty response — so fall back to a repr of the result, and only then to an
-    explicit error.
+    empty response — so coerce what is coercible, then fall back to a repr of
+    the result, and only then to an explicit error.
     """
     try:
         return json.dumps(response).encode("utf-8")
@@ -144,7 +169,13 @@ def _dumps_response(response: dict) -> bytes:
         pass
 
     coerced = dict(response)
-    coerced["result"] = repr(coerced.get("result"))
+    try:
+        coerced["result"] = _jsonable(coerced.get("result"))
+        return json.dumps(coerced).encode("utf-8")
+    except (TypeError, ValueError):
+        pass
+
+    coerced["result"] = repr(response.get("result"))
     try:
         return json.dumps(coerced).encode("utf-8")
     except (TypeError, ValueError):
@@ -230,6 +261,31 @@ class PyMOLSocketServer:
             if action == "get_chains":
                 selection = args[0] if args else kwargs.get("selection", "all")
                 return {"status": "success", "result": cmd.get_chains(selection)}
+
+            if action == "iterate_to_list":
+                # Read per-atom properties back to the caller.  Nothing else in
+                # the protocol can: the properties that live on atoms rather
+                # than on objects — occupancy, altloc, per-atom b — are only
+                # reachable through cmd.iterate or cmd.get_model, and get_model
+                # returns a chempy object that does not survive the JSON wire.
+                #
+                # Always returns a list of tuples, one per atom, with one
+                # element per comma-separated field in the expression, so a
+                # single-field query is a list of 1-tuples rather than a list
+                # of scalars.  Callers can then unpack without special-casing.
+                selection = args[0] if args else kwargs.get("selection", "all")
+                expression = args[1] if len(args) > 1 else kwargs.get("expression")
+                if not expression:
+                    return {
+                        "status": "error",
+                        "error": (
+                            "iterate_to_list needs an expression, "
+                            "e.g. iterate_to_list('polymer', 'chain, resi, q')"
+                        ),
+                    }
+                space: dict = {"_rows": []}
+                cmd.iterate(selection, f"_rows.append(({expression},))", space=space)
+                return {"status": "success", "result": space["_rows"]}
 
             # ── Dynamic resolution (incl. dotted names like util.cbc) ───
             method = _resolve_dotted(action) if action else None
