@@ -86,6 +86,7 @@ To auto-load it on every PyMOL launch, add this to `~/.pymolrc.py`:
 
 ```python
 from pymol import cmd
+
 cmd.do("run /absolute/path/to/MCPymol/src/mcpymol/plugin.py")
 ```
 
