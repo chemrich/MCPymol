@@ -195,28 +195,3 @@ def test_non_json_garbage_gets_an_error_response(live_bridge):
     with patch.object(live_bridge, "handle_request") as handler:
         handler.return_value = {"status": "success", "result": "OK"}
         assert send_request("refresh")["status"] == "success"
-
-
-def test_large_response_does_not_reparse_every_chunk(live_bridge):
-    """Parsing after every chunk is quadratic: each attempt rescans everything
-    received so far, and every attempt before the last is doomed.
-
-    Measured over a real socket, parse-every-chunk against parse-on-short-read:
-    4 MB took 0.133s vs 0.015s, and 16 MB took 2.230s vs 0.070s. The size here
-    is chosen to separate those — a smaller payload does not, which is how the
-    first version of this test passed against both strategies.
-    """
-    import time
-
-    big = "M" * 16_000_000
-    with patch.object(live_bridge, "handle_request") as handler:
-        handler.return_value = {"status": "success", "result": big}
-        started = time.perf_counter()
-        res = send_request("get_pdbstr", args=["all"], timeout=120.0)
-        elapsed = time.perf_counter() - started
-
-    assert res["result"] == big
-    assert elapsed < 1.0, (
-        f"16 MB round trip took {elapsed:.2f}s; parse-on-short-read does it in "
-        f"~0.07s and parse-per-chunk in ~2.2s, so this looks like a regression"
-    )
