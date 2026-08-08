@@ -1138,3 +1138,44 @@ def test_wrapper_schemas_match_their_signatures(name, required, optional):
 
     assert sorted(schema.get("required", [])) == sorted(required)
     assert sorted(schema["properties"]) == sorted(required + optional)
+
+
+def test_send_request_parses_only_on_a_short_read():
+    """The end-of-message test must not rescan the buffer after every chunk.
+
+    Parsing per chunk is quadratic — each attempt rescans everything received
+    so far and every attempt before the last is doomed. Over a real socket a
+    16 MB response took 2.23s that way against 0.07s parsing only on a short
+    read.
+
+    Driven with a fixed chunk sequence rather than a real socket: the kernel
+    decides how a stream is split, so a socket-based version of this counts
+    something environment-dependent (5 attempts locally, 12 on CI) and a timed
+    version is worse still.
+    """
+    from mcpymol.bridge import _RECV_CHUNK
+
+    payload = json.dumps({"status": "success", "result": "M" * 200_000}).encode()
+    chunks = [payload[i : i + _RECV_CHUNK] for i in range(0, len(payload), _RECV_CHUNK)]
+    assert len(chunks) > 3, "need several chunks for this to mean anything"
+    assert len(chunks[-1]) < _RECV_CHUNK, "the final chunk must be short"
+
+    attempts = 0
+    real_loads = json.loads
+
+    def counting_loads(*args, **kwargs):
+        nonlocal attempts
+        attempts += 1
+        return real_loads(*args, **kwargs)
+
+    with patch("socket.socket") as mock_cls:
+        mock_cls.return_value.__enter__.return_value.recv.side_effect = [*chunks, b""]
+        with patch("mcpymol.bridge.json.loads", counting_loads):
+            res = send_request("get_pdbstr", args=["all"])
+
+    assert res["status"] == "success"
+    assert len(res["result"]) == 200_000
+    assert attempts == 1, (
+        f"{attempts} parse attempts for {len(chunks)} chunks — only the final "
+        f"short chunk should be tried"
+    )
