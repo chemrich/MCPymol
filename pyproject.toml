@@ -33,7 +33,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Visualization",
 ]
 dependencies = [
-    "fastmcp>=3.3.1",
+    "fastmcp>=3.4.5",
     "mcp>=1.27.1",
 ]
 
@@ -46,7 +46,7 @@ Changelog = "https://github.com/chemrich/MCPymol/blob/main/CHANGELOG.md"
 [project.optional-dependencies]
 # 3D-print export (print_export tool): mesh repair to watertight STL.
 print = [
-    "trimesh>=4.0",
+    "trimesh>=5.0.0",
     "pymeshlab>=2023.12",
     "scipy>=1.11",
     "scikit-image>=0.22",
@@ -59,11 +59,11 @@ mcpymol = "mcpymol.server:main"
 [dependency-groups]
 dev = [
     "pre-commit>=4.0",
-    "pytest>=9.0.3",
+    "pytest>=9.1.1",
     "pytest-mock>=3.15.1",
     "pytest-cov>=6.0",
-    "ruff>=0.15.14",
-    "mypy>=1.13",
+    "ruff>=0.16.1",
+    "mypy>=2.3.0",
 ]
 
 [build-system]
