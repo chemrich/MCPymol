@@ -1,5 +1,9 @@
 # MCPymol — talk to PyMOL
 
+[![PyPI](https://img.shields.io/pypi/v/mcpymol)](https://pypi.org/project/mcpymol/)
+[![Python](https://img.shields.io/pypi/pyversions/mcpymol)](https://pypi.org/project/mcpymol/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
 ![Nucleosome core particle (1AOI) rendered in MCPymol's ghost-heart style](assets/nucleosome.png)
 
 **MCPymol** is a [Model Context Protocol](https://modelcontextprotocol.io/) server that lets you drive PyMOL with natural language. Load structures, set up analytical views, measure things, and explore proteins by talking to Claude or Gemini. The image above was made by typing *"show me a nucleosome"* into Claude Code. That was the whole prompt.
@@ -70,16 +74,33 @@ yourself.
 
 ## Installation
 
-There are two halves to wire up: the **native plugin** (runs inside PyMOL) and the **MCP bridge** (runs outside, and is what your AI assistant launches).
+There are two halves to wire up: the **native plugin** (runs inside PyMOL) and the **MCP bridge** (runs outside, and is what your AI assistant launches). Both come from the same package.
 
-### 1. Start the native plugin
+### 1. Install MCPymol
+
+```bash
+uv tool install mcpymol
+```
+
+Or `pipx install mcpymol`, or `pip install mcpymol` into a virtualenv — any of
+them puts an `mcpymol` command on your PATH. There is no need to clone the
+repository unless you intend to work on MCPymol itself.
+
+> **Why not `uvx mcpymol`?** `uvx` runs the bridge perfectly well, but it is
+> the wrong tool for step 2: it unpacks the package into `~/.cache/uv`, and
+> the plugin has to be loaded by absolute path, so the line written into your
+> PyMOL startup file would point into a cache that `uv cache clean` reclaims.
+> `uv tool install` puts it somewhere permanent — and lets both halves come
+> from one installation, so the bridge and the plugin cannot drift apart.
+
+### 2. Start the native plugin
 
 The plugin runs *inside* PyMOL, which has its own Python interpreter — it
 cannot import the installed package, so it is loaded from a file path. Let
 MCPymol find that path for you:
 
 ```bash
-uv run mcpymol --install-plugin
+mcpymol --install-plugin
 ```
 
 That adds a small managed block to `~/.pymolrc.py`, so PyMOL loads the plugin
@@ -100,29 +121,20 @@ path, and you can `run` it from the PyMOL command line or add your own line to
 **Changing the port.** Set `MCPYMOL_PORT` before launching **both** PyMOL and
 the bridge — see [Configuration](#configuration).
 
-### 2. Register the bridge with your AI assistant
+### 3. Register the bridge with your AI assistant
 
-Pick one. All paths are to the cloned repo.
+Pick one. The command is just `mcpymol` — the same installation the plugin came
+from.
 
-```bash
-git clone https://github.com/chemrich/MCPymol.git
-cd MCPymol
-```
-
-#### Claude Code CLI (macOS, `uv`)
+#### Claude Code CLI
 
 ```bash
-uv sync
-claude mcp add mcpymol -- uv --directory /absolute/path/to/MCPymol run mcpymol
+claude mcp add mcpymol -- mcpymol
 ```
 
 Start a new Claude Code session.
 
-#### Claude Desktop (macOS, `uv`)
-
-```bash
-uv sync
-```
+#### Claude Desktop
 
 Add to `claude_desktop_config.json`:
 
@@ -130,40 +142,68 @@ Add to `claude_desktop_config.json`:
 {
   "mcpServers": {
     "mcpymol": {
-      "command": "uv",
-      "args": ["--directory", "/absolute/path/to/MCPymol", "run", "mcpymol"]
+      "command": "/absolute/path/to/mcpymol"
     }
   }
 }
 ```
 
-Restart Claude Desktop.
+Run `which mcpymol` to get that path, and use it in full. Claude Desktop is
+launched by the OS rather than from your shell, so it does not inherit your
+PATH and will not find a bare `mcpymol`. Restart Claude Desktop afterwards.
 
-#### Gemini CLI (macOS, `uv`)
+#### Gemini CLI
 
 ```bash
-uv sync
-gemini mcp add mcpymol uv --directory /absolute/path/to/MCPymol run mcpymol
+gemini mcp add mcpymol mcpymol
 gemini mcp refresh
 ```
+
+#### Without installing — `uvx`
+
+To run the bridge without installing anything, point your assistant at
+`uvx mcpymol` instead:
+
+```bash
+claude mcp add mcpymol -- uvx mcpymol
+```
+
+The plugin in step 2 still needs a real installation, and `uvx` resolves the
+newest release each time, so the two halves can end up on different versions.
+Prefer this only if you are not installing MCPymol at all.
 
 #### Restricted environments — no `uv`
 
 If `uv` is blocked by your org's security policy, use a standard venv. On Linux you may need `sudo apt-get install python3-venv pymol` first.
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install --upgrade pip
-pip install -e .
+python3 -m venv ~/.venvs/mcpymol
+~/.venvs/mcpymol/bin/pip install --upgrade pip
+~/.venvs/mcpymol/bin/pip install mcpymol
+~/.venvs/mcpymol/bin/mcpymol --install-plugin
 
 # Point the assistant directly at the venv binary
-claude mcp add mcpymol /absolute/path/to/MCPymol/.venv/bin/mcpymol
+claude mcp add mcpymol ~/.venvs/mcpymol/bin/mcpymol
 # or
-gemini mcp add mcpymol /absolute/path/to/MCPymol/.venv/bin/mcpymol
+gemini mcp add mcpymol ~/.venvs/mcpymol/bin/mcpymol
 ```
 
-If your network blocks PyPI, you may also need to tweak the repository URLs inside `uv.lock` to match your internal mirror.
+If your network blocks PyPI, install from your internal mirror with `pip install --index-url ...`.
+
+### Working on MCPymol itself
+
+For development, clone the repo and run from the checkout — this is the only
+path that needs a clone:
+
+```bash
+git clone https://github.com/chemrich/MCPymol.git
+cd MCPymol
+uv sync
+uv run mcpymol --install-plugin
+claude mcp add mcpymol -- uv --directory /absolute/path/to/MCPymol run mcpymol
+```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Configuration
 
@@ -185,7 +225,7 @@ before launching PyMOL and the bridge.
 
 ```bash
 MCPYMOL_PORT=9867 open -a PyMOL       # macOS
-MCPYMOL_PORT=9867 uv run mcpymol      # bridge
+MCPYMOL_PORT=9867 mcpymol             # bridge
 ```
 
 
@@ -195,7 +235,7 @@ MCPYMOL_PORT=9867 uv run mcpymol      # bridge
 | --- | --- | --- |
 | Every tool returns *"Socket connection failed. Is the PyMOL plugin running?"* | Plugin not loaded in PyMOL | `run /path/to/plugin.py` inside PyMOL, or add it to `~/.pymolrc.py` |
 | *"Address already in use"* on plugin start | A previous PyMOL session left the port open, or another app uses 9876 | Quit lingering PyMOL processes, or set `MCPYMOL_PORT=9867` on both sides |
-| Long `get_fastastr` / `get_chains` calls fail with a JSON parse error | You're on a pre-2026-05 version of MCPymol that capped recv() at 8 KB | Pull main — the bridge now drains the response in full |
+| Long `get_fastastr` / `get_chains` calls fail with a JSON parse error | You're on a pre-2026-05 version of MCPymol that capped recv() at 8 KB | Upgrade (`uv tool upgrade mcpymol`) — the bridge now drains the response in full |
 | `conservation_view` is slow | First call hits the ColabFold MMseqs2 API (30 s–few min); subsequent calls for the same sequence hit a local cache | If you have an internal MMseqs2 server, set `MCPYMOL_MMSEQS_URL` |
 | `poisson_boltzmann_view` fails | `apbs` or `pdb2pqr` missing | `brew install brewsci/bio/apbs` and `pip install pdb2pqr` |
 | A tool reports a file *"did not appear"* | PyMOL and the bridge are on different machines — they exchange files through the filesystem | Run both on the same host |
@@ -545,8 +585,8 @@ This tool needs the optional `print` extra (trimesh, pymeshlab, scipy,
 scikit-image, networkx):
 
 ```bash
-uv sync --extra print          # from a MCPymol checkout
-uv pip install 'mcpymol[print]' # standalone
+uv tool install 'mcpymol[print]'  # installed
+uv sync --extra print             # from a MCPymol checkout
 ```
 
 ```
