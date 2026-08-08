@@ -7,7 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-08-08
+
+The first release published to PyPI. Every install path used to begin with
+`git clone`, which asked people to take on a checkout in order to run a tool
+they only wanted to use — and left them tracking a branch rather than a
+version.
+
 ### Added
+
+- **MCPymol is on PyPI**, so the bridge installs with `uvx mcpymol` and needs
+  no checkout. This is what makes the plugin the interesting half of the
+  install: the bridge is now a one-line registration, while the plugin still
+  has to be found on disk, which is what `--install-plugin` below is for.
+  Publishing uses [Trusted Publishing](https://docs.pypi.org/trusted-publishers/)
+  over OIDC rather than a stored API token, so there is no long-lived
+  credential in the repository to leak or rotate. `.github/workflows/release.yml`
+  fires on a `v*` tag and refuses to upload if the tag disagrees with the
+  version it just built — a published version is immutable, and a wrong one
+  can only be superseded, never replaced.
 - **`mcpymol --install-plugin`**, which adds the plugin to `~/.pymolrc.py` so PyMOL loads it on startup, plus `--plugin-path` and `--uninstall-plugin`. The plugin runs inside PyMOL, whose Python is a separate interpreter that cannot import this package, so it has to be loaded from a file path — and finding that path inside a pip or `uvx` installation is unpleasant. The block is delimited and rewritten in place rather than appended, because the path it embeds points into one installation and goes stale on upgrade; re-running the command is the fix. Existing `.pymolrc.py` content is preserved, and uninstall removes only the managed block.
 
 ## [1.4.0] - 2026-08-08
