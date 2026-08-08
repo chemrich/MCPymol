@@ -32,6 +32,34 @@ after a push. `pre-commit install` wires up both stages in one go.
 **On push:** the full `pytest` suite. It takes about 16 seconds — too slow to
 pay on every commit, unremarkable on a push.
 
+## Merging
+
+`main` is protected. Every change goes through a pull request, and a PR cannot
+merge until all nine CI checks are green *and* the branch is up to date with
+`main`. The rule applies to admins, so there is no bypass — `gh pr merge
+--admin` is refused the same as the button.
+
+That last part is deliberate. This project has merged a red PR before, because
+"check the status, then merge" is two steps with a gap between them. Use:
+
+```bash
+gh pr merge --auto --rebase
+```
+
+which queues the merge and lets GitHub perform it when the checks pass, so the
+gap does not exist.
+
+The up-to-date requirement means a merge invalidates every other open PR's
+checks; rebase and let CI re-run. It is the price of never merging something
+whose CI ran against a different `main` — which is how several stale Dependabot
+runs looked green while testing the wrong thing.
+
+Dependabot's patch and minor updates enable auto-merge on themselves and land
+once green. Major bumps get a comment and wait for a human.
+
+If CI itself is broken and you genuinely need to land a fix, turn the rule off
+in Settings → Branches, land it, and turn it back on.
+
 ## The two opt-in suites
 
 Both are deselected by default so CI passes offline and without PyMOL. Run

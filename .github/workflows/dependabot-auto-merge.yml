@@ -1,0 +1,42 @@
+name: Dependabot auto-merge
+
+# Queues Dependabot's patch and minor updates to merge themselves once every
+# required check passes. Major bumps are left for a human, because those are
+# the ones that change behaviour.
+#
+# Auto-merge does not bypass anything: main requires nine green checks and an
+# up-to-date branch, so this only removes the manual click, never the gate.
+
+on: pull_request_target
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-merge:
+    name: Enable auto-merge
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
+    steps:
+      # NB: pull_request_target runs with write access in the base repo's
+      # context. Nothing here checks out the PR's code, which is what makes
+      # that safe — do not add actions/checkout of the head ref.
+      - name: Inspect the update
+        id: metadata
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
+
+      - name: Enable auto-merge for patch and minor updates
+        if: steps.metadata.outputs.update-type != 'version-update:semver-major'
+        run: gh pr merge --auto --rebase "$PR_URL"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Leave major updates for review
+        if: steps.metadata.outputs.update-type == 'version-update:semver-major'
+        run: |
+          gh pr comment "$PR_URL" --body             "Major version bump — not auto-merging. Worth reading the changelog before this lands."
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
