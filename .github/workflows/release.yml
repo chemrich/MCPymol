@@ -1,0 +1,67 @@
+name: Release
+
+# Publishing is driven by tags, not by pushes to main: the tag is the record
+# of what was released, and a PyPI version is immutable once it exists.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build & verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+
+      - name: Build sdist and wheel
+        run: uv build
+
+      # A published version can never be replaced, only superseded by another
+      # release. Tagging v1.5.0 while pyproject still says 1.4.0 would upload
+      # 1.4.0 under a v1.5.0 tag and burn the version number permanently, so
+      # this checks the tag against the artefacts that are about to be
+      # uploaded rather than against the source it was built from.
+      - name: Tag matches built version
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if [ ! -f "dist/mcpymol-${version}.tar.gz" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} implies version ${version}, but that is not what was built. Bump the version in pyproject.toml, or retag. dist/ contains:"
+            ls -1 dist/
+            exit 1
+          fi
+
+      - name: Validate package metadata
+        run: uv run --with twine twine check dist/*
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    # Trusted Publishing (OIDC): PyPI verifies this exact repository, workflow
+    # filename and environment, and hands back a short-lived token. There is
+    # no API token stored in the repo to leak or rotate — but it does mean the
+    # three names below are load-bearing and must match the pending publisher
+    # registered on PyPI. Renaming this file breaks publishing.
+    environment:
+      name: pypi
+      url: https://pypi.org/p/mcpymol
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
