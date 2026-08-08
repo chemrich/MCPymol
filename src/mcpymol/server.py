@@ -316,7 +316,6 @@ __all__ = [
     "_compute_shannon_entropy",
     "_conservation_cache",
     "_distance",
-    "_distance",
     "_download_alphafold",
     "_element_from_name",
     "_fetch_atoms",
