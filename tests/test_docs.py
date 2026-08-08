@@ -31,15 +31,20 @@ SUMMARISED_MODULE = "primitives.py"
 def _env_vars_in_code() -> set[str]:
     return {
         match
-        for path in SRC.glob("*.py")
+        for path in SRC.rglob("*.py")
         for match in re.findall(r"MCPYMOL_[A-Z_]+", path.read_text())
     }
 
 
 def _headline_tools() -> dict[str, str]:
-    """Tool name -> module, for every module except the summarised primitives."""
+    """Tool name -> module, for every module except the summarised primitives.
+
+    Recursive because tools live in subpackages now (``mcpymol.wiggles``), and
+    a glob that stopped at the top level would let a whole family of them ship
+    undocumented — the exact failure this file exists to catch.
+    """
     tools = {}
-    for path in sorted(SRC.glob("*.py")):
+    for path in sorted(SRC.rglob("*.py")):
         if path.name == SUMMARISED_MODULE:
             continue
         for node in ast.parse(path.read_text()).body:

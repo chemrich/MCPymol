@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`mcpymol.wiggles`: ten cryo-EM tools for occupancy, ensembles, maps and local resolution.** `occupancy_view`, `altloc_view`, `ensemble_spread_view`, `morph_states`, `qscore_view`, `restore_bfactors`, `map_info`, `load_map`, `density_view`, `local_resolution_view`. Each exists because a render that looked fine was hiding something, and they share one rule: say what is being shown, and refuse when the picture would be meaningful-looking and wrong. `morph_states` declines to interpolate states that do not share a topology, because a morph across independently reconstructed volumes animates a correspondence nobody established. `local_resolution_view` declines to colour one map by another that does not share its voxel grid, because sampling the resolution field at the wrong coordinates renders smooth, plausible and wrong rather than visibly broken. `load_map` records provenance and never infers it — a measured reconstruction and a network-enhanced one are the same isosurface once drawn, so defaulting to "measured" would assert that somebody observed a generated volume.
+- **Two unit traps closed, both of the kind that yields a wrong answer of the right order of magnitude.** `map_info` computes voxel size as `cella/m`, not `cella/n` — the two differ on any boxed or cropped map — and the nominal figure it reports is itself only accurate to ±5–15%, which at 1.2 Å is a systematic stretch of every distance in the model. `density_view` states its contour level in both σ and absolute units, because PyMOL contours in σ while EMDB publishes absolute levels: EMD-30913's published `0.05` is 3.16 σ, and used directly it contours noise. `local_resolution_view` hits the same trap on a second axis — its ramp breakpoints are converted to σ against the *resolution* map's header, a different scale from the contour level's.
+- **The live suite now builds its own cryo-EM fixtures.** A 16 KB synthesised MRC volume and a minimal wwPDB validation report, both written by the session fixture, so all ten tools are swept against a real PyMOL without a network round trip or a checked-in binary. Nothing was added to `EXCLUDED`.
+
+### Changed
+
+- **`tests/test_docs.py` walks the package recursively.** The glob stopped at the top level, so tools defined in a subpackage would have escaped the checks that every tool is named in the README and in the agent skill — the exact rot this file exists to prevent, and it would have let ten of them through silently.
+- **`tests/test_package_layout.py` covers subpackages.** `mcpymol.wiggles` and `mcpymol.wiggles.tools` are both listed: the first is what the module walk sees, the second is where the tools are defined and so the one the re-export checks have to look at.
+
 ## [1.5.1] - 2026-08-09
 
 Everything v1.5.0 got wrong about installing and upgrading itself, plus two

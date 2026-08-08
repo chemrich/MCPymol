@@ -98,6 +98,43 @@ All take `obj_name`. Each is a one-call scene.
   residues.
 - **3D printing:** `print_ribbon_view` — see below.
 
+## Cryo-EM: occupancy, ensembles and maps
+
+Ten tools for heterogeneity, model quality and volumes. They are opinionated in
+one specific way: **they refuse rather than draw something meaningful-looking
+and wrong.** A refusal here is the tool working, not an error to route around —
+report it and say what differed.
+
+- **Is the atom really there:** `occupancy_view` (per-atom crystallographic `q`;
+  alternates de-emphasised in proportion), `altloc_view` (every alternate at
+  once, occupancies labelled). Note that "occupancy" names two incompatible
+  quantities — `q`, and the fraction of *particles* containing a subunit. These
+  tools report the first only, and never infer the second from it.
+- **Ensembles:** `ensemble_spread_view` (per-residue RMS deviation across
+  states, as colour and putty width — a description of disagreement, not an
+  error bar), `morph_states` (interpolates, but **refuses** states that do not
+  share a topology; `cmd.morph` is Incentive-only, so on open-source PyMOL the
+  check reports and the morph does not happen).
+- **Undo the B-factor overwrite:** `restore_bfactors`. The three views above
+  push their values into the B-factor column so PyMOL can spectrum-colour by
+  them; the originals are stashed first.
+- **Model quality:** `qscore_view(obj_name, validation_path)` — reads
+  per-residue Q-scores out of a wwPDB validation report. No network, no map, no
+  compute. Expect entries before Sept 2023 to have none, and expect some real
+  scores to be negative.
+- **Map geometry:** `map_info(path)` — header only, no PyMOL, no network. Leads
+  with voxel size, which is derived rather than stored and is a classic source
+  of a silently wrong answer.
+- **Volumes:** `load_map(path, name, provenance)` then `density_view(map_obj,
+  selection, level, units)`. **Always pass `units`.** PyMOL contours in σ and
+  EMDB publishes absolute contours; EMD-30913's `0.05` is 3.16 σ, and passing it
+  as a σ level contours noise. Set `provenance` when you know it — it defaults
+  to `unknown` and is deliberately never guessed, because a generated volume and
+  a measured one are the same isosurface once drawn.
+- **Where the map is good:** `local_resolution_view(map_obj, res_obj)` — colours
+  the isosurface by a local-resolution volume. Refuses when the two do not share
+  a voxel grid. Breakpoints are given in Å and reported in both Å and σ.
+
 ## Rendering, movies and sessions
 
 - `render(width, height, ray_trace, filename)` — the one to reach for. Returns

@@ -25,6 +25,15 @@ TOOL_MODULES = [
     "mcpymol.structures",
     "mcpymol.style",
     "mcpymol.views",
+    # mcpymol.wiggles is a subpackage, so it needs both entries. The package
+    # itself is what test_no_module_was_left_behind sees when it walks
+    # mcpymol.__path__ (iter_modules does not descend), and `.tools` is where
+    # the ten tools are actually defined, so it is the one the re-export
+    # checks have to look at. The rest of the subpackage — atoms, maps,
+    # provenance and friends — is pure logic behind those tools and registers
+    # nothing, which is why it is not listed.
+    "mcpymol.wiggles",
+    "mcpymol.wiggles.tools",
 ]
 
 
@@ -91,6 +100,9 @@ def test_no_module_was_left_behind():
     }
     found = {f"mcpymol.{m.name}" for m in pkgutil.iter_modules(mcpymol.__path__)}
     unreferenced = found - set(TOOL_MODULES) - standalone
+    # iter_modules does not descend, so a subpackage is one entry here. Its
+    # internals are covered by the re-export checks on the module that defines
+    # the tools.
     assert not unreferenced, f"module(s) not wired into the server: {sorted(unreferenced)}"
 
 
