@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **README: a Requirements section.** The README never said that PyMOL itself is a prerequisite — the one thing MCPymol cannot install for you — nor which Python version the bridge needs, nor that the two halves must share a machine because several tools hand files between them through the filesystem. Optional per-feature dependencies (APBS, the `print` extra, network access) are now listed in one table instead of being mentioned wherever the feature happens to be described.
+- **README: an Upgrading section.** A failure mode that only exists now that the two halves install separately: the line `--install-plugin` writes into `~/.pymolrc.py` embeds an absolute path into one installation, so on upgrade PyMOL keeps loading the *old* plugin against a new bridge. It presents as a tool that is broken or a fix that did not take, rather than as a stale install. Troubleshooting gains rows for that and its neighbours.
+- **README: the two opt-in test suites.** `pytest -m live` and `pytest -m network` were undocumented despite being the safety net for everything the mocked suite structurally cannot see, including the warning that `-m live` clears the PyMOL session it connects to.
+
+### Fixed
+
+- **The README documented two flags that do the opposite of what it said.** `render` was described as taking `ray_trace=False` for "a fast unshaded snapshot", and `turntable` as defaulting to "the fast OpenGL renderer". Both paths were disabled in v1.4.0 — PyMOL's OpenGL frame grab needs its GUI thread, which the plugin does not run on, and it silently wrote blank images — and `rendering.py` forces ray-tracing back on in both tools. The flags are still accepted, and now documented as ignored with a note in the reply, which is the point: the alternative was handing back a blank PNG.
+- **`assets/pharmacophore_view.png` was referenced but never committed**, so it rendered as a broken image on GitHub — the only one of twenty image references that did not resolve. Generated through the tools, as the other figures were.
+- **Stale counts.** 87 primitives and 121 tools, not "~85" and 120; 555 tests by default plus 122 opt-in, not 469. Re-derived from the registered tool list and a test collection rather than counted by hand. The module layout table was missing `analysis.py`, `pdbtext.py`, `style.py` and `cli.py`, which have existed since the v1.3.0 split and v1.4.0.
+- The test command no longer sets `PYTHONPATH=src`, which `pyproject.toml`'s `pythonpath` setting has made redundant.
+
 ## [1.5.0] - 2026-08-08
 
 The first release published to PyPI. Every install path used to begin with
