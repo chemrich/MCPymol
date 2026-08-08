@@ -479,7 +479,10 @@ __all__ = [
 
 
 def main():
-    mcp.run()
+    """Console-script entry point; delegates to the CLI in mcpymol.cli."""
+    from mcpymol.cli import main as cli_main
+
+    cli_main()
 
 
 if __name__ == "__main__":

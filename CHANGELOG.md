@@ -5,6 +5,11 @@ All notable changes to MCPymol will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **`mcpymol --install-plugin`**, which adds the plugin to `~/.pymolrc.py` so PyMOL loads it on startup, plus `--plugin-path` and `--uninstall-plugin`. The plugin runs inside PyMOL, whose Python is a separate interpreter that cannot import this package, so it has to be loaded from a file path — and finding that path inside a pip or `uvx` installation is unpleasant. The block is delimited and rewritten in place rather than appended, because the path it embeds points into one installation and goes stale on upgrade; re-running the command is the fix. Existing `.pymolrc.py` content is preserved, and uninstall removes only the managed block.
+
 ## [1.4.0] - 2026-08-08
 
 MCPymol could make pictures but could not answer questions with numbers, and
