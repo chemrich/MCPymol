@@ -14,9 +14,9 @@ PyMOL is great, but its syntax is famously obscure — and despite the name, it 
 
 - **A vocabulary the LLM understands.** Tools like `fetch_structure`, `ligand_view`, `interface_view`, `mutation_view`, `conservation_view` do high-level setup in one call: pick the biological assembly, hide solvent, color sensibly, label the right residues, draw the right H-bonds.
 - **Renders the model can see.** `render` ray-traces and hands the image straight back, so the assistant can look at what it made and fix it — rather than writing a PNG it has no way to inspect.
-- **~85 PyMOL primitives** exposed as individual tools (`show`, `hide`, `color`, `select`, `distance`, `align`, `spectrum`, …) so the model can compose finer motions when the high-level tools don't quite fit. 120 tools in total, every parameter documented in the tool schema.
+- **87 PyMOL primitives** exposed as individual tools (`show`, `hide`, `color`, `select`, `distance`, `align`, `spectrum`, …) so the model can compose finer motions when the high-level tools don't quite fit. 121 tools in total, every parameter documented in the tool schema. When even that runs out, `execute_pymol_command` passes a raw PyMOL command straight through.
 - **Predicted structures.** A UniProt accession fetches from AlphaFold DB and colors by pLDDT confidence in the official palette — via `fetch_structure` or `fetch_alphafold` directly.
-- **Scene introspection.** `list_objects`, `list_chains`, `list_ligands` and `structure_info` let the model check what's actually loaded before guessing, and `count_atoms` catches a selection that matches nothing — otherwise invisible until the render comes out blank.
+- **Scene introspection.** `list_objects`, `list_chains`, `list_ligands` and `structure_info` let the model check what's actually loaded before guessing, `count_atoms` catches a selection that matches nothing — otherwise invisible until the render comes out blank — and `atom_properties` reaches occupancy and altlocs that no per-residue view can show.
 - **Your own files too.** `load_structure` opens a local PDB/mmCIF — a model you built, a docking pose, an MD frame — through the same prep and styling as a fetched entry.
 - **Smart structure prep.** Fetching a PDB code grabs the biological assembly when one exists, then runs a BFS heuristic over chain–chain contacts (`multimer_cutoff`, default 8 Å) so sprawling functional multimers like the CRP pentamer or ferritin cage stay whole while crystallographic copies get dropped. Waters and crystallization additives are hidden automatically.
 - **Two-process bridge.** PyMOL's GUI has its own Python; MCPymol works by running a tiny TCP listener *inside* PyMOL plus a separate FastMCP server *outside* it.
@@ -24,13 +24,15 @@ PyMOL is great, but its syntax is famously obscure — and despite the name, it 
 ## How it talks
 
 ```
-┌──────────────┐   MCP / stdio    ┌────────────────┐   JSON over    ┌──────────────┐
-│ Claude /     │ ───────────────▶ │ mcpymol server │ ◀── TCP :9876 ─▶ │ PyMOL GUI    │
-│ Gemini CLI   │                  │  (FastMCP)     │                │  (plugin.py) │
-└──────────────┘                  └────────────────┘                └──────────────┘
+┌──────────────┐   MCP / stdio    ┌────────────────┐  JSON over TCP  ┌──────────────┐
+│ Claude /     │ ───────────────▶ │ mcpymol server │ ◀────:9876────▶ │ PyMOL GUI    │
+│ Gemini CLI   │                  │   (FastMCP)    │                 │  (plugin.py) │
+└──────────────┘                  └────────────────┘                 └──────────────┘
 ```
 
-The plugin half runs inside PyMOL and dispatches to `pymol.cmd`. The bridge half is what the MCP client launches.
+The plugin half runs inside PyMOL and dispatches to `pymol.cmd`. The bridge half is what the MCP client launches. They talk over a local TCP socket because PyMOL's GUI ships its own Python interpreter, which cannot import the packages the MCP server needs — so the two halves cannot live in one process.
+
+Both halves must run on the **same machine**: several tools hand files between them through the filesystem.
 
 ## Try it
 
@@ -71,6 +73,21 @@ you Asp30 makes a salt bridge at 2.7 Å; `ligand_view` then shows you where it
 sits. Asking only for the picture gets you a picture you have to interpret
 yourself.
 
+
+## Requirements
+
+- **PyMOL** — the open-source build is what this is developed against (`brew install pymol` on macOS, `apt-get install pymol` on Debian/Ubuntu). The Schrödinger incentive build works too. MCPymol drives a PyMOL you already have; it does not install or bundle one.
+- **Python 3.10+** for the bridge. This is *separate* from the Python inside PyMOL, which MCPymol never imports into.
+- **An MCP client** — Claude Code, Claude Desktop, or Gemini CLI.
+
+Optional, per feature:
+
+| For | You also need |
+| --- | --- |
+| `poisson_boltzmann_view` | `apbs` and `pdb2pqr` on `PATH` |
+| `print_export`, `print_ribbon_view` | the `print` extra (`pip install 'mcpymol[print]'`) |
+| `conservation_view` | network access to an MMseqs2 server (ColabFold's public API by default) |
+| `fetch_structure`, `structure_info` | network access to the RCSB |
 
 ## Installation
 
@@ -190,6 +207,24 @@ gemini mcp add mcpymol ~/.venvs/mcpymol/bin/mcpymol
 
 If your network blocks PyPI, install from your internal mirror with `pip install --index-url ...`.
 
+### Upgrading
+
+```bash
+uv tool upgrade mcpymol
+mcpymol --install-plugin   # don't skip this
+```
+
+**Both halves have to move together.** The line that `--install-plugin` writes
+into `~/.pymolrc.py` embeds an absolute path into one installation, and that
+path goes stale on upgrade — so PyMOL keeps loading the *old* plugin while the
+bridge is new. Re-running rewrites the managed block in place rather than
+appending a second one. Then restart PyMOL, and reconnect the MCP server in
+your client so it picks up the new bridge (`/mcp` in Claude Code).
+
+A mismatched pair fails in a way that reads like a bug in a tool rather than a
+stale install: calls that should work report unknown actions, or a tool fixed
+in the release you just installed keeps misbehaving.
+
 ### Working on MCPymol itself
 
 For development, clone the repo and run from the checkout — this is the only
@@ -243,14 +278,34 @@ MCPYMOL_PORT=9867 mcpymol             # bridge
 | `fetch_structure`/`fetch_alphafold` says *"No AlphaFold model"* | The accession is valid but AlphaFold DB has no model at that version | Try another `model_version`, or check the accession |
 | A view comes out blank | The selection matched no atoms | `count_atoms` on the selection before building the scene |
 | A long operation returns *"Socket connection failed: timed out"* | Something slower than its budget | Raise `MCPYMOL_SLOW_OP_TIMEOUT` (renders, saves) or `MCPYMOL_PB_TIMEOUT` (APBS) |
+| A tool reports an unknown action, or a bug you just upgraded past is still there | The plugin in PyMOL is from an older install than the bridge — the path in `~/.pymolrc.py` went stale on upgrade | `mcpymol --install-plugin`, restart PyMOL, then reconnect the server in your client (`/mcp` in Claude Code) — see [Upgrading](#upgrading) |
+| New tools don't show up after an upgrade | The MCP client is still running the previous bridge process | Reconnect the server in your client, or start a new session |
+| A fetch reports success but nothing is loaded | Pre-v1.4.0 behaviour: `cmd.fetch` doesn't raise on a failed download | Upgrade — fetches now verify atoms arrived and say so plainly, and no longer clear the session on failure |
+| `render` says the image is *"a single flat colour"* | The camera is pointed at nothing, or the session is wedged after heavy use | `zoom` on the object, or restart PyMOL if `zoom` stops responding |
 
 ## Tests
 
 ```bash
-PYTHONPATH=src uv run pytest tests/
+uv run pytest
 ```
 
-The suite mocks the socket layer and PyMOL's `cmd` module, so it runs without a PyMOL install. 469 tests cover the socket payloads, the bridge framing, the conservation pipeline (A3M parsing, Shannon entropy, MMseqs2 mocking, MSA→B-factor mapping), the mesh-repair paths, and every view. `tests/test_bridge_roundtrip.py` additionally runs the real bridge against the real plugin listener over TCP on an ephemeral port, so the wire format is checked against itself rather than against a mock.
+555 tests run by default. They mock the socket layer and PyMOL's `cmd` module, so they need neither PyMOL nor a network, and cover the socket payloads, the bridge framing, the conservation pipeline (A3M parsing, Shannon entropy, MMseqs2 mocking, MSA→B-factor mapping), the mesh-repair paths, and every view. `tests/test_bridge_roundtrip.py` additionally runs the real bridge against the real plugin listener over TCP on an ephemeral port, so the wire format is checked against itself rather than against a mock.
+
+### The two opt-in suites
+
+A further 122 tests are **deselected by default**, because they need things CI does not have. Both are worth running before a release tag:
+
+```bash
+uv run pytest -m live      # needs a running PyMOL with the plugin loaded
+uv run pytest -m network   # hits real external APIs
+```
+
+> **`-m live` clears the PyMOL session it connects to.** It drives your actual
+> PyMOL. Don't run it against a session you care about.
+
+`-m live` exists because a mocked suite asserts the payload we *send*, which can never tell you whether PyMOL will accept it — and that gap is where every wiring bug has lived: tools calling `cmd` functions that don't exist, arguments bound in the wrong order, renders that come back blank. It calls every registered tool once and asserts only that each is *wired* (the action resolves, the arguments bind), not that it succeeds, since many tools error honestly without the right context. New tools are swept automatically. It skips cleanly when no PyMOL is listening, and detects a wedged session rather than reporting a hundred confusing failures.
+
+Treat a green default run as necessary, not sufficient.
 
 ### Layout
 
@@ -261,10 +316,14 @@ The suite mocks the socket layer and PyMOL's `cmd` module, so it runs without a 
 | `mcpymol/structures.py` | fetching/loading structures, sessions, introspection |
 | `mcpymol/primitives.py` | one thin tool per `pymol.cmd` function |
 | `mcpymol/views.py` | the `*_view` scene presets |
+| `mcpymol/style.py` | scene conventions shared across the presets |
 | `mcpymol/rendering.py` | `render`, `turntable` |
 | `mcpymol/comparison.py` | `superposition_view` |
 | `mcpymol/conservation.py` | MSA + Shannon entropy |
+| `mcpymol/analysis.py` | `contact_report`, `interface_report` |
+| `mcpymol/pdbtext.py` | parsing the PDB records PyMOL hands back as text |
 | `mcpymol/printing.py` | watertight STL export |
+| `mcpymol/cli.py` | `--install-plugin`, `--plugin-path`, `--uninstall-plugin` |
 | `mcpymol/plugin.py` | the half that runs *inside* PyMOL |
 
 `mcpymol/server.py` is the entry point and re-exports everything, so `from mcpymol.server import ligand_view` still works.
@@ -559,11 +618,15 @@ usually different residues) and **chain breaks** where loops went unmodelled.
 
 Ray-traces the current scene and returns the image as MCP image content, so the model can actually look at it and iterate. This is the tool to use instead of `ray` + `png`, which only leave a file behind.
 
-Defaults to 1000×750 — the image is inlined into the conversation, and base64 inflates it by a third. Above 5 MB (`MCPYMOL_MAX_IMAGE_BYTES`) it returns the path instead. `ray_trace=False` gives a fast unshaded snapshot for checking a selection or camera angle.
+Defaults to 1000×750 — the image is inlined into the conversation, and base64 inflates it by a third. Above 5 MB (`MCPYMOL_MAX_IMAGE_BYTES`) it returns the path instead.
+
+Every render is ray-traced, and `ray_trace=False` does **not** change that: PyMOL's fast unshaded frame grab needs its GUI thread, which the plugin does not run on, so that path wrote blank images. The flag is accepted and ignored, with a note in the reply, rather than silently handing back a blank PNG. To make a render cheaper, ask for a smaller `width`/`height`. `render` also detects the two ways an image comes back empty — a single flat colour, or nothing written at all — and says so instead of returning a black square.
 
 ### `turntable` — 360° animation
 
-Writes a numbered PNG sequence spinning the camera a full turn, plus the `ffmpeg` command to assemble it. Defaults to the fast OpenGL renderer; ray-tracing 36 frames of a large assembly can take an hour.
+Writes a numbered PNG sequence spinning the camera a full turn, plus the `ffmpeg` command to assemble it. Defaults to 36 frames (10° apart) at 800×600.
+
+Every frame is ray-traced, for the same reason `render` is — the unshaded OpenGL path silently produced blank frames over this bridge. That makes it slow: 36 frames of a large assembly can take an hour, so start with a low `frames` count and a small `width`/`height` before committing to a long run.
 
 > Make me a turntable animation of 1AOI
 
@@ -585,9 +648,12 @@ This tool needs the optional `print` extra (trimesh, pymeshlab, scipy,
 scikit-image, networkx):
 
 ```bash
-uv tool install 'mcpymol[print]'  # installed
-uv sync --extra print             # from a MCPymol checkout
+uv tool install 'mcpymol[print]'   # installed from PyPI
+uv sync --extra print              # from a MCPymol checkout
 ```
+
+If you already installed MCPymol without it, re-running the command above adds
+the extra to the existing install; follow it with `mcpymol --install-plugin`.
 
 ```
 Export T7 RNA polymerase (1MSW) for 3D printing with the protein and the
