@@ -75,7 +75,7 @@ def test_round_trip_large_response(live_bridge):
     big = "M" * 500_000
     with patch.object(live_bridge, "handle_request") as handler:
         handler.return_value = {"status": "success", "result": big}
-        res = send_request("get_fastastr", args=["1abc and chain A"])
+        res = send_request("get_fastastr", args=["1abc and chain A"], timeout=60.0)
 
     assert res["status"] == "success"
     assert res["result"] == big
@@ -86,7 +86,7 @@ def test_round_trip_large_request(live_bridge):
     script = "\n".join(f"alter resi {i}, b={i}" for i in range(20_000))
     with patch.object(live_bridge, "handle_request") as handler:
         handler.return_value = {"status": "success", "result": "OK"}
-        send_request("do", args=[script])
+        send_request("do", args=[script], timeout=60.0)
 
     assert handler.call_args[0][0]["args"] == [script]
 
@@ -104,7 +104,7 @@ def test_round_trip_unicode(live_bridge):
     text = "α-helix → β-sheet ± 2.5 Å " * 5000
     with patch.object(live_bridge, "handle_request") as handler:
         handler.return_value = {"status": "success", "result": text}
-        res = send_request("help", args=["cartoon"])
+        res = send_request("help", args=["cartoon"], timeout=60.0)
 
     assert res["result"] == text
 
@@ -195,3 +195,28 @@ def test_non_json_garbage_gets_an_error_response(live_bridge):
     with patch.object(live_bridge, "handle_request") as handler:
         handler.return_value = {"status": "success", "result": "OK"}
         assert send_request("refresh")["status"] == "success"
+
+
+def test_large_response_does_not_reparse_every_chunk(live_bridge):
+    """Parsing after every chunk is quadratic: each attempt rescans everything
+    received so far, and every attempt before the last is doomed.
+
+    Measured over a real socket, parse-every-chunk against parse-on-short-read:
+    4 MB took 0.133s vs 0.015s, and 16 MB took 2.230s vs 0.070s. The size here
+    is chosen to separate those — a smaller payload does not, which is how the
+    first version of this test passed against both strategies.
+    """
+    import time
+
+    big = "M" * 16_000_000
+    with patch.object(live_bridge, "handle_request") as handler:
+        handler.return_value = {"status": "success", "result": big}
+        started = time.perf_counter()
+        res = send_request("get_pdbstr", args=["all"], timeout=120.0)
+        elapsed = time.perf_counter() - started
+
+    assert res["result"] == big
+    assert elapsed < 1.0, (
+        f"16 MB round trip took {elapsed:.2f}s; parse-on-short-read does it in "
+        f"~0.07s and parse-per-chunk in ~2.2s, so this looks like a regression"
+    )

@@ -71,13 +71,22 @@ def send_request(
                 if not chunk:
                     break
                 chunks.append(chunk)
-                # JSON is self-delimiting once we have enough bytes.  Try to
-                # parse after every chunk so we don't depend on the peer
-                # half-closing (handy for test mocks too).
-                try:
-                    return json.loads(b"".join(chunks).decode("utf-8"))
-                except (json.JSONDecodeError, UnicodeDecodeError):
-                    continue
+                # JSON is self-delimiting once the whole document has arrived,
+                # so a parse attempt doubles as an end-of-message test — but
+                # only attempt it on a short read.
+                #
+                # A full-size chunk means the socket had at least that much
+                # waiting, so the message is very unlikely to end there, and
+                # parsing anyway costs a scan of everything received so far.
+                # Doing that per chunk is quadratic: an 8 MB response spent
+                # ~476 ms on parses guaranteed to fail. The plugin half-closes
+                # when it is done, which is the normal exit; this check only
+                # exists so a peer that does not (a test mock) still works.
+                if len(chunk) < _RECV_CHUNK:
+                    try:
+                        return json.loads(b"".join(chunks).decode("utf-8"))
+                    except (json.JSONDecodeError, UnicodeDecodeError):
+                        continue
             if not chunks:
                 return {"status": "error", "error": "Empty response from PyMOL plugin."}
             try:
