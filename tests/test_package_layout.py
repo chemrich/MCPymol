@@ -141,3 +141,19 @@ def test_descriptions_are_substantive():
     ]
 
     assert not thin, f"parameters with a too-short description: {thin}"
+
+
+def test_all_has_no_duplicates():
+    """A name listed twice is a merge artefact, not an export.
+
+    Found by a ruff upgrade (RUF068) riding in on a Dependabot PR, after four
+    rounds of hand-editing this list. Kept as a test rather than left to the
+    linter because the pinned ruff does not have that rule yet, and ordering is
+    left to ruff's own RUF022.
+    """
+    import collections
+
+    counts = collections.Counter(server.__all__)
+    duplicated = sorted(name for name, n in counts.items() if n > 1)
+
+    assert not duplicated, f"__all__ lists these more than once: {duplicated}"
