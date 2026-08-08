@@ -10,11 +10,51 @@ permissions:
   contents: read
 
 jobs:
-  build:
-    name: Build & verify
+  # ci.yml runs on push-to-main and pull_request, neither of which a tag push
+  # matches — so without this the only thing standing between `git tag` and an
+  # immutable PyPI upload is `twine check`, which validates metadata and
+  # nothing about whether the code works. A tag can point at any commit
+  # (an amended one, a branch tip, a merge whose checks went red later), so
+  # the gate has to run against the tagged ref itself rather than trust that
+  # some earlier run covered it.
+  verify:
+    name: Tests (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+      - name: Install dependencies
+        run: uv sync --locked --all-groups
+      - name: Run pytest
+        run: uv run pytest tests/ -v
+
+  lint:
+    name: Lint & type check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+      - run: uv sync --locked --all-groups --extra print
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy
+
+  build:
+    name: Build & verify
+    needs: [verify, lint]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           enable-cache: true
