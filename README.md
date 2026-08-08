@@ -4,7 +4,7 @@
 [![Python](https://img.shields.io/pypi/pyversions/mcpymol)](https://pypi.org/project/mcpymol/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-![Nucleosome core particle (1AOI) rendered in MCPymol's ghost-heart style](assets/nucleosome.png)
+![Nucleosome core particle (1AOI) rendered in MCPymol's ghost-heart style](https://raw.githubusercontent.com/chemrich/MCPymol/main/assets/nucleosome.png)
 
 **MCPymol** is a [Model Context Protocol](https://modelcontextprotocol.io/) server that lets you drive PyMOL with natural language. Load structures, set up analytical views, measure things, and explore proteins by talking to Claude or Gemini. The image above was made by typing *"show me a nucleosome"* into Claude Code. That was the whole prompt.
 
@@ -85,7 +85,7 @@ Optional, per feature:
 | For | You also need |
 | --- | --- |
 | `poisson_boltzmann_view` | `apbs` and `pdb2pqr` on `PATH` |
-| `print_export`, `print_ribbon_view` | the `print` extra (`pip install 'mcpymol[print]'`) |
+| `print_export`, `print_ribbon_view` | the `print` extra — install it the way you installed MCPymol, e.g. `uv tool install 'mcpymol[print]'` (see [3D Printing Export](#-3d-printing-export)) |
 | `conservation_view` | network access to an MMseqs2 server (ColabFold's public API by default) |
 | `fetch_structure`, `structure_info` | network access to the RCSB |
 
@@ -99,9 +99,20 @@ There are two halves to wire up: the **native plugin** (runs inside PyMOL) and t
 uv tool install mcpymol
 ```
 
-Or `pipx install mcpymol`, or `pip install mcpymol` into a virtualenv — any of
-them puts an `mcpymol` command on your PATH. There is no need to clone the
+`pipx install mcpymol` works the same way. There is no need to clone the
 repository unless you intend to work on MCPymol itself.
+
+Check it landed somewhere your shell can see:
+
+```bash
+which mcpymol      # if this prints nothing, run: uv tool update-shell
+```
+
+**Note the full path it prints** — you will want it in step 3. `uv` and `pipx`
+install into `~/.local/bin`, which is not on everyone's PATH, and an MCP client
+started by the OS rather than from your shell does not inherit your PATH at
+all. Wiring the assistant to a bare `mcpymol` when it is not on PATH fails at
+launch with `spawn mcpymol ENOENT`, not at install time.
 
 > **Why not `uvx mcpymol`?** `uvx` runs the bridge perfectly well, but it is
 > the wrong tool for step 2: it unpacks the package into `~/.cache/uv`, and
@@ -140,13 +151,14 @@ the bridge — see [Configuration](#configuration).
 
 ### 3. Register the bridge with your AI assistant
 
-Pick one. The command is just `mcpymol` — the same installation the plugin came
-from.
+Pick one. Use the **full path** from `which mcpymol` — it is the same
+installation the plugin came from, and a bare `mcpymol` only works if that
+directory is on the PATH of whatever launches the client.
 
 #### Claude Code CLI
 
 ```bash
-claude mcp add mcpymol -- mcpymol
+claude mcp add mcpymol -- "$(which mcpymol)"
 ```
 
 Start a new Claude Code session.
@@ -165,29 +177,38 @@ Add to `claude_desktop_config.json`:
 }
 ```
 
-Run `which mcpymol` to get that path, and use it in full. Claude Desktop is
-launched by the OS rather than from your shell, so it does not inherit your
-PATH and will not find a bare `mcpymol`. Restart Claude Desktop afterwards.
+The absolute path is not optional here: Claude Desktop is launched by the OS
+rather than from your shell, so it never inherits your PATH. Restart Claude
+Desktop afterwards.
 
 #### Gemini CLI
 
 ```bash
-gemini mcp add mcpymol mcpymol
+gemini mcp add mcpymol "$(which mcpymol)"
 gemini mcp refresh
 ```
 
 #### Without installing — `uvx`
 
 To run the bridge without installing anything, point your assistant at
-`uvx mcpymol` instead:
+`uvx mcpymol`:
 
 ```bash
 claude mcp add mcpymol -- uvx mcpymol
 ```
 
-The plugin in step 2 still needs a real installation, and `uvx` resolves the
-newest release each time, so the two halves can end up on different versions.
-Prefer this only if you are not installing MCPymol at all.
+**You still need the plugin**, and step 2's command is not available to you —
+nothing was installed. Run it through `uvx` instead:
+
+```bash
+uvx mcpymol --install-plugin
+```
+
+That writes a path into `~/.cache/uv` (see the note in step 1), so `uv cache
+clean` or a `uvx` upgrade will break it and you will have to re-run it. `uvx`
+also resolves the newest release on each launch, so the bridge can drift ahead
+of the plugin. This path trades a permanent install for maintenance; if that
+sounds worse than installing, install.
 
 #### Restricted environments — no `uv`
 
@@ -209,20 +230,24 @@ If your network blocks PyPI, install from your internal mirror with `pip install
 
 ### Upgrading
 
-```bash
-uv tool upgrade mcpymol
-mcpymol --install-plugin   # don't skip this
-```
+Upgrade the way you installed — `uv tool upgrade mcpymol`, `pipx upgrade
+mcpymol`, or `<venv>/bin/pip install --upgrade mcpymol`. Then **restart
+PyMOL** and reconnect the MCP server in your client (`/mcp` in Claude Code).
 
-**Both halves have to move together.** The line that `--install-plugin` writes
-into `~/.pymolrc.py` embeds an absolute path into one installation, and that
-path goes stale on upgrade — so PyMOL keeps loading the *old* plugin while the
-bridge is new. Re-running rewrites the managed block in place rather than
-appending a second one. Then restart PyMOL, and reconnect the MCP server in
-your client so it picks up the new bridge (`/mcp` in Claude Code).
+**Both halves have to move together, and neither moves on its own.** The
+plugin is loaded into PyMOL's memory at startup, and the bridge is a process
+your MCP client launched — upgrading the package on disk changes neither until
+each is restarted. PyMOL will happily keep running the plugin it loaded days
+ago against a freshly upgraded bridge.
+
+You do *not* normally need to re-run `--install-plugin`: `uv tool`, `pipx` and
+a venv all upgrade the package in place, so the path in `~/.pymolrc.py` still
+points at the right file. Re-run it if you *move* the installation — switching
+install method, rebuilding the venv, or using the `uvx` path, whose cache
+directory does change.
 
 A mismatched pair fails in a way that reads like a bug in a tool rather than a
-stale install: calls that should work report unknown actions, or a tool fixed
+stale process: calls that should work report unknown actions, or a tool fixed
 in the release you just installed keeps misbehaving.
 
 ### Working on MCPymol itself
@@ -270,7 +295,7 @@ MCPYMOL_PORT=9867 mcpymol             # bridge
 | --- | --- | --- |
 | Every tool returns *"Socket connection failed. Is the PyMOL plugin running?"* | Plugin not loaded in PyMOL | `run /path/to/plugin.py` inside PyMOL, or add it to `~/.pymolrc.py` |
 | *"Address already in use"* on plugin start | A previous PyMOL session left the port open, or another app uses 9876 | Quit lingering PyMOL processes, or set `MCPYMOL_PORT=9867` on both sides |
-| Long `get_fastastr` / `get_chains` calls fail with a JSON parse error | You're on a pre-2026-05 version of MCPymol that capped recv() at 8 KB | Upgrade (`uv tool upgrade mcpymol`) — the bridge now drains the response in full |
+| Long `get_fastastr` / `get_chains` calls fail with a JSON parse error | You're on a pre-2026-05 version of MCPymol that capped recv() at 8 KB | [Upgrade](#upgrading) — the bridge now drains the response in full |
 | `conservation_view` is slow | First call hits the ColabFold MMseqs2 API (30 s–few min); subsequent calls for the same sequence hit a local cache | If you have an internal MMseqs2 server, set `MCPYMOL_MMSEQS_URL` |
 | `poisson_boltzmann_view` fails | `apbs` or `pdb2pqr` missing | `brew install brewsci/bio/apbs` and `pip install pdb2pqr` |
 | A tool reports a file *"did not appear"* | PyMOL and the bridge are on different machines — they exchange files through the filesystem | Run both on the same host |
@@ -278,7 +303,7 @@ MCPYMOL_PORT=9867 mcpymol             # bridge
 | `fetch_structure`/`fetch_alphafold` says *"No AlphaFold model"* | The accession is valid but AlphaFold DB has no model at that version | Try another `model_version`, or check the accession |
 | A view comes out blank | The selection matched no atoms | `count_atoms` on the selection before building the scene |
 | A long operation returns *"Socket connection failed: timed out"* | Something slower than its budget | Raise `MCPYMOL_SLOW_OP_TIMEOUT` (renders, saves) or `MCPYMOL_PB_TIMEOUT` (APBS) |
-| A tool reports an unknown action, or a bug you just upgraded past is still there | The plugin in PyMOL is from an older install than the bridge — the path in `~/.pymolrc.py` went stale on upgrade | `mcpymol --install-plugin`, restart PyMOL, then reconnect the server in your client (`/mcp` in Claude Code) — see [Upgrading](#upgrading) |
+| A tool reports an unknown action, or a bug you just upgraded past is still there | PyMOL is still running the plugin it loaded at startup, from before the upgrade | Restart PyMOL, then reconnect the server in your client (`/mcp` in Claude Code) — see [Upgrading](#upgrading) |
 | New tools don't show up after an upgrade | The MCP client is still running the previous bridge process | Reconnect the server in your client, or start a new session |
 | A fetch reports success but nothing is loaded | Pre-v1.4.0 behaviour: `cmd.fetch` doesn't raise on a failed download | Upgrade — fetches now verify atoms arrived and say so plainly, and no longer clear the session on failure |
 | `render` says the image is *"a single flat colour"* | The camera is pointed at nothing, or the session is wedged after heavy use | `zoom` on the object, or restart PyMOL if `zoom` stops responding |
@@ -338,7 +363,7 @@ Pocket residues (within 5 Å of the ligand) as element-colored sticks with CA la
 
 > Show me the ATP binding site in 1ATP
 
-![Ligand view of ATP in cAMP-dependent kinase (1ATP)](assets/ligand_view.png)
+![Ligand view of ATP in cAMP-dependent kinase (1ATP)](https://raw.githubusercontent.com/chemrich/MCPymol/main/assets/ligand_view.png)
 
 ### `interface_view` — protein–protein interface
 
@@ -346,7 +371,7 @@ Chain A marine, chain B salmon. Interface residues (within 4 Å of the partner) 
 
 > Show the interface between chain A and chain D in 1BRS
 
-![Interface view of barnase–barstar complex (1BRS)](assets/interface_view.png)
+![Interface view of barnase–barstar complex (1BRS)](https://raw.githubusercontent.com/chemrich/MCPymol/main/assets/interface_view.png)
 
 ### `putty_view` — B-factor flexibility
 
@@ -354,7 +379,7 @@ Tube radius *and* color scale with B-factor: blue/thin = rigid, red/thick = flex
 
 > Show the B-factor flexibility of 1UBQ as a putty view
 
-![Putty view of ubiquitin (1UBQ)](assets/putty_view.png)
+![Putty view of ubiquitin (1UBQ)](https://raw.githubusercontent.com/chemrich/MCPymol/main/assets/putty_view.png)
 
 ### `bfactor_view` — B-factor flexibility, plain cartoon
 
@@ -368,7 +393,7 @@ Surface colored by amino-acid chemistry: orange = hydrophobic, white = polar, sk
 
 > Show the hydrophobic surface of 1TCA
 
-![Hydrophobic surface view of *Candida antarctica* Lipase B (1TCA)](assets/hydrophobic_surface_view.png)
+![Hydrophobic surface view of *Candida antarctica* Lipase B (1TCA)](https://raw.githubusercontent.com/chemrich/MCPymol/main/assets/hydrophobic_surface_view.png)
 
 ### `electrostatic_view` — approximate electrostatics
 
@@ -376,7 +401,7 @@ Red→white→blue surface coloring driven by per-residue pKa-weighted partial c
 
 > Show the electrostatic surface of 1LYZ
 
-![Electrostatic view of lysozyme (1LYZ)](assets/electrostatic_view.png)
+![Electrostatic view of lysozyme (1LYZ)](https://raw.githubusercontent.com/chemrich/MCPymol/main/assets/electrostatic_view.png)
 
 ### `poisson_boltzmann_view` — true PB electrostatics
 
@@ -390,7 +415,7 @@ Full Poisson-Boltzmann potential via [APBS](https://github.com/Electrostatics/ap
 
 > Run a Poisson-Boltzmann electrostatics calculation on 1LYZ
 
-![Poisson-Boltzmann electrostatic surface of lysozyme (1LYZ)](assets/poisson_boltzmann_view.png)
+![Poisson-Boltzmann electrostatic surface of lysozyme (1LYZ)](https://raw.githubusercontent.com/chemrich/MCPymol/main/assets/poisson_boltzmann_view.png)
 
 ### `conservation_view` — evolutionary conservation
 
@@ -400,7 +425,7 @@ Magenta = conserved, white = moderate, cyan = variable. First call takes 30 s �
 
 > Color lysozyme (1LYZ) by conservation
 
-![Lysozyme (1LYZ) coloured by evolutionary conservation from a 5,507-sequence alignment](assets/conservation_view.png)
+![Lysozyme (1LYZ) coloured by evolutionary conservation from a 5,507-sequence alignment](https://raw.githubusercontent.com/chemrich/MCPymol/main/assets/conservation_view.png)
 
 Lysozyme against 5,507 homologues. The variable surface loops go cyan while the
 core and the substrate-binding cleft stay magenta — conservation tracking
@@ -412,7 +437,7 @@ CYS sidechains and disulfide bonds in yellow, metal coordination bonds in orange
 
 > Show the disulfide bonds in 1CEL
 
-![Crosslink view of cellulase (1CEL)](assets/crosslink_view.png)
+![Crosslink view of cellulase (1CEL)](https://raw.githubusercontent.com/chemrich/MCPymol/main/assets/crosslink_view.png)
 
 ### `pocket_view` — binding pocket surface
 
@@ -420,7 +445,7 @@ The pocket cavity (residues within 5 Å of the ligand) as a semi-transparent sur
 
 > Show the binding pocket around MK1 in 1HSG
 
-![Pocket view of MK1 binding site in HIV-1 protease (1HSG)](assets/pocket_view.png)
+![Pocket view of MK1 binding site in HIV-1 protease (1HSG)](https://raw.githubusercontent.com/chemrich/MCPymol/main/assets/pocket_view.png)
 
 ### `pharmacophore_view` — ligand pharmacophore features
 
@@ -428,7 +453,7 @@ The ligand colored by pharmacophore type: violet = aromatic ring carbon, yellow 
 
 > Show the pharmacophore features of MK1 in 1HSG
 
-![Pharmacophore view of MK1 in HIV-1 protease (1HSG)](assets/pharmacophore_view.png)
+![Pharmacophore view of MK1 in HIV-1 protease (1HSG)](https://raw.githubusercontent.com/chemrich/MCPymol/main/assets/pharmacophore_view.png)
 
 ### `mutation_view` — mutation hotspots
 
@@ -436,7 +461,7 @@ Grey cartoon, mutated sidechains as magenta sticks with white CA labels, neighbo
 
 > Highlight mutations E6V, K16E, and V67F in hemoglobin (4HHB)
 
-![Mutation view of hemoglobin (4HHB) showing E6V, K16E, V67F](assets/mutation_view.png)
+![Mutation view of hemoglobin (4HHB) showing E6V, K16E, V67F](https://raw.githubusercontent.com/chemrich/MCPymol/main/assets/mutation_view.png)
 
 ### `textbook_view` — cel-shaded illustration
 
@@ -444,7 +469,7 @@ White cartoon + surface with heavy ray-trace contours. The cel-shaded look kicks
 
 > Make 4HHB look like a textbook illustration
 
-![Haemoglobin (4HHB) rendered in the cel-shaded textbook style](assets/textbook_view.png)
+![Haemoglobin (4HHB) rendered in the cel-shaded textbook style](https://raw.githubusercontent.com/chemrich/MCPymol/main/assets/textbook_view.png)
 
 ### `cinematic_view` — fog and shadows
 
@@ -452,7 +477,7 @@ Depth-cueing + fog + soft shadows on a black background. Best on big assemblies 
 
 > Give me a cinematic view of GroEL
 
-![GroEL (1GRL) down its seven-fold axis with depth cueing and shadows](assets/cinematic_view.png)
+![GroEL (1GRL) down its seven-fold axis with depth cueing and shadows](https://raw.githubusercontent.com/chemrich/MCPymol/main/assets/cinematic_view.png)
 
 Depth cueing needs scale to pay off — this is one GroEL ring down its
 seven-fold axis. On a small globular protein the effect is mostly lost.
@@ -469,7 +494,7 @@ pLDDT is stored in the B-factor column, which is why `bfactor_view` and `putty_v
 
 > Get the AlphaFold model for P0DTC2
 
-![pLDDT confidence of the AlphaFold SARS-CoV-2 spike model (P0DTC2)](assets/plddt_view.png)
+![pLDDT confidence of the AlphaFold SARS-CoV-2 spike model (P0DTC2)](https://raw.githubusercontent.com/chemrich/MCPymol/main/assets/plddt_view.png)
 
 Mean pLDDT 67.1 across 1273 residues — 7% very high, 49% confident, 20% low,
 24% very low. The orange tails are the point: AlphaFold is telling you it does
@@ -483,7 +508,7 @@ An RMSD alone tells you a structure moved; this tells you where.
 
 > Superpose 4AKE onto 1AKE and show me where it moves
 
-![Adenylate kinase open (4AKE) superposed on closed (1AKE), coloured by per-residue shift](assets/superposition_view.png)
+![Adenylate kinase open (4AKE) superposed on closed (1AKE), coloured by per-residue shift](https://raw.githubusercontent.com/chemrich/MCPymol/main/assets/superposition_view.png)
 
 Adenylate kinase, open against closed: the core fits at 2.07 Å RMSD while
 residues 145–152 move up to 24 Å. That is the LID domain closing over the
@@ -618,7 +643,7 @@ usually different residues) and **chain breaks** where loops went unmodelled.
 
 Ray-traces the current scene and returns the image as MCP image content, so the model can actually look at it and iterate. This is the tool to use instead of `ray` + `png`, which only leave a file behind.
 
-Defaults to 1000×750 — the image is inlined into the conversation, and base64 inflates it by a third. Above 5 MB (`MCPYMOL_MAX_IMAGE_BYTES`) it returns the path instead.
+Defaults to 1000×750 — the image is inlined into the conversation, and base64 inflates it by a third. Above 5 MB (`MCPYMOL_MAX_IMAGE_BYTES`) it returns the path instead, and keeps the file there even if you did not pass a `filename`, so a render that took minutes is not thrown away for being too big to show.
 
 Every render is ray-traced, and `ray_trace=False` does **not** change that: PyMOL's fast unshaded frame grab needs its GUI thread, which the plugin does not run on, so that path wrote blank images. The flag is accepted and ignored, with a note in the reply, rather than silently handing back a blank PNG. To make a render cheaper, ask for a smaller `width`/`height`. `render` also detects the two ways an image comes back empty — a single flat colour, or nothing written at all — and says so instead of returning a black square.
 
@@ -647,13 +672,19 @@ multi-material parts.
 This tool needs the optional `print` extra (trimesh, pymeshlab, scipy,
 scikit-image, networkx):
 
+Install it into **the same environment MCPymol is already in** — a bare
+`pip install` picks whatever `pip` is first on your PATH, which is usually a
+different interpreter entirely, and leaves `print_export` still reporting the
+dependencies missing:
+
 ```bash
-uv tool install 'mcpymol[print]'   # installed from PyPI
-uv sync --extra print              # from a MCPymol checkout
+uv tool install 'mcpymol[print]'                   # if you used uv tool
+pipx install --force 'mcpymol[print]'              # if you used pipx
+~/.venvs/mcpymol/bin/pip install 'mcpymol[print]'  # if you used a venv
+uv sync --extra print                              # from a checkout
 ```
 
-If you already installed MCPymol without it, re-running the command above adds
-the extra to the existing install; follow it with `mcpymol --install-plugin`.
+Re-running over an existing install is fine — it adds the extra in place.
 
 ```
 Export T7 RNA polymerase (1MSW) for 3D printing with the protein and the
@@ -689,7 +720,7 @@ print_export(obj_name="1ema", groups="1ema=(1ema or 1ema_spine)",
              representation="cartoon", method="voxel", voxel_pitch=0.2)
 ```
 
-![GFP (1EMA) as chunky print-ready ribbons with the reinforcing backbone spine](assets/print_ribbon_view.png)
+![GFP (1EMA) as chunky print-ready ribbons with the reinforcing backbone spine](https://raw.githubusercontent.com/chemrich/MCPymol/main/assets/print_ribbon_view.png)
 
 GFP's β-barrel with the chunky arrows applied. The bulges running along each
 strand are the spine tube passing through — the internal rebar, visible before

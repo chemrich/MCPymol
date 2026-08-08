@@ -116,13 +116,15 @@ def render(
     ray_trace: Annotated[
         bool,
         Field(
-            description="Ray-trace for publication quality (default), or take a fast unshaded viewport grab."
+            description="Kept for compatibility and ignored — every render is "
+            "ray-traced, because PyMOL's unshaded OpenGL capture does not work "
+            "over this bridge. Use a smaller width/height to render faster."
         ),
     ] = True,
     filename: Annotated[
         str | None,
         Field(
-            description="Optional path to also keep the PNG at. Without it the render goes to a temporary file that is cleaned up afterwards."
+            description="Optional path to also keep the PNG at. Without it the render goes to a temporary file that is cleaned up afterwards — except when the image is too large to inline, where the file is kept so you still have the render."
         ),
     ] = None,
 ) -> Image | str:
@@ -133,9 +135,10 @@ def render(
     you holding a filename you cannot look at. Call this after setting up a
     view to check what it actually looks like, and iterate.
 
-    Ray-tracing gives shadows and smooth surfaces but takes seconds to minutes
-    on a large assembly; set ``ray_trace=False`` for a fast, flat OpenGL
-    snapshot when you only need to confirm a selection or orientation.
+    Every render is ray-traced, which takes seconds to minutes on a large
+    assembly. ``ray_trace=False`` is accepted but ignored: PyMOL's fast
+    unshaded frame grab needs its GUI thread, which this plugin does not run
+    on, so that path wrote blank images. Render smaller to render faster.
     """
     if width < 1 or height < 1:
         return f"Error: width and height must be positive, got {width}x{height}."
@@ -180,11 +183,14 @@ def render(
             )
 
         if len(data) > MAX_INLINE_IMAGE_BYTES:
-            saved = path if keep else "a temporary file"
+            # Keep the file even when it went to a temporary path: this render
+            # cost minutes, and deleting it while reporting where it "is at"
+            # would leave the caller with nothing but a stale path.
+            keep = True
             return (
                 f"Rendered {width}x{height} ({len(data) / 1e6:.1f} MB) — too large to "
                 f"return inline (limit {MAX_INLINE_IMAGE_BYTES / 1e6:.1f} MB). It is at "
-                f"{saved}. Re-run with a smaller width/height to see it here."
+                f"{path}. Re-run with a smaller width/height to see it here.{note}"
             )
 
         return Image(data=data, format="png")
