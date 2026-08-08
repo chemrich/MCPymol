@@ -244,6 +244,8 @@ DEFAULTS: dict[str, str] = {
     "mutations": "A1G",
     "ligand_resn": "ALA",
     "resn": "ALA",
+    "properties": "chain, resi, b, q",
+    "max_atoms": 5,
 }
 
 # Tools left out of the sweep, each for a stated reason. The completeness test

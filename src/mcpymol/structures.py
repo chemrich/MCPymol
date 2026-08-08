@@ -684,6 +684,89 @@ def get_sequence(
     return "\n".join(lines)
 
 
+# Fields worth having by default: identity, then the two per-atom columns that
+# have nowhere else to live.
+DEFAULT_ATOM_PROPERTIES = "chain, resi, resn, name, b, q"
+
+
+@mcp.tool()
+def atom_properties(
+    selection: Annotated[
+        str,
+        Field(
+            description='Atoms to read, e.g. "1hsg and chain A and resi 25". Narrow '
+            "this: a whole protein is thousands of atoms."
+        ),
+    ],
+    properties: Annotated[
+        str,
+        Field(
+            description="Comma-separated PyMOL atom properties. Common ones: chain, "
+            "resi, resn, name, elem, b (B-factor or pLDDT), q (occupancy), alt "
+            "(altloc), formal_charge, partial_charge, ss, segi, index."
+        ),
+    ] = DEFAULT_ATOM_PROPERTIES,
+    max_atoms: Annotated[
+        int, Field(description="How many atoms to list. Any omitted are counted.")
+    ] = 50,
+) -> str:
+    """
+    Reads per-atom properties, which nothing else in the tool set can reach.
+
+    Object-level facts come back through ``structure_info`` and ``list_chains``,
+    and per-residue values through ``get_sequence`` or the view presets. But
+    properties that live on individual *atoms* — occupancy, alternate
+    conformations, per-atom B-factor, formal charge — have no other route: the
+    PyMOL call that exposes them returns an object that cannot cross the bridge.
+
+    Use it to check what you are actually looking at: partial occupancy where a
+    sidechain has two conformations, per-atom pLDDT inside a predicted model, or
+    which atoms carry a formal charge before reasoning about electrostatics.
+
+    ``properties`` is evaluated by PyMOL once per atom, so it accepts any
+    expression valid in ``iterate`` — the names above are the useful subset.
+    """
+    fields = [f.strip() for f in properties.split(",") if f.strip()]
+    if not fields:
+        return "Error: no properties requested, e.g. properties='chain, resi, b'."
+    if max_atoms < 1:
+        return f"Error: max_atoms must be at least 1, got {max_atoms}."
+
+    res = send_request("iterate_to_list", args=[selection, ", ".join(fields)], timeout=120.0)
+    if res.get("status") == "error":
+        return f"Error reading '{selection}': {res.get('error')}"
+
+    rows = res.get("result") or []
+    if not rows:
+        return (
+            f"No atoms matched '{selection}'. Check the object name and selection "
+            f"syntax with count_atoms."
+        )
+
+    widths = [len(f) for f in fields]
+    for row in rows[:max_atoms]:
+        for i, value in enumerate(row[: len(fields)]):
+            widths[i] = max(widths[i], len(_format_atom_value(value)))
+
+    lines = [f"{len(rows)} atoms in '{selection}':", ""]
+    lines.append("  " + "  ".join(f.ljust(w) for f, w in zip(fields, widths, strict=False)))
+    for row in rows[:max_atoms]:
+        cells = [_format_atom_value(v) for v in row[: len(fields)]]
+        lines.append("  " + "  ".join(c.ljust(w) for c, w in zip(cells, widths, strict=False)))
+
+    if len(rows) > max_atoms:
+        lines.append(f"  ... and {len(rows) - max_atoms} more atoms (raise max_atoms).")
+    return "\n".join(lines)
+
+
+def _format_atom_value(value) -> str:
+    """Render one property value compactly; floats to 2 dp, blanks visible."""
+    if isinstance(value, float):
+        return f"{value:.2f}"
+    text = str(value)
+    return text if text else "-"
+
+
 # ── Sessions ─────────────────────────────────────────────────────────────────
 
 # PyMOL decides it is writing a session from the extension, so these are the

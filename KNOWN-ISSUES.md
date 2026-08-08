@@ -71,35 +71,22 @@ tests that pin each action name and argument order against the real PyMOL API.
 
 ---
 
-## 3. numpy results reach clients as a repr string
+## 3. numpy results reach clients as a repr string — **fixed**
 
-`_dumps_response` in `plugin.py` falls back to `repr()` when `json.dumps`
-raises, so the client always gets *a* reply. But several `pymol.cmd` functions
-return **numpy arrays** — `get_coords` and `get_atom_coords` among them — and
-those are not JSON-serialisable. Today they arrive as:
+`_dumps_response` fell back to `repr()` whenever `json.dumps` raised, so the
+numpy arrays returned by `get_coords` and `get_atom_coords` arrived as strings
+that looked like data and could not be used as data.
 
-```json
-{"status": "success", "result": "array([[1., 2., 3.]])"}
-```
+A `_jsonable()` pass now runs before the repr fallback, converting anything
+exposing `.tolist()` and recursing through dicts and sequences. The repr
+fallback is preserved for genuinely opaque objects. Verified against a live
+PyMOL: `get_coords` returns `[-0.0009, 0.0637, -0.4905]` rather than
+`"array([[...]])"`.
 
-A success response carrying a *string* that looks like data and cannot be used
-as data. Same failure shape as issue 1: reporting success while returning
-nothing usable.
-
-**Fix written, on branch `feat/wiggles-query`.** A `_jsonable()` pass before the
-repr fallback converts anything exposing `.tolist()`, recursing through dicts
-and sequences. The repr fallback is preserved for genuinely opaque objects
-(chempy models, handles), and a `.tolist()` that raises falls through to it
-rather than taking down the reply.
-
-That branch also adds an `iterate_to_list` action, which is the only way to
-read **per-atom** properties over the wire — occupancy, altloc and per-atom
-b-factor live on atoms, reachable through `cmd.iterate` or `cmd.get_model`, and
-`get_model` returns a chempy object that does not survive JSON.
-
-Review note: `iterate_to_list` evaluates a Python expression inside PyMOL. That
-is real code execution, but it is no wider than the existing `do` action or
-`_resolve_dotted`, and the listener is bound to localhost.
+The same branch added the `iterate_to_list` action — the only route to
+properties that live on atoms rather than residues or objects — and it is now
+exposed to clients as the `atom_properties` tool, so occupancy, altloc and
+per-atom B-factor are reachable end to end.
 
 ---
 
