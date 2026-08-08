@@ -1,6 +1,7 @@
 """Tests for render() and turntable()."""
 
 import os
+import re
 import struct
 import zlib
 from unittest.mock import patch
@@ -185,6 +186,27 @@ def test_render_refuses_to_inline_a_huge_image(mock_sr, tmp_path):
     assert isinstance(result, str)
     assert "too large to return inline" in result
     assert "smaller width/height" in result
+
+
+@patch("mcpymol.rendering.send_request")
+def test_render_keeps_an_oversized_render_that_went_to_a_temp_file(mock_sr):
+    """The oversize reply names the file it is at, so that file has to still
+    be there. It used to be unlinked on the way out when no filename was
+    given, which threw away a render that had just cost minutes and left the
+    caller chasing a path that no longer existed."""
+    mock_sr.side_effect = _writes_png([], data=_png_bytes())
+
+    with patch("mcpymol.rendering.MAX_INLINE_IMAGE_BYTES", 10):
+        result = render()
+
+    assert isinstance(result, str)
+    assert "too large to return inline" in result
+
+    reported = re.search(r"It is at (\S+?)\.\s", result)
+    assert reported, f"no path in the reply: {result}"
+    path = reported.group(1)
+    assert os.path.exists(path), f"reply points at {path}, which was deleted"
+    os.unlink(path)
 
 
 @pytest.mark.parametrize("w,h", [(0, 100), (100, 0), (-5, 100)])
