@@ -114,3 +114,8 @@ def test_contributing_warns_against_patching_the_facade():
         "CONTRIBUTING must explain that send_request is patched on the owning "
         "module, not on mcpymol.server"
     )
+
+
+def test_deliberately_failing_probe():
+    """Temporary: verifies branch protection refuses a red merge. Deleted."""
+    assert False, "deliberate failure to test the merge gate"
