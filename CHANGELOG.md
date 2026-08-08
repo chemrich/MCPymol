@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.1] - 2026-08-09
+
+Everything v1.5.0 got wrong about installing and upgrading itself, plus two
+rendering bugs found in the same review. Most of this release is documentation,
+which is the part of a newly-published package people actually run.
+
+Note that the PyPI project page for 1.5.0 renders its figures broken and always
+will — a published version is immutable. This release is what fixes that page.
+
 ### Added
 
 - **README: a Requirements section.** The README never said that PyMOL itself is a prerequisite — the one thing MCPymol cannot install for you — nor which Python version the bridge needs, nor that the two halves must share a machine because several tools hand files between them through the filesystem. Optional per-feature dependencies (APBS, the `print` extra, network access) are now listed in one table instead of being mentioned wherever the feature happens to be described.
@@ -21,7 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`assets/pharmacophore_view.png` was referenced but never committed**, so it rendered as a broken image on GitHub — the only one of twenty image references that did not resolve. Generated through the tools, as the other figures were.
 - **Stale counts.** 87 primitives and 121 tools, not "~85" and 120; 555 tests by default plus 122 opt-in, not 469. Re-derived from the registered tool list and a test collection rather than counted by hand. The module layout table was missing `analysis.py`, `pdbtext.py`, `style.py` and `cli.py`, which have existed since the v1.3.0 split and v1.4.0.
 - **An oversized render deleted the file it told you about.** Above `MCPYMOL_MAX_IMAGE_BYTES`, `render` returns a message instead of the image — but when no `filename` was given it unlinked the temporary PNG on the way out while reporting that the render "is at a temporary file". A 4000×3000 publication render therefore cost minutes and left nothing behind. The file is now kept whenever that branch is taken, and the message names its real path.
-- **The README's images are absolute URLs**, because the README is also the PyPI long description and PyPI does not rewrite relative links — all 17 figures, including the hero image, rendered as broken-image placeholders on the project page. Fixed for the next release; 1.5.0's page cannot be corrected, since a published version is immutable.
+- **The README's images are absolute URLs**, because the README is also the PyPI long description and PyPI does not rewrite relative links — all 17 figures, including the hero image, rendered as broken-image placeholders on the project page. They point at `raw.githubusercontent.com` now. 1.5.0's page keeps its broken images permanently, since a published version is immutable — this release is the fix.
 - **Install instructions assumed a PATH that the recommended installers do not guarantee.** `uv tool install` and `pipx` put `mcpymol` in `~/.local/bin`, which is not universally on PATH — and an MCP client launched by the OS inherits no PATH at all — so registering a bare `mcpymol` failed at client launch with `spawn mcpymol ENOENT` rather than at install time. Every registration command now uses the full path, with a `which mcpymol` check up front.
 - **The `uvx` path documented a bridge with no plugin.** It dropped the clone that used to supply `plugin.py` while still pointing at step 2's `mcpymol --install-plugin`, a command a reader on that path does not have. It now gives `uvx mcpymol --install-plugin` and states the cache-path trade-off plainly.
 - **The `print` extra pointed at the wrong environment.** A bare `pip install 'mcpymol[print]'` resolves to whatever `pip` is first on PATH, which on a Homebrew or Debian Python fails outright and otherwise installs a second copy of MCPymol somewhere the tool venv never sees. Now given per install method.
