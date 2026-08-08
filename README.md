@@ -64,6 +64,12 @@ Organised by the question, not the tool.
 | Where do these two structures differ? | `superposition_view` |
 | How far apart / what angle / how much surface? | `distance`, `angle`, `dihedral`, `sasa`, `rms_cur` |
 | Which parts are conserved? Flexible? Confident? | `conservation_view`, `bfactor_view`, `plddt_view` |
+| Is this atom really there, or is it half-occupied? | `occupancy_view`, `altloc_view` |
+| How much do the members of this ensemble disagree? | `ensemble_spread_view`, then `morph_states` if they share a topology |
+| How good is this cryo-EM model, per residue? | `qscore_view` |
+| What's the voxel size / geometry of this map? | `map_info` — reads the header only |
+| Can I see the density around this ligand? | `load_map`, then `density_view` |
+| Which parts of this map are actually well resolved? | `local_resolution_view` |
 | What does it look like? | `render` — returns the image, so the model can see it |
 | Can I keep this scene? | `save_session` / `load_session` |
 | Can I print it? | `print_ribbon_view` + `print_export` |
@@ -279,6 +285,7 @@ before launching PyMOL and the bridge.
 | `MCPYMOL_MAX_IMAGE_BYTES` | `5000000` | Above this, `render` returns the file path instead of inlining the image. |
 | `MCPYMOL_PB_TIMEOUT` | `600` s | Wall-clock ceiling on the external `apbs` / `pdb2pqr` processes. |
 | `MCPYMOL_MMSEQS_URL` | ColabFold public API | MMseqs2 server for `conservation_view`. Point at an internal one to avoid the public queue. |
+| `MCPYMOL_WIGGLES_TIMEOUT` | `10` s | Socket budget for the standalone `BridgePort` adapter in `mcpymol.wiggles`. The tools themselves use `MCPYMOL_SLOW_OP_TIMEOUT`, since a map load moves tens of megabytes. |
 | `MCPYMOL_ALPHAFOLD_API_URL` | AlphaFold DB prediction API | Where `fetch_alphafold` asks which model file is current. |
 | `MCPYMOL_ALPHAFOLD_URL` | AlphaFold DB files | Legacy filename template, used only when you pin `model_version` explicitly. |
 | `MCPYMOL_RCSB_URL` | RCSB data API | Base URL for the metadata `structure_info` reports. |
@@ -346,6 +353,7 @@ Treat a green default run as necessary, not sufficient.
 | `mcpymol/comparison.py` | `superposition_view` |
 | `mcpymol/conservation.py` | MSA + Shannon entropy |
 | `mcpymol/analysis.py` | `contact_report`, `interface_report` |
+| `mcpymol/wiggles/` | cryo-EM occupancy, ensembles, maps and local resolution |
 | `mcpymol/pdbtext.py` | parsing the PDB records PyMOL hands back as text |
 | `mcpymol/printing.py` | watertight STL export |
 | `mcpymol/cli.py` | `--install-plugin`, `--plugin-path`, `--uninstall-plugin` |
@@ -725,6 +733,124 @@ print_export(obj_name="1ema", groups="1ema=(1ema or 1ema_spine)",
 GFP's β-barrel with the chunky arrows applied. The bulges running along each
 strand are the spine tube passing through — the internal rebar, visible before
 it gets fused into one solid on export.
+
+## Cryo-EM: occupancy, ensembles and maps
+
+Ten tools for the things a viewer usually throws away. Every one of them exists
+because a render that looked fine was hiding something, so they share a rule:
+**say what is being shown, and refuse when the picture would be
+meaningful-looking and wrong.**
+
+### `occupancy_view` and `altloc_view` — is this atom really there
+
+`occupancy_view` colours and scales by per-atom occupancy `q`, de-emphasising
+alternates at `q<1` in proportion, so a half-occupied conformer looks
+half-there. `altloc_view` shows every alternate location at once, one colour per
+group, occupancies labelled — PyMOL shows one by default, which quietly turns a
+statement about heterogeneity into a single structure.
+
+"Occupancy" names two incompatible quantities: the crystallographic `q` above,
+and the fraction of imaged particles containing a subunit. A model can be
+`q = 1.0` everywhere while its subunit is present in half the particles. Both
+are true, they are different questions, and `occupancy_view` reports only the
+first — the legend says which.
+
+```
+occupancy_view(obj_name="1ejg")
+altloc_view(obj_name="1ejg")
+```
+
+### `ensemble_spread_view` and `morph_states` — how much do the states disagree
+
+`ensemble_spread_view` computes per-residue RMS deviation across the states of a
+multi-model object, pushes it into the B-factor column and putty-scales it, so
+spread reads as tube width as well as colour. Spread is a description of how
+much the deposited members differ — not a calibrated uncertainty and not an
+error bar.
+
+`morph_states` interpolates between states, and the value in it is the refusal.
+A morph is only meaningful when every state shares a topology; across
+independently reconstructed volumes it animates a correspondence nobody
+established, so the tool checks and declines. (`cmd.morph` is Incentive-only —
+on open-source PyMOL the check still runs and reports, and only the
+interpolation is unavailable.)
+
+`restore_bfactors` puts back what these views overwrote.
+
+```
+ensemble_spread_view(obj_name="1l2y")
+morph_states(obj_name="1l2y", validate_only=True)
+```
+
+### `qscore_view` — per-residue model quality, already published
+
+Colours a model by Q-score parsed straight out of its wwPDB validation report.
+No network, no map, no computation — the numbers exist, nothing surfaces them.
+Two things to expect from real data: entries deposited before the September 2023
+rollout carry no Q-scores at all, and real Q-scores go negative, so the
+published 0–1 framing is the intended range rather than the observed one.
+
+```
+qscore_view(obj_name="9c0k", validation_path="9c0k_validation.xml.gz")
+```
+
+### `map_info` — the number nothing displays
+
+Reads an MRC/CCP4 header and reports the geometry, above all **voxel size**.
+Only the 1024-byte header is read: the data is never loaded, PyMOL is never
+touched, nothing goes over the network.
+
+Voxel size is not stored, it is derived, and the derivation has a trap — it is
+`cella/m` (the grid sampling), not `cella/n` (the stored extent). Those differ
+on any boxed or cropped map, and dividing by `n` gives a wrong answer of the
+right order of magnitude. The nominal value is itself only expected to be
+accurate to ±5–15%, which at 1.2 Å is a systematic stretch of every distance in
+the model that looks like a slightly strained structure rather than an error.
+Anisotropy, cropping and axis permutation are all flagged loudly.
+
+### `load_map` and `density_view` — contouring honestly
+
+`load_map` parses the header before touching PyMOL, so a malformed file fails
+without leaving a half-loaded object, confirms the object arrived rather than
+assuming it, and records **provenance** — which defaults to `unknown` and is
+never inferred. A measured reconstruction, a sharpened map, a
+network-enhanced map and a decoder output are the same isosurface once drawn, so
+defaulting to "measured" would assert that somebody observed a generated volume.
+
+`density_view` draws an isomesh around a selection and states the contour level
+in **both** σ and absolute units. PyMOL normalises maps on load, so its levels
+are in σ; EMDB's author-recommended contour is an absolute map value. They are
+not interchangeable and the difference is not subtle — EMD-30913 publishes
+`0.05`, which is **3.16 σ**; used directly it contours noise.
+
+```
+load_map(path="emd_30913.map.gz", name="emd30913", provenance="measured")
+density_view(map_obj="emd30913", selection="chain A", level=0.05, units="absolute")
+```
+
+### `local_resolution_view` — where the map is actually good
+
+Colours a map's isosurface by a local-resolution volume instead of by chain. A
+single global resolution number misrepresents almost every map: a rigid core at
+2.5 Å and a flexible periphery at 5 Å live in the same volume.
+
+Two things make this harder than it looks. The volumes must share a voxel grid —
+colouring one map by another samples it at the first map's coordinates, so a
+mismatch in extent, spacing, origin or axis order draws colour from the wrong
+place and renders *smooth, plausible and wrong*. The tool refuses and names what
+differs. And because PyMOL normalises on load, ramp breakpoints given in Å are
+converted to σ against the **resolution** map's own header — a different σ scale
+from the contour level, which comes from the density map's. Every breakpoint is
+reported in both units.
+
+Local resolution is an estimate: estimators disagree with each other on the same
+map, and the value at a voxel depends on the window and the mask as much as on
+the data.
+
+```
+local_resolution_view(map_obj="emd30913", res_obj="emd30913_locres",
+                      level=0.05, units="absolute")
+```
 
 ## The name
 

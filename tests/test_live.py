@@ -57,6 +57,14 @@ LIVE_OBJECT = "_live_probe"
 LIVE_OBJECT_2 = "_live_probe_2"
 LIVE_SEQUENCE = "ACDEFGHIKLMNPQRSTVWY"
 
+# The cryo-EM tools need a volume in the session and a validation report on
+# disk. Both are synthesised rather than downloaded, for the same reason the
+# probe peptide is built with `fab`: no network, and byte-identical every run.
+# A 16^3 map is 16 KB, which PyMOL loads instantly and contours happily.
+LIVE_MAP = "_live_map"
+LIVE_MAP_RES = "_live_map_res"
+_PROBE_FILES: dict[str, str] = {}
+
 
 # ── the signatures that can only mean a misconfigured wrapper ────────────────
 
@@ -92,8 +100,78 @@ def _bridge_reachable() -> bool:
         return False
 
 
+def _write_probe_map(path, *, scale: float) -> str:
+    """A tiny but genuinely loadable MRC2014 volume: a Gaussian blob at centre.
+
+    Header layout follows the spec (Cheng et al. 2015) with the grid sampling
+    equal to the extent, so ``cella/m`` and ``cella/n`` agree here — this
+    fixture is for exercising PyMOL, not for testing the voxel-size trap, which
+    the mocked suite covers against deliberately cropped headers.
+
+    ``scale`` multiplies the density, which is how the two probe maps end up
+    with different header statistics while sharing a grid — exactly the shape
+    ``local_resolution_view`` expects.
+    """
+    import math
+    import struct
+
+    n, voxel = 16, 1.0
+    values = []
+    for z in range(n):
+        for y in range(n):
+            for x in range(n):
+                r2 = sum((c - (n - 1) / 2) ** 2 for c in (x, y, z))
+                values.append(scale * math.exp(-r2 / 8.0))
+
+    lo, hi = min(values), max(values)
+    mean = sum(values) / len(values)
+    rms = math.sqrt(sum((v - mean) ** 2 for v in values) / len(values))
+
+    header = bytearray(1024)
+
+    def put(fmt, off, *vals):
+        struct.pack_into("<" + fmt, header, off, *vals)
+
+    put("3i", 0, n, n, n)  # nx, ny, nz
+    put("i", 12, 2)  # mode: float32
+    put("3i", 16, 0, 0, 0)  # nxstart, nystart, nzstart
+    put("3i", 28, n, n, n)  # mx, my, mz
+    put("3f", 40, n * voxel, n * voxel, n * voxel)  # cella
+    put("3f", 52, 90.0, 90.0, 90.0)  # cellb
+    put("3i", 64, 1, 2, 3)  # mapc, mapr, maps
+    put("3f", 76, lo, hi, mean)  # dmin, dmax, dmean
+    put("i", 88, 1)  # ispg
+    put("i", 108, 20140)  # nversion
+    header[208:212] = b"MAP "
+    header[212:216] = b"\x44\x44\x00\x00"  # little-endian machine stamp
+    put("f", 216, rms)
+
+    path.write_bytes(bytes(header) + struct.pack(f"<{len(values)}f", *values))
+    return str(path)
+
+
+def _write_probe_validation(path) -> str:
+    """A minimal wwPDB validation report carrying Q-scores.
+
+    Six residues is enough: the parser keys on ``ModelledSubgroup`` elements
+    with a Q-score attribute, and one of these deliberately has none, because
+    a residue the file says nothing about must not be coloured as though it
+    scored badly.
+    """
+    rows = "\n".join(
+        f'  <ModelledSubgroup chain="A" resnum="{i}" resname="ALA" Q_score="{0.3 + i * 0.1:.2f}"/>'
+        for i in range(1, 6)
+    )
+    path.write_text(
+        f'<?xml version="1.0"?>\n<wwPDB-validation-information>\n{rows}\n'
+        f'  <ModelledSubgroup chain="A" resnum="6" resname="ALA"/>\n'
+        f"</wwPDB-validation-information>\n"
+    )
+    return str(path)
+
+
 @pytest.fixture(scope="session", autouse=True)
-def live_session():
+def live_session(tmp_path_factory):
     """Skip the whole module unless a PyMOL plugin is listening."""
     if not _bridge_reachable():
         pytest.skip(
@@ -107,6 +185,20 @@ def live_session():
     send_request("fab", args=[LIVE_SEQUENCE, LIVE_OBJECT])
     send_request("create", args=[LIVE_OBJECT_2, LIVE_OBJECT])
     send_request("do", args=["set_symmetry " + LIVE_OBJECT + ", 50, 50, 50, 90, 90, 90, P 1"])
+
+    # The cryo-EM volumes go in through the real load_map, not a raw `load`:
+    # density_view and local_resolution_view refuse a map whose header they
+    # never saw, and that refusal is deliberate. Loading them any other way
+    # would make the sweep test the refusal instead of the tools.
+    from mcpymol.wiggles.tools import load_map as _load_map
+
+    probe_dir = tmp_path_factory.mktemp("live_maps")
+    _PROBE_FILES["map"] = _write_probe_map(probe_dir / "probe.mrc", scale=1.0)
+    _PROBE_FILES["res_map"] = _write_probe_map(probe_dir / "probe_res.mrc", scale=4.0)
+    _PROBE_FILES["validation"] = _write_probe_validation(probe_dir / "probe_validation.xml")
+    _load_map(path=_PROBE_FILES["map"], name=LIVE_MAP, provenance="measured")
+    _load_map(path=_PROBE_FILES["res_map"], name=LIVE_MAP_RES, provenance="generated")
+
     _require_a_healthy_viewport()
     yield
     send_request("do", args=["reinitialize"])
@@ -212,6 +304,8 @@ DEFAULTS: dict[str, str] = {
     "uniprot_id": "P69905",
     "file_path": "/nonexistent/live-probe.pdb",
     "map_object": "_live_missing_map",
+    "map_obj": LIVE_MAP,
+    "res_obj": LIVE_MAP_RES,
     "prefix": "_live_sym",
     "segi": None,
     "options": None,
@@ -291,7 +385,18 @@ def _coerce(value, annotation):
     return value
 
 
-def _arguments_for(fn, tmp_path) -> dict:
+# Tools whose `path` must point at a real file of a particular kind, rather
+# than at the scratch directory the generic rule hands out. Without these the
+# map tools would be called on a directory, come back with an honest "not a
+# readable map" and pass the sweep having exercised nothing.
+PATH_FIXTURES = {
+    "map_info": "map",
+    "load_map": "map",
+    "qscore_view": "validation",
+}
+
+
+def _arguments_for(fn, tmp_path, tool_name: str = "") -> dict:
     """Build a plausible argument set from the parameter names and types."""
     import inspect
     import typing
@@ -299,7 +404,9 @@ def _arguments_for(fn, tmp_path) -> dict:
     hints = typing.get_type_hints(fn, include_extras=False)
     args = {}
     for name, param in inspect.signature(fn).parameters.items():
-        if name in ("filename",):
+        if name in ("path", "validation_path") and tool_name in PATH_FIXTURES:
+            args[name] = _PROBE_FILES[PATH_FIXTURES[tool_name]]
+        elif name in ("filename",):
             args[name] = str(tmp_path / "live_probe.png")
         elif name in ("out_dir", "path"):
             args[name] = str(tmp_path)
@@ -346,7 +453,7 @@ def _sweepable():
 def test_tool_is_wired_correctly(tool_name, tmp_path):
     """Call the tool for real and reject only misconfiguration."""
     fn = _tool_functions()[tool_name]
-    result = fn(**_arguments_for(fn, tmp_path))
+    result = fn(**_arguments_for(fn, tmp_path, tool_name))
     assert_wired(tool_name, str(result))
 
 
