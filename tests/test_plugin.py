@@ -291,3 +291,186 @@ def test_timeout_error_is_an_oserror_subclass():
     caught before the generic OSError arm or stalled peers get no reply."""
     assert issubclass(TimeoutError, OSError)
     assert socket.timeout is TimeoutError
+
+
+# ── iterate_to_list ─────────────────────────────────────────────────────────
+
+
+def test_iterate_to_list_reads_per_atom_properties(plugin_server):
+    """The only route to atom-level properties over the wire.
+
+    cmd.get_model returns a chempy object that does not survive JSON, so
+    occupancy and altloc are otherwise unreachable by a client.
+    """
+
+    def fake_iterate(selection, expression, space=None):
+        # Mimic PyMOL: evaluate the expression once per atom, in `space`.
+        for chain, resi, q in (("A", "1", 1.0), ("A", "2", 0.6)):
+            eval(expression, {"chain": chain, "resi": resi, "q": q, **(space or {})})
+
+    mock_pymol.cmd.iterate = fake_iterate
+
+    payload = json.dumps({"action": "iterate_to_list", "args": ["polymer", "chain, resi, q"]})
+    res = plugin_server.handle_request(payload)
+
+    assert res["status"] == "success"
+    assert res["result"] == [("A", "1", 1.0), ("A", "2", 0.6)]
+
+
+def test_iterate_to_list_single_field_still_yields_tuples(plugin_server):
+    """Arity follows the expression, so callers never special-case one field."""
+
+    def fake_iterate(selection, expression, space=None):
+        for q in (1.0, 0.5):
+            eval(expression, {"q": q, **(space or {})})
+
+    mock_pymol.cmd.iterate = fake_iterate
+
+    res = plugin_server.handle_request(
+        json.dumps({"action": "iterate_to_list", "args": ["all", "q"]})
+    )
+
+    assert res["result"] == [(1.0,), (0.5,)]
+
+
+def test_iterate_to_list_accepts_kwargs(plugin_server):
+    def fake_iterate(selection, expression, space=None):
+        assert selection == "chain B"
+        eval(expression, {"resi": "7", **(space or {})})
+
+    mock_pymol.cmd.iterate = fake_iterate
+
+    res = plugin_server.handle_request(
+        json.dumps(
+            {
+                "action": "iterate_to_list",
+                "kwargs": {"selection": "chain B", "expression": "resi"},
+            }
+        )
+    )
+
+    assert res["status"] == "success"
+    assert res["result"] == [("7",)]
+
+
+def test_iterate_to_list_without_an_expression_is_an_error(plugin_server):
+    res = plugin_server.handle_request(json.dumps({"action": "iterate_to_list"}))
+
+    assert res["status"] == "error"
+    assert "needs an expression" in res["error"]
+
+
+def test_iterate_to_list_empty_selection_returns_an_empty_list(plugin_server):
+    """No atoms is a legitimate answer, not an error — the caller decides."""
+
+    def fake_iterate(selection, expression, space=None):
+        return None  # PyMOL calls the expression zero times
+
+    mock_pymol.cmd.iterate = fake_iterate
+
+    res = plugin_server.handle_request(
+        json.dumps({"action": "iterate_to_list", "args": ["none", "q"]})
+    )
+
+    assert res["status"] == "success"
+    assert res["result"] == []
+
+
+def test_iterate_to_list_propagates_pymol_errors(plugin_server):
+    def boom(*a, **k):
+        raise RuntimeError("Invalid selection")
+
+    mock_pymol.cmd.iterate = boom
+
+    res = plugin_server.handle_request(
+        json.dumps({"action": "iterate_to_list", "args": ["bogus(", "q"]})
+    )
+
+    assert res["status"] == "error"
+    assert "Invalid selection" in res["error"]
+
+
+# ── numpy coercion in the response path ─────────────────────────────────────
+
+
+class _FakeArray:
+    """Stands in for a numpy array: not JSON-able, but has .tolist()."""
+
+    def __init__(self, data):
+        self._data = data
+
+    def tolist(self):
+        return self._data
+
+    def __repr__(self):
+        return "array(...)"
+
+
+def test_numpy_result_is_converted_not_reprd(plugin_server):
+    """cmd.get_coords returns a numpy array.
+
+    Before coercion this hit the repr fallback and reached the client as
+    ``status: success`` carrying the *string* "array(...)" — a reply that
+    looks like data and is not. Regression guard for that.
+    """
+    mock_pymol.cmd.get_coords.return_value = _FakeArray([[1.0, 2.0, 3.0]])
+    sock = _fake_sock(json.dumps({"action": "get_coords", "args": ["all"]}).encode())
+
+    res = _served(plugin_server, sock)
+
+    assert res["status"] == "success"
+    assert res["result"] == [[1.0, 2.0, 3.0]]
+    assert res["result"] != "array(...)"
+
+
+def test_nested_numpy_is_converted(plugin_server):
+    mock_pymol.cmd.get_extent.return_value = {"box": _FakeArray([1.0, 2.0])}
+    sock = _fake_sock(json.dumps({"action": "get_extent", "args": ["all"]}).encode())
+
+    res = _served(plugin_server, sock)
+
+    assert res["result"] == {"box": [1.0, 2.0]}
+
+
+def test_set_result_is_converted_to_a_list(plugin_server):
+    mock_pymol.cmd.get_names.return_value = {"a", "b"}
+    sock = _fake_sock(json.dumps({"action": "get_names", "args": []}).encode())
+
+    res = _served(plugin_server, sock)
+
+    assert sorted(res["result"]) == ["a", "b"]
+
+
+def test_opaque_object_still_falls_back_to_repr(plugin_server):
+    """Coercion must not remove the existing safety net."""
+
+    class Opaque:
+        def __repr__(self):
+            return "<chempy model>"
+
+    mock_pymol.cmd.get_model.return_value = Opaque()
+    sock = _fake_sock(json.dumps({"action": "get_model", "args": ["all"]}).encode())
+
+    res = _served(plugin_server, sock)
+
+    assert res["status"] == "success"
+    assert res["result"] == "<chempy model>"
+
+
+def test_tolist_that_raises_falls_back_to_repr(plugin_server):
+    """A broken .tolist() must not take down the reply."""
+
+    class Hostile:
+        def tolist(self):
+            raise ValueError("nope")
+
+        def __repr__(self):
+            return "<hostile>"
+
+    mock_pymol.cmd.get_coords.return_value = Hostile()
+    sock = _fake_sock(json.dumps({"action": "get_coords", "args": ["all"]}).encode())
+
+    res = _served(plugin_server, sock)
+
+    assert res["status"] == "success"
+    assert res["result"] == "<hostile>"
