@@ -135,6 +135,36 @@ report it and say what differed.
   the isosurface by a local-resolution volume. Refuses when the two do not share
   a voxel grid. Breakpoints are given in Å and reported in both Å and σ.
 
+### Ensembles — and the one thing not to say about them
+
+The single most important fact when driving these: **cryo-EM heterogeneity
+methods recover *motion* reliably and *populations* unreliably.** That is a
+blind-challenge result over 41 submissions, not a hedge. Never tell a user that
+state A is twice as populated as state B, and never read an empty region of
+latent space as a state the molecule avoids — the commonest failure in that
+challenge was missing a middle state that was genuinely there.
+
+- **`load_ensemble(directory, name, method)`** — reads a heterogeneity job
+  (cryoDRGN, 3DVA, RECOVAR, 3DFlex, DynaMight) as ordered frames. The method is
+  detected from documented markers and never guessed; an unrecognised directory
+  loads fine but stays unidentified. Pass `method=` if you know what produced it.
+  Provenance defaults to `generated` — nothing observed a decoder's output.
+- **`latent_traverse_view(ensemble_name)`** — steps through the frames as a
+  contoured trajectory, wired to PyMOL's movie timeline. **Refuses when the
+  method is unidentified**, which is invariant I2 working, not a failure: each
+  method's caveat differs and an unlabelled trajectory asserts the wrong one.
+  Draws no latent scatter and no density, deliberately.
+- **`deformation_view(obj_name)`** — the well-supported one. Per-residue
+  displacement between two states, as colour and CGO arrows. Refuses states with
+  differing atom counts. Pass `uncertainty_path` when the method estimated
+  deformation on half-sets; without it every arrow looks equally trustworthy and
+  they are not.
+- **`composition_view(obj_name, table)`** — occupancy in **sense 2**, the
+  fraction of *particles* containing a part. Takes an explicit table
+  (`"chain A=0.4, chain B=1.0"` or a file) and **never derives it from `q`**. A
+  model can be `q=1.0` everywhere while a subunit is in half the particles. For
+  sense 1 use `occupancy_view`; the two are permanently separate.
+
 ## Rendering, movies and sessions
 
 - `render(width, height, ray_trace, filename)` — the one to reach for. Returns

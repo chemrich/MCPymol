@@ -41,6 +41,8 @@ than a path that would not resolve.
 from mcpymol.wiggles.atoms import Atom, fetch_atoms
 from mcpymol.wiggles.bfactors import clear_stash
 from mcpymol.wiggles.density import to_absolute, to_sigma
+from mcpymol.wiggles.heterogeneity import Ensemble, Method, loaded_ensemble
+from mcpymol.wiggles.latent import contains_absence_claim
 from mcpymol.wiggles.localres import grid_differences
 from mcpymol.wiggles.mapinfo import MapHeader, read_map_header
 from mcpymol.wiggles.port import BridgePort, FakePort, PortError, PymolPort, SendRequestPort
@@ -50,8 +52,12 @@ from mcpymol.wiggles.provenance import Provenance, declare, provenance_of
 # the shared FastMCP app. Imported last so the names above are available to it.
 from mcpymol.wiggles.tools import (
     altloc_view,
+    composition_view,
+    deformation_view,
     density_view,
     ensemble_spread_view,
+    latent_traverse_view,
+    load_ensemble,
     load_map,
     local_resolution_view,
     map_info,
@@ -73,12 +79,21 @@ __all__ = [  # noqa: RUF022
     "load_map",
     "density_view",
     "local_resolution_view",
+    # tier 3 — ensembles
+    "load_ensemble",
+    "latent_traverse_view",
+    "deformation_view",
+    "composition_view",
     # the pieces worth reaching for directly
     "MapHeader",
     "read_map_header",
     "to_sigma",
     "to_absolute",
     "grid_differences",
+    "Ensemble",
+    "Method",
+    "loaded_ensemble",
+    "contains_absence_claim",
     "Provenance",
     "declare",
     "provenance_of",

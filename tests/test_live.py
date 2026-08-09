@@ -63,6 +63,7 @@ LIVE_SEQUENCE = "ACDEFGHIKLMNPQRSTVWY"
 # A 16^3 map is 16 KB, which PyMOL loads instantly and contours happily.
 LIVE_MAP = "_live_map"
 LIVE_MAP_RES = "_live_map_res"
+LIVE_ENSEMBLE = "_live_ens"
 _PROBE_FILES: dict[str, str] = {}
 
 
@@ -98,6 +99,14 @@ def _bridge_reachable() -> bool:
             return True
     except OSError:
         return False
+
+
+def _wiggles_port():
+    """A port for calling the tier-3 core functions directly in a fixture."""
+    from mcpymol.bridge import _SLOW_OP_TIMEOUT, send_request
+    from mcpymol.wiggles.port import SendRequestPort
+
+    return SendRequestPort(send_request, timeout=_SLOW_OP_TIMEOUT)
 
 
 def _write_probe_map(path, *, scale: float) -> str:
@@ -186,7 +195,14 @@ def live_session(tmp_path_factory):
     send_request("create", args=[LIVE_OBJECT_2, LIVE_OBJECT])
     send_request("do", args=["set_symmetry " + LIVE_OBJECT + ", 50, 50, 50, 90, 90, 90, P 1"])
 
-    # The cryo-EM volumes go in through the real load_map, not a raw `load`:
+    _require_a_healthy_viewport()
+
+    # AFTER the viewport check, which reinitializes: anything loaded before it
+    # is destroyed, and the map tools would then run against a registry entry
+    # whose object no longer exists — erroring honestly, passing the wiring
+    # check, and proving nothing.
+    #
+    # The volumes go in through the real load_map, not a raw `load`:
     # density_view and local_resolution_view refuse a map whose header they
     # never saw, and that refusal is deliberate. Loading them any other way
     # would make the sweep test the refusal instead of the tools.
@@ -196,10 +212,32 @@ def live_session(tmp_path_factory):
     _PROBE_FILES["map"] = _write_probe_map(probe_dir / "probe.mrc", scale=1.0)
     _PROBE_FILES["res_map"] = _write_probe_map(probe_dir / "probe_res.mrc", scale=4.0)
     _PROBE_FILES["validation"] = _write_probe_validation(probe_dir / "probe_validation.xml")
-    _load_map(path=_PROBE_FILES["map"], name=LIVE_MAP, provenance="measured")
-    _load_map(path=_PROBE_FILES["res_map"], name=LIVE_MAP_RES, provenance="generated")
+    # The wrappers turn failures into "Error: ..." strings, which is right for
+    # an MCP client and silent for a fixture. Assert, or a broken setup shows up
+    # later as tools erroring honestly and passing the wiring check.
+    for name, path, prov in (
+        (LIVE_MAP, _PROBE_FILES["map"], "measured"),
+        (LIVE_MAP_RES, _PROBE_FILES["res_map"], "generated"),
+    ):
+        loaded = _load_map(path=path, name=name, provenance=prov)
+        assert not loaded.startswith("Error:"), f"live fixture could not load {name}: {loaded}"
 
-    _require_a_healthy_viewport()
+    # A three-frame ensemble for the tier-3 sweep. The frames differ in scale,
+    # so the shared-absolute-level conversion has something real to convert.
+    # The method is *declared* rather than faked with a marker file: writing a
+    # decoy z.pkl would make load_ensemble report a cryoDRGN job that does not
+    # exist, and this suite should not manufacture evidence to satisfy itself.
+    from mcpymol.wiggles.heterogeneity import load_ensemble as _load_ensemble
+
+    ens_dir = probe_dir / "ensemble"
+    ens_dir.mkdir()
+    for index, scale in enumerate((1.0, 1.6, 2.4), start=1):
+        _write_probe_map(ens_dir / f"vol_{index}.mrc", scale=scale)
+    _PROBE_FILES["ensemble_dir"] = str(ens_dir)
+    _load_ensemble(
+        _wiggles_port(), ens_dir, LIVE_ENSEMBLE, method="cryodrgn", provenance="generated"
+    )
+
     yield
     send_request("do", args=["reinitialize"])
 
@@ -235,7 +273,15 @@ def _require_a_healthy_viewport() -> None:
 
 @pytest.fixture(autouse=True)
 def _keep_the_probe_alive():
-    """Some tools delete or mangle the probe; rebuild it if one did."""
+    """Some tools delete or mangle the fixtures; rebuild whatever one did.
+
+    The sweep calls destructive primitives on purpose — that is what it is for —
+    so the volumes are as vulnerable as the peptide. Restoring them matters more
+    than it looks: the map and ensemble tools keep their headers in a
+    process-global registry, so a deleted object leaves the registry intact and
+    the tool proceeds to contour something that is no longer there. It fails
+    with an honest domain error, passes the wiring check, and proves nothing.
+    """
     yield
     res = send_request("count_atoms", args=[f"({LIVE_OBJECT})"])
     try:
@@ -245,6 +291,32 @@ def _keep_the_probe_alive():
     if not alive:
         send_request("delete", args=[LIVE_OBJECT])
         send_request("fab", args=[LIVE_SEQUENCE, LIVE_OBJECT])
+
+    if _PROBE_FILES:
+        _restore_volumes()
+
+
+def _restore_volumes() -> None:
+    """Reload any probe volume a test removed, registry and all."""
+    from mcpymol.wiggles.heterogeneity import load_ensemble as _load_ensemble
+    from mcpymol.wiggles.tools import load_map as _load_map
+
+    present = send_request("get_names", args=["objects"]).get("result") or []
+    for name, key, prov in (
+        (LIVE_MAP, "map", "measured"),
+        (LIVE_MAP_RES, "res_map", "generated"),
+    ):
+        if name not in present:
+            _load_map(path=_PROBE_FILES[key], name=name, provenance=prov)
+
+    if not any(str(n).startswith(f"{LIVE_ENSEMBLE}_f") for n in present):
+        _load_ensemble(
+            _wiggles_port(),
+            _PROBE_FILES["ensemble_dir"],
+            LIVE_ENSEMBLE,
+            method="cryodrgn",
+            provenance="generated",
+        )
 
 
 # ── argument defaults, by parameter name ─────────────────────────────────────
@@ -306,6 +378,10 @@ DEFAULTS: dict[str, str] = {
     "map_object": "_live_missing_map",
     "map_obj": LIVE_MAP,
     "res_obj": LIVE_MAP_RES,
+    "ensemble_name": LIVE_ENSEMBLE,
+    # A selection that matches whatever `fab` built, so composition_view is
+    # exercised rather than refused for an empty selection.
+    "table": "polymer=0.6",
     "prefix": "_live_sym",
     "segi": None,
     "options": None,
@@ -393,6 +469,7 @@ PATH_FIXTURES = {
     "map_info": "map",
     "load_map": "map",
     "qscore_view": "validation",
+    "load_ensemble": "ensemble_dir",
 }
 
 
@@ -404,7 +481,7 @@ def _arguments_for(fn, tmp_path, tool_name: str = "") -> dict:
     hints = typing.get_type_hints(fn, include_extras=False)
     args = {}
     for name, param in inspect.signature(fn).parameters.items():
-        if name in ("path", "validation_path") and tool_name in PATH_FIXTURES:
+        if name in ("path", "validation_path", "directory") and tool_name in PATH_FIXTURES:
             args[name] = _PROBE_FILES[PATH_FIXTURES[tool_name]]
         elif name in ("filename",):
             args[name] = str(tmp_path / "live_probe.png")
@@ -570,3 +647,57 @@ def test_journey_a_failed_fetch_keeps_the_session(hiv_protease):
 
     assert "Successfully fetched" not in result
     assert "1hsg" in list_objects(), f"the session was cleared by a failed fetch\n{before}"
+
+
+def test_journey_deformation_draws_real_arrows():
+    """A two-state object, and arrows that actually reach PyMOL as geometry.
+
+    The generic sweep calls deformation_view on the single-state probe, which
+    correctly refuses — so the sweep never reaches the CGO path, and CGO is
+    exactly where a wiring bug would live: `load_cgo` takes a flat list of
+    floats whose opcodes carry their own argument counts, and a miscounted
+    arrow is accepted silently and drawn as nothing.
+    """
+    from mcpymol.wiggles.deformation import deformation_view
+
+    moved = "_live_moved"
+    send_request("delete", args=[moved])
+    send_request("create", args=[moved, LIVE_OBJECT, 1, 1])
+    send_request("create", args=[moved, LIVE_OBJECT, 1, 2])
+    # Displace state 2 so there is a real motion to draw.
+    # selection + camera=0, NOT object=: with object= PyMOL stores a TTT
+    # display matrix and the coordinates never move, so get_coords reports zero
+    # displacement and the arrows would be correct about nothing having happened.
+    send_request("translate", args=[[6.0, 0.0, 0.0], moved, 2, 0])
+
+    result = deformation_view(_wiggles_port(), moved, arrows=True)
+    assert_wired("deformation_view", result)
+    assert "REFUSED" not in result, result
+
+    names = send_request("get_names", args=["objects"]).get("result") or []
+    assert f"{moved}_arrows" in names, f"CGO arrows never arrived: {names}\n{result}"
+
+    # The displacement is a rigid 6 A translation, so every residue should
+    # report it. A CGO that draws but reports the wrong magnitude would pass
+    # the existence check above.
+    assert "6.00" in result, result
+
+
+def test_journey_latent_traverse_holds_one_absolute_level():
+    """Three frames at different scales, contoured at one absolute value.
+
+    This is the trap the tool exists to close, and it can only be checked
+    against a real PyMOL: the frames were normalised independently on load, so
+    a correct implementation asks for a *different* sigma per frame and PyMOL
+    has to accept each one.
+    """
+    from mcpymol.wiggles.latent import latent_traverse_view
+
+    result = latent_traverse_view(_wiggles_port(), LIVE_ENSEMBLE, name="_live_traj")
+    assert_wired("latent_traverse_view", result)
+    assert "REFUSED" not in result, result
+
+    names = send_request("get_names", args=["objects"]).get("result") or []
+    drawn = [n for n in names if str(n).startswith("_live_traj")]
+    assert len(drawn) == 3, f"expected three contoured frames, got {drawn}\n{result}"
+    assert "IS the density change" in result, result
