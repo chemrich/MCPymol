@@ -11,6 +11,8 @@ from mcpymol.wiggles.atoms import (
     fetch_atoms,
     fetch_state_coords,
     group_by_residue,
+    residue_clause,
+    residue_selection,
 )
 from mcpymol.wiggles.port import FakePort, PortError
 
@@ -108,3 +110,42 @@ def test_altloc_groups_excludes_blank_and_whitespace():
         Atom("A", "4", "SER", "CA", "A", 1.0, 0.0),
     ]
     assert altloc_groups(atoms) == ["A", "B"]
+
+
+class TestSelectionQuoting:
+    """Two identifier shapes that occur constantly in real depositions and
+    that PyMOL's selection grammar reads as something else entirely.
+
+    Both were checked against PyMOL 3.1.0 rather than assumed. With a blank
+    chain, `(gly) and chain  and resi 2` matched 10 atoms in a session where
+    gly held 7 — `and` had been taken as the chain name and the selection was
+    no longer scoped to the object. With `resi -3`, an object whose only
+    residue was numbered 2 matched all 7 of its atoms, because -3 parses as
+    the range 1-3.
+    """
+
+    def test_blank_chain_cannot_swallow_the_next_token(self):
+        sel = residue_selection("gly", "", "2")
+
+        assert 'chain ""' in sel
+        assert "chain  and" not in sel
+
+    def test_negative_residue_is_not_a_range(self):
+        sel = residue_selection("obj", "A", "-3")
+
+        assert 'resi "-3"' in sel
+        assert "resi -3 " not in sel + " "
+
+    def test_insertion_codes_and_ordinary_values_survive(self):
+        assert residue_selection("obj", "A", "52A") == '(obj) and chain "A" and resi "52A"'
+
+    def test_clause_form_quotes_the_same_way(self):
+        assert residue_clause("", "-3") == '(chain "" and resi "-3")'
+
+    def test_a_quote_in_an_identifier_is_refused_not_guessed_at(self):
+        """Quoting is only safe while the value cannot close it. Nothing in
+        the PDB or mmCIF grammar puts a double quote in one of these, so the
+        file is corrupt — and silently proceeding is how the blank-chain bug
+        behaved."""
+        with pytest.raises(ValueError, match="double quote"):
+            residue_selection("obj", 'A" or all and chain "B', "1")

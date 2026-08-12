@@ -221,3 +221,29 @@ def test_other_morph_errors_still_raise():
     )
     with pytest.raises(PortError, match="Invalid selection"):
         morph_states(port, "obj")
+
+
+def test_blank_chain_and_negative_resi_stay_scoped():
+    """The same selection defect qscore had, at the ensembles call site.
+
+    The reported fix named qscore.py only; ensembles.py builds the identical
+    string and would have kept writing one residue's spread across a range —
+    or, with a blank chain, across every atom in the session.
+    """
+    rows = [
+        ("", "-3", "MET", "CA", "", 1.0, 20.0),
+        ("", "-2", "ALA", "CA", "", 1.0, 20.0),
+    ]
+    port = make_port(
+        n_states=2,
+        atom_rows=rows,
+        coords_by_state=[[(0.0, 0.0, 0.0), (1.0, 0.0, 0.0)], [(0.5, 0.0, 0.0), (1.5, 0.0, 0.0)]],
+    )
+
+    ensemble_spread_view(port, "obj")
+
+    selections = [args[0] for args, _ in port.calls("alter") if args]
+    assert selections, "no alter issued"
+    for sel in selections:
+        assert "chain  and" not in sel, f"unscoped selection: {sel}"
+    assert any('chain "" and resi "-3"' in s for s in selections), selections
