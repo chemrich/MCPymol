@@ -16,6 +16,7 @@ from __future__ import annotations
 import pytest
 from test_mapinfo import write_map
 
+from mcpymol.wiggles.density import DEFAULT_SIGMA
 from mcpymol.wiggles.heterogeneity import forget_ensemble, load_ensemble, loaded_ensemble
 from mcpymol.wiggles.latent import (
     ABSENCE_CLAIMS,
@@ -242,3 +243,36 @@ def test_the_provenance_banner_is_carried(ensemble):
     port, name = ensemble()
     out = latent_traverse_view(port, name)
     assert "Provenance: GENERATED" in out
+
+
+def test_the_level_is_anchored_on_the_first_usable_frame(ensemble):
+    """Frame 0 having no usable RMS must not decide the level for the rest.
+
+    The absolute level used to be converted against `headers[0]` whatever it
+    said. A header carrying rms=0 (or MRC's rms=-1 "not computed") converts
+    nothing, so the anchor came back as plain dmean — a number unrelated to
+    the level asked for, then held across every other frame. Frames 2 and 3
+    here have perfectly good statistics and should supply it.
+    """
+    port, name = ensemble(rms=(0.0, 0.5, 0.5), dmean=0.0)
+
+    report = latent_traverse_view(port, name)
+
+    # dmean=0, rms=0.5 on the usable frames, so DEFAULT_SIGMA anchors at
+    # 1.5 * 0.5 = 0.75 absolute, which converts back to 1.5 sigma on those.
+    levels = [args[2] for args, _ in port.calls("isosurface")]
+    assert levels, port.call_log
+    assert all(lv == pytest.approx(DEFAULT_SIGMA) for lv in levels), levels
+    assert "1 frame(s) were skipped" in report or "skipped" in report
+
+
+def test_an_absolute_level_needs_no_usable_anchor(ensemble):
+    """units="absolute" requires no conversion to establish the level, so an
+    unusable frame 0 must not block it — only the per-frame conversion can,
+    and that is what the usable filter is for."""
+    port, name = ensemble(rms=(0.0, 0.5), dmean=0.0)
+
+    latent_traverse_view(port, name, level=0.75, units="absolute")
+
+    levels = [args[2] for args, _ in port.calls("isosurface")]
+    assert levels == [pytest.approx(1.5)], levels

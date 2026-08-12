@@ -111,8 +111,8 @@ def test_displacement_reaches_the_bfactor_column():
     deformation_view(port, "obj", arrows=False)
 
     altered = {args[0]: args[1] for args, _ in port.calls("alter")}
-    assert "b=3.0000" in altered["(obj) and chain A and resi 2"]
-    assert "b=6.0000" in altered["(obj) and chain A and resi 3"]
+    assert "b=3.0000" in altered['(obj) and chain "A" and resi "2"']
+    assert "b=6.0000" in altered['(obj) and chain "A" and resi "3"']
 
 
 def test_the_report_names_the_biggest_movers():
@@ -236,3 +236,36 @@ def test_the_report_forbids_reading_a_population_off_an_arrow():
 
     assert "MOTION IS THE WELL-SUPPORTED CLAIM" in out
     assert "Do NOT read them as: this fraction of particles moved" in out
+
+
+def test_blank_chain_and_negative_resi_stay_scoped():
+    """The same selection defect qscore and ensembles had, at this call site.
+
+    A blank chain leaves `chain  and resi 2`, where PyMOL takes `and` as the
+    chain name and the selection stops being scoped to the object — verified
+    against PyMOL 3.1.0, where it matched more atoms than the named object
+    held. A negative residue number is read as a range. Both are routine in
+    real depositions, and this module writes B-factors, so an unscoped alter
+    destroys every other loaded structure's values.
+    """
+    rows = [
+        ("", "-3", "ALA", "CA", "", 1.0, 20.0),
+        ("", "-2", "GLY", "CA", "", 1.0, 30.0),
+    ]
+    start = [(0.0, 0.0, 0.0), (0.0, 1.0, 0.0)]
+    end = [(1.0, 0.0, 0.0), (2.0, 1.0, 0.0)]
+    port = FakePort(
+        {
+            "iterate_to_list": rows,
+            "count_states": 2,
+            "get_coords": lambda obj, state=1: start if state == 1 else end,
+        }
+    )
+
+    deformation_view(port, "obj")
+
+    selections = [args[0] for args, _ in port.calls("alter") if args]
+    assert selections, "no alter issued"
+    for sel in selections:
+        assert "chain  and" not in sel, f"unscoped selection: {sel}"
+    assert any('chain "" and resi "-3"' in s for s in selections), selections

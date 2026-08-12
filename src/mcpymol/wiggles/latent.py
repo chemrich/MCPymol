@@ -39,7 +39,7 @@ because that spread *is* the density change.
 
 from __future__ import annotations
 
-from mcpymol.wiggles.density import DEFAULT_SIGMA, to_absolute, to_sigma
+from mcpymol.wiggles.density import DEFAULT_SIGMA, to_absolute, to_sigma, usable_rms
 from mcpymol.wiggles.heterogeneity import Ensemble, Method, loaded_ensemble
 from mcpymol.wiggles.port import PortError, PymolPort, call
 from mcpymol.wiggles.provenance import provenance_banner
@@ -124,8 +124,10 @@ def latent_traverse_view(
         port: A live or fake PyMOL port.
         ensemble_name: An ensemble loaded through ``load_ensemble``.
         level: Contour level. ``None`` uses :data:`DEFAULT_SIGMA` against the
-            first frame, then holds that **absolute** value across all frames.
-        units: ``"sigma"`` (interpreted against frame 1) or ``"absolute"``.
+            first frame whose header can define a sigma scale, then holds that
+            **absolute** value across all frames.
+        units: ``"sigma"`` (interpreted against the first frame with a usable
+            RMS) or ``"absolute"`` (no conversion needed, so no anchor).
         name: Prefix for the isosurfaces. Defaults to ``<ensemble>_surf``.
         color: Colour for every frame. One colour on purpose — a per-frame
             spectrum would encode frame index as if it were a measured quantity.
@@ -179,15 +181,32 @@ def latent_traverse_view(
             ]
         )
 
-    first = ensemble.headers[0]
+    no_usable_rms = PortError(
+        f"no frame of {ensemble_name!r} has a usable RMS in its header, so an "
+        f"absolute contour level cannot be converted to the sigma PyMOL "
+        f"contours in. The headers may be stale or the maps unnormalised."
+    )
+
+    # Anchor the absolute level on the first header that can define a sigma
+    # scale, not simply on frame 0. A header carrying rms=0, or MRC's rms=-1
+    # "statistics not computed" marker, converts nothing — and taking it
+    # anyway used to yield an anchor of dmean, a number unrelated to the level
+    # asked for and then applied to every other frame. A level already given in
+    # absolute units needs no anchor at all.
+    anchor = next((h for h in ensemble.headers if usable_rms(h)), None)
+
     if level is None:
-        absolute = to_absolute(first, DEFAULT_SIGMA)
+        if anchor is None:
+            raise no_usable_rms
+        absolute = to_absolute(anchor, DEFAULT_SIGMA)
         used_default = True
     elif units == "absolute":
         absolute = float(level)
         used_default = False
     else:
-        absolute = to_absolute(first, float(level))
+        if anchor is None:
+            raise no_usable_rms
+        absolute = to_absolute(anchor, float(level))
         used_default = False
 
     levels = frame_levels(ensemble, absolute)
@@ -197,11 +216,7 @@ def latent_traverse_view(
         if sigma is not None
     ]
     if not usable:
-        raise PortError(
-            f"no frame of {ensemble_name!r} has a usable RMS in its header, so an "
-            f"absolute contour level cannot be converted to the sigma PyMOL "
-            f"contours in. The headers may be stale or the maps unnormalised."
-        )
+        raise no_usable_rms
 
     prefix = name or f"{ensemble_name}_surf"
     width = max(2, len(str(ensemble.n_frames)))

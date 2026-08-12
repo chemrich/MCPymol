@@ -27,7 +27,13 @@ import math
 import re
 from pathlib import Path
 
-from mcpymol.wiggles.atoms import Atom, count_states, fetch_atoms, fetch_state_coords
+from mcpymol.wiggles.atoms import (
+    Atom,
+    count_states,
+    fetch_atoms,
+    fetch_state_coords,
+    residue_selection,
+)
 from mcpymol.wiggles.bfactors import preservation_note, stash_bfactors
 from mcpymol.wiggles.port import PortError, PymolPort, call
 
@@ -245,7 +251,7 @@ def deformation_view(
 
     stashed = stash_bfactors(obj, atoms) if preserve_bfactors else 0
     for (chain, resi), value in residue_shift.items():
-        call(port, "alter", f"({obj}) and chain {chain} and resi {resi}", f"b={value:.4f}")
+        call(port, "alter", residue_selection(obj, chain, resi), f"b={value:.4f}")
     call(port, "spectrum", "b", "blue_white_red", obj, minimum=0, maximum=round(hi, 4))
     if as_putty:
         call(port, "show", "cartoon", obj)
