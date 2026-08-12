@@ -190,3 +190,26 @@ def test_default_object_name_strips_compound_suffixes(tmp_path):
     port = loaded_port("emd_1234")
     out = load_map(port, p)
     assert "-> emd_1234" in out
+
+
+def test_unsharpened_is_not_read_as_sharpened(tmp_path):
+    """'sharp' is a substring of 'unsharp', and SHARPENED is declared first,
+    so the first-match scan inverted the one thing the depositor had troubled
+    to record in the filename."""
+    from test_mapinfo import write_map
+
+    path = write_map(tmp_path, "emd_1234_unsharpened.mrc")
+    evidence = gather_evidence(read_map_header(path), path)
+
+    assert evidence.suggested is Provenance.MEASURED, evidence.reasons
+    assert any("unsharp" in r for r in evidence.reasons), evidence.reasons
+
+
+def test_a_genuinely_sharpened_name_still_reads_as_sharpened(tmp_path):
+    """The longest-token rule must not break the case it was guarding."""
+    from test_mapinfo import write_map
+
+    path = write_map(tmp_path, "emd_1234_sharpened.mrc")
+    evidence = gather_evidence(read_map_header(path), path)
+
+    assert evidence.suggested is Provenance.SHARPENED, evidence.reasons

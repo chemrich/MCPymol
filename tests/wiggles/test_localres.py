@@ -200,12 +200,16 @@ def test_the_setting_is_read_now_not_at_load_time(session):
     assert "read now, not as it was at load time" in out
 
 
-def test_zero_rms_refuses_rather_than_dividing(session):
-    port, _, _ = session(res_kw={"rms": 0.0})
+@pytest.mark.parametrize("rms", [0.0, -1.0])
+def test_unusable_rms_refuses_rather_than_dividing(session, rms):
+    """A negative RMS would flip the ramp: ascending Angstrom breakpoints come
+    back descending, binding blue to the worst-resolved density while the
+    legend states blue is the best. Refuse both, not just zero."""
+    port, _, _ = session(res_kw={"rms": rms})
     out = local_resolution_view(port, "main", "locres")
 
     assert "REFUSED" in out
-    assert "sigma is undefined" in out
+    assert "cannot define a sigma scale" in out
     assert "normalize_ccp4_maps, off" in out
     assert not port.calls("ramp_new"), port.call_log
 

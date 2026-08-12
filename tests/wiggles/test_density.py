@@ -52,12 +52,21 @@ def test_absolute_to_sigma_uses_mean_and_rms(loaded):
     assert to_sigma(header, 1.0) == pytest.approx(2.0)
 
 
-def test_zero_rms_cannot_be_converted(tmp_path):
-    """A header with rms=0 makes sigma undefined; say so rather than divide."""
+@pytest.mark.parametrize("rms", [0.0, -1.0])
+def test_unusable_rms_cannot_be_converted(tmp_path, rms):
+    """Neither zero nor negative RMS can define a sigma scale.
+
+    -1 is MRC2014's marker for "statistics not computed" — mrcfile writes it,
+    with dmean=-2, whenever a map is saved without update_header_stats(), and
+    plenty of processing pipelines never rewrite them. It is the more
+    dangerous of the two because it divides cleanly: `if not header.rms`
+    passed it straight through, silently inverting the sign of every
+    conversion.
+    """
     path = write_map(tmp_path, "z.mrc")
     header = read_map_header(path)
-    header = type(header)(**{**header.__dict__, "rms": 0.0})
-    with pytest.raises(ValueError, match="sigma is undefined"):
+    header = type(header)(**{**header.__dict__, "rms": rms})
+    with pytest.raises(ValueError, match="cannot define a sigma scale"):
         to_sigma(header, 1.0)
 
 
@@ -213,3 +222,31 @@ def test_the_report_says_when_normalisation_could_not_be_determined(loaded):
 
     assert _isomesh_level(port) == pytest.approx(2.0)
     assert "would not report" in report
+
+
+def test_a_deleted_map_is_not_contoured_from_its_stale_header(loaded):
+    """The registry is keyed by object name and nothing evicts from it.
+
+    Without the existence check, deleting a map leaves its header behind, and
+    the next density_view converts levels with the statistics of a volume that
+    is no longer loaded — plus a provenance banner asserting a measurement for
+    whatever now holds the name.
+    """
+    port, obj, _header = loaded()
+    port.responses["get_names"] = []  # the object is gone from the session
+
+    with pytest.raises(PortError, match="was not loaded through load_map"):
+        density_view(port, obj, "chain A", level=1.0, units="absolute")
+
+
+def test_the_report_names_the_file_the_header_came_from(loaded):
+    """A map deleted and replaced under the same name still passes the
+    existence check, because PyMOL does not expose an object's source file.
+    Printing the path is what makes that substitution visible to a reader."""
+    port, obj, _header = loaded()
+    port.responses["get"] = "1"
+
+    report = density_view(port, obj, "chain A", level=1.0, units="absolute")
+
+    assert "Header read from:" in report
+    assert "m.mrc" in report

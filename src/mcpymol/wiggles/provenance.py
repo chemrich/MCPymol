@@ -138,14 +138,26 @@ def gather_evidence(header: MapHeader, path: str | Path | None = None) -> Eviden
         )
 
     haystack = f"{name} {joined}".lower()
-    for provenance, tokens in _TOKENS:
-        hit = next((t for t in tokens if t in haystack), None)
-        if hit is not None:
-            evidence.suggested = provenance
-            evidence.reasons.append(
-                f"the name or labels contain {hit!r}, which suggests {provenance.value}"
-            )
-            break
+
+    # Longest matching token wins, not the first in declaration order. These
+    # tokens are substrings of one another: 'sharp' occurs inside 'unsharp',
+    # and SHARPENED is declared first, so a file named emd_1234_unsharpened.mrc
+    # was suggested as *sharpened* — inverting the one thing its depositor had
+    # taken the trouble to record. Sorting by length makes the more specific
+    # token win whatever order the table is written in; ties keep declaration
+    # order, since sorted() is stable.
+    candidates = [
+        (provenance, token)
+        for provenance, tokens in _TOKENS
+        for token in tokens
+        if token in haystack
+    ]
+    if candidates:
+        provenance, hit = sorted(candidates, key=lambda pair: -len(pair[1]))[0]
+        evidence.suggested = provenance
+        evidence.reasons.append(
+            f"the name or labels contain {hit!r}, which suggests {provenance.value}"
+        )
 
     if not evidence.reasons:
         evidence.reasons.append("nothing in the filename or MRC labels indicates an origin")

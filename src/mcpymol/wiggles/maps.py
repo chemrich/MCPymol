@@ -50,9 +50,35 @@ class LoadedMap:
 _LOADED: dict[str, LoadedMap] = {}
 
 
-def loaded_map(obj: str) -> LoadedMap | None:
-    """The record for ``obj``, or None if it was not loaded through load_map."""
-    return _LOADED.get(obj)
+def loaded_map(obj: str, port: PymolPort | None = None) -> LoadedMap | None:
+    """The record for ``obj``, or None if it was not loaded through load_map.
+
+    Pass ``port`` and the record is only returned if an object of that name is
+    still in the session. The registry is keyed by name and nothing evicts
+    from it, so without the check a deleted map leaves its header behind and
+    the next contour is converted with a volume's statistics that is no longer
+    loaded — a wrong number, and the provenance banner asserting a measurement
+    for whatever now holds the name.
+
+    The check cannot catch every case: a map deleted and *replaced* under the
+    same name still passes, because PyMOL does not expose the file an object
+    was loaded from. That is why :func:`mcpymol.wiggles.density.density_view`
+    prints the path the header came from — the one thing that makes a
+    substitution visible to a reader.
+    """
+    record = _LOADED.get(obj)
+    if record is None or port is None:
+        return record
+
+    try:
+        names = port.query("get_names", "objects")
+    except PortError:
+        return record  # cannot check; the stale-name risk beats failing here
+
+    if isinstance(names, (list, tuple)) and obj not in names:
+        forget_map(obj)
+        return None
+    return record
 
 
 def forget_map(obj: str | None = None) -> None:

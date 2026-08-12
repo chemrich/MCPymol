@@ -45,7 +45,13 @@ from __future__ import annotations
 
 from itertools import pairwise
 
-from mcpymol.wiggles.density import DEFAULT_CARVE, DEFAULT_SIGMA, to_absolute, to_sigma
+from mcpymol.wiggles.density import (
+    DEFAULT_CARVE,
+    DEFAULT_SIGMA,
+    to_absolute,
+    to_sigma,
+    usable_rms,
+)
 from mcpymol.wiggles.mapinfo import MapHeader
 from mcpymol.wiggles.maps import LoadedMap, loaded_map, normalisation_state
 from mcpymol.wiggles.port import PortError, PymolPort, call
@@ -187,8 +193,8 @@ def _breakpoints(header: MapHeader, breaks: list[float] | None) -> tuple[list[fl
     return [best + step * i for i in range(n)], note
 
 
-def _require_loaded(obj: str, role: str) -> LoadedMap:
-    record = loaded_map(obj)
+def _require_loaded(port: PymolPort, obj: str, role: str) -> LoadedMap:
+    record = loaded_map(obj, port)
     if record is None:
         raise PortError(
             f"{obj!r} (the {role}) was not loaded through load_map, so its header "
@@ -264,8 +270,8 @@ def local_resolution_view(
             ]
         )
 
-    main = _require_loaded(map_obj, "density map")
-    res = _require_loaded(res_obj, "resolution map")
+    main = _require_loaded(port, map_obj, "density map")
+    res = _require_loaded(port, res_obj, "resolution map")
 
     differences = grid_differences(main.header, res.header)
     if differences:
@@ -342,7 +348,7 @@ def local_resolution_view(
         contour = to_sigma(main.header, float(level))  # type: ignore[arg-type]
     else:
         contour = float(level)  # type: ignore[arg-type]
-    contour_absolute = to_absolute(main.header, contour) if main.header.rms else None
+    contour_absolute = to_absolute(main.header, contour) if usable_rms(main.header) else None
 
     surface = name or f"{map_obj}_localres"
     ramp = ramp_name or f"{res_obj}_ramp"
