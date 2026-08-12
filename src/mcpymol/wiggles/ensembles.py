@@ -17,7 +17,13 @@ from __future__ import annotations
 
 import math
 
-from mcpymol.wiggles.atoms import Atom, count_states, fetch_atoms, fetch_state_coords
+from mcpymol.wiggles.atoms import (
+    Atom,
+    count_states,
+    fetch_atoms,
+    fetch_state_coords,
+    residue_selection,
+)
 from mcpymol.wiggles.bfactors import preservation_note, stash_bfactors
 from mcpymol.wiggles.port import PortError, PymolPort, call
 
@@ -107,7 +113,7 @@ def ensemble_spread_view(port: PymolPort, obj: str, *, as_putty: bool = True) ->
 
     stashed = stash_bfactors(obj, atoms)
     for (chain, resi), value in residue_spread.items():
-        call(port, "alter", f"({obj}) and chain {chain} and resi {resi}", f"b={value:.4f}")
+        call(port, "alter", residue_selection(obj, chain, resi), f"b={value:.4f}")
     call(port, "spectrum", "b", "blue_white_red", obj, minimum=0, maximum=round(hi, 4))
     if as_putty:
         call(port, "show", "cartoon", obj)

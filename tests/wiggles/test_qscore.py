@@ -7,7 +7,7 @@ import gzip
 import pytest
 
 from mcpymol.wiggles.bfactors import has_stash
-from mcpymol.wiggles.port import FakePort, PortError
+from mcpymol.wiggles.port import ITERATE_TO_LIST, FakePort, PortError
 from mcpymol.wiggles.qscore import NO_DATA_COLOUR, QSCORE_LEGEND, parse_validation_xml, qscore_view
 
 VALIDATION = """<?xml version="1.0" encoding="UTF-8"?>
@@ -131,3 +131,35 @@ def test_worst_residues_are_surfaced(validation):
     out = qscore_view(FakePort({"iterate_to_list": ROWS}), "obj", validation)
     assert "Least resolvable" in out
     assert "A/2 0.41" in out  # the lowest scorer leads
+
+
+BLANK_CHAIN_VALIDATION = """<?xml version="1.0" encoding="UTF-8"?>
+<wwPDB-validation-information>
+  <Entry pdbid="7abc"/>
+  <ModelledSubgroup resnum="-3" resname="MET" Q_score="0.92"/>
+</wwPDB-validation-information>
+"""
+
+
+def test_blank_chain_does_not_escape_the_object(tmp_path):
+    """A validation entry with no chain attribute made every alter unscoped.
+
+    qscore.py defaults chain to "" when neither `chain` nor `said` is present,
+    and the raw interpolation `chain {chain} and resi {resi}` then left
+    `chain  and resi -3`, where PyMOL takes `and` as the chain name. Verified
+    on PyMOL 3.1.0: the selection matched more atoms than the named object
+    held. Since restore_bfactors only ever restores the object it was given,
+    every other structure in the session lost its B-factors with no way back.
+    """
+    path = tmp_path / "blank.xml"
+    path.write_text(BLANK_CHAIN_VALIDATION)
+    port = FakePort({ITERATE_TO_LIST: [("", "-3", "MET", "CA", "", 1.0, 20.0)]})
+
+    qscore_view(port, "obj", str(path))
+
+    selections = [args[0] for args, _ in port.calls("alter") if args]
+    assert selections, "no alter issued"
+    for sel in selections:
+        assert "chain  and" not in sel, f"unscoped selection: {sel}"
+        assert "resi -3" not in sel + " ", f"negative resi read as a range: {sel}"
+    assert any('chain "" and resi "-3"' in s for s in selections), selections

@@ -27,7 +27,7 @@ both units, and stating one without saying which is how the mistake happens.
 from __future__ import annotations
 
 from mcpymol.wiggles.mapinfo import MapHeader
-from mcpymol.wiggles.maps import loaded_map
+from mcpymol.wiggles.maps import loaded_map, normalisation_state
 from mcpymol.wiggles.port import PortError, PymolPort, call
 from mcpymol.wiggles.provenance import provenance_banner
 
@@ -59,6 +59,28 @@ def to_sigma(header: MapHeader, absolute: float) -> float:
 def to_absolute(header: MapHeader, sigma: float) -> float:
     """Convert a sigma level back to an absolute map value."""
     return header.dmean + sigma * header.rms
+
+
+def _normalisation_note(normalised: bool | None, level_sent: float) -> str:
+    """One line saying which number reached ``isomesh``, and why.
+
+    The sigma/absolute pair above it is a statement about the map; this is a
+    statement about the command that was actually run. They differ exactly
+    when PyMOL is not normalising, which is the case the user most needs
+    told — silently swapping units is how a correct-looking report ends up
+    describing a mesh that was drawn somewhere else.
+    """
+    if normalised is False:
+        return (
+            f"  normalize_ccp4_maps is OFF, so isomesh was given {level_sent:.6g} "
+            f"in the map's own units."
+        )
+    if normalised is None:
+        return (
+            f"  PyMOL would not report normalize_ccp4_maps; assumed on, so isomesh "
+            f"was given {level_sent:.3g} sigma. If it is off, this contour is wrong."
+        )
+    return f"  normalize_ccp4_maps is on, so isomesh was given {level_sent:.3g} sigma."
 
 
 def density_view(
@@ -122,8 +144,30 @@ def density_view(
     if absolute is None and header.rms:
         absolute = to_absolute(header, sigma)
 
+    # Which number isomesh wants depends on whether PyMOL normalised the volume
+    # on load. With normalize_ccp4_maps on (the default) a level is in sigma;
+    # with it off the map keeps its stored values and the level is read as a
+    # raw density. Sending sigma to an un-normalised map is the failure this
+    # module exists to prevent: EMD-30913's published 0.05 is 3.16 sigma, and
+    # 3.16 as a raw value contours nothing at all — an empty mesh under a
+    # report claiming the depositor's own level was applied.
+    normalised = normalisation_state(port)
+    if normalised is False:
+        if absolute is None:
+            raise PortError(
+                f"{map_obj!r} was loaded with normalize_ccp4_maps off, so a contour "
+                f"level is read in the map's own units — but its header reports "
+                f"rms={header.rms:g}, so the sigma level given cannot be converted "
+                f"to one. Give the level in absolute units, or repair the header "
+                f"statistics. Contouring on the unconverted number would draw a "
+                f"surface at the wrong density and say nothing was wrong."
+            )
+        level_sent = absolute
+    else:
+        level_sent = sigma
+
     mesh = name or f"{map_obj}_mesh"
-    call(port, "isomesh", mesh, map_obj, sigma, selection, carve=carve)
+    call(port, "isomesh", mesh, map_obj, level_sent, selection, carve=carve)
 
     absolute_text = f"{absolute:.6g}" if absolute is not None else "unknown (rms=0)"
     lines = [
@@ -132,6 +176,7 @@ def density_view(
         f"  Contour: {sigma:.3g} sigma  =  {absolute_text} absolute",
         f"  Map sigma (header rms): {header.rms:.6g}   mean: {header.dmean:.6g}",
         f"  Mesh `{mesh}`, carved {carve:g} Å around the selection.",
+        _normalisation_note(normalised, level_sent),
         "",
     ]
 

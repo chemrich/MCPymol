@@ -161,3 +161,55 @@ def test_geometry_warnings_reach_the_report(loaded):
     port, obj, _ = loaded("aniso.mrc", nx=100, ny=100, nz=100, cella=(100.0, 100.0, 150.0))
     out = density_view(port, obj, "chain A", level=1.0)
     assert "ANISOTROPIC" in out
+
+
+# ── which number actually reaches isomesh ───────────────────────────────────
+
+
+def _isomesh_level(port):
+    args, _ = port.calls("isomesh")[0]
+    return args[2]
+
+
+def test_normalised_map_is_contoured_in_sigma(loaded):
+    port, obj, _header = loaded()
+    port.responses["get"] = "1"  # normalize_ccp4_maps on
+
+    report = density_view(port, obj, "chain A", level=1.0, units="absolute")
+
+    # dmean=0, rms=0.5, so 1.0 absolute is 2 sigma.
+    assert _isomesh_level(port) == pytest.approx(2.0)
+    assert "is on" in report
+
+
+def test_unnormalised_map_is_contoured_in_absolute_units(loaded):
+    """With normalize_ccp4_maps off, PyMOL reads the level as a raw map value.
+
+    Sending sigma there is the failure this module exists to prevent:
+    EMD-30913's published 0.05 is 3.16 sigma, and 3.16 as a raw density
+    contours nothing at all — an empty mesh under a report claiming the
+    depositor's own level was applied.
+    """
+    port, obj, _header = loaded()
+    port.responses["get"] = "0"  # normalize_ccp4_maps off
+
+    report = density_view(port, obj, "chain A", level=1.0, units="absolute")
+
+    assert _isomesh_level(port) == pytest.approx(1.0), (
+        "sent sigma to an un-normalised map, so the mesh is at the wrong density"
+    )
+    assert "OFF" in report
+    # The sigma/absolute pair still describes the map honestly.
+    assert "2 sigma" in report
+
+
+def test_the_report_says_when_normalisation_could_not_be_determined(loaded):
+    """An older plugin may not expose `get`. Assuming on is the right default,
+    but the report has to say the contour rests on that assumption."""
+    port, obj, _header = loaded()
+    port.responses["get"] = "something unexpected"
+
+    report = density_view(port, obj, "chain A", level=1.0, units="absolute")
+
+    assert _isomesh_level(port) == pytest.approx(2.0)
+    assert "would not report" in report
