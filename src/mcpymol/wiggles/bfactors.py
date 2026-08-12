@@ -49,7 +49,23 @@ def stash_bfactors(obj: str, atoms: list[Atom]) -> int:
 
     Takes atoms already fetched rather than querying again — the caller has
     them, and a second read would be a second round trip for data we hold.
+
+    **The first stash wins.** Every caller here reads ``b`` *after* some
+    earlier view may already have overwritten it, so a second stash would save
+    the first view's output as though it were the user's data — and
+    :func:`restore_bfactors` would then write occupancies, or Q-scores, into
+    the B-factor column and report success for having destroyed the
+    crystallographic values. Since the only way back is what is held here, the
+    original has to survive; re-stashing is a no-op that returns the size of
+    the stash already held, so the caller's "N values preserved" line stays
+    true.
+
+    :func:`restore_bfactors` clears the stash, so a view run after a restore
+    stashes fresh.
     """
+    existing = _STASH.get(obj)
+    if existing is not None:
+        return len(existing)
     _STASH[obj] = {_key(a): a.b for a in atoms}
     return len(_STASH[obj])
 
@@ -88,6 +104,13 @@ def restore_bfactors(port: PymolPort, obj: str) -> str:
     port.do(f"stored.wiggles_b = {json.dumps(flat)}")
     call(port, "alter", obj, "b=stored.wiggles_b.get('|'.join((chain, resi, name, alt)), b)")
     call(port, "rebuild", obj)
+
+    # Drop the stash now the column holds those values again. Otherwise the
+    # first-stash-wins rule would pin this object to B-factors that are no
+    # longer the ones worth saving, and a view run after a restore could never
+    # record a new baseline.
+    clear_stash(obj)
+
     return (
         f"Restored {len(saved)} B-factors on {obj}. Atoms not present when the "
         f"stash was taken keep their current value."

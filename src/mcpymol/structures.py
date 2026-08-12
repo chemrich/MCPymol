@@ -689,6 +689,46 @@ def get_sequence(
 DEFAULT_ATOM_PROPERTIES = "chain, resi, resn, name, b, q"
 
 
+def _split_properties(properties: str) -> list[str]:
+    """Split a property list on commas that separate *fields*.
+
+    ``properties`` is a Python expression list evaluated by ``iterate``, so a
+    comma inside brackets or quotes belongs to the expression, not to the
+    list. Splitting on every comma tore an expression like
+    ``resi in ('1','2')`` into fragments that were then handed to PyMOL as
+    separate field names — a confusing per-fragment error, or worse a partial
+    result, in a tool whose whole point is reaching data no other view shows.
+    """
+    fields: list[str] = []
+    current: list[str] = []
+    depth = 0
+    quote: str | None = None
+
+    for char in properties:
+        if quote is not None:
+            current.append(char)
+            if char == quote:
+                quote = None
+            continue
+        if char in "\"'":
+            quote = char
+            current.append(char)
+        elif char in "([{":
+            depth += 1
+            current.append(char)
+        elif char in ")]}":
+            depth = max(0, depth - 1)
+            current.append(char)
+        elif char == "," and depth == 0:
+            fields.append("".join(current))
+            current = []
+        else:
+            current.append(char)
+
+    fields.append("".join(current))
+    return [f.strip() for f in fields if f.strip()]
+
+
 @mcp.tool()
 def atom_properties(
     selection: Annotated[
@@ -726,7 +766,7 @@ def atom_properties(
     ``properties`` is evaluated by PyMOL once per atom, so it accepts any
     expression valid in ``iterate`` — the names above are the useful subset.
     """
-    fields = [f.strip() for f in properties.split(",") if f.strip()]
+    fields = _split_properties(properties)
     if not fields:
         return "Error: no properties requested, e.g. properties='chain, resi, b'."
     if max_atoms < 1:

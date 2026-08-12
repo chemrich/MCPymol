@@ -17,7 +17,13 @@ from __future__ import annotations
 
 import math
 
-from mcpymol.wiggles.atoms import Atom, count_states, fetch_atoms, fetch_state_coords
+from mcpymol.wiggles.atoms import (
+    Atom,
+    count_states,
+    fetch_atoms,
+    fetch_state_coords,
+    residue_selection,
+)
 from mcpymol.wiggles.bfactors import preservation_note, stash_bfactors
 from mcpymol.wiggles.port import PortError, PymolPort, call
 
@@ -74,7 +80,9 @@ def per_residue_spread(atoms: list[Atom], atom_spread: list[float]) -> dict[tupl
     return {key: sum(v) / len(v) for key, v in acc.items()}
 
 
-def ensemble_spread_view(port: PymolPort, obj: str, *, as_putty: bool = True) -> str:
+def ensemble_spread_view(
+    port: PymolPort, obj: str, *, as_putty: bool = True, superpose: bool = True
+) -> str:
     """Colour and thicken ``obj`` by how much its states disagree, per residue.
 
     Args:
@@ -82,9 +90,24 @@ def ensemble_spread_view(port: PymolPort, obj: str, *, as_putty: bool = True) ->
         obj: A multi-state object.
         as_putty: Render as a putty cartoon so spread reads as tube width as
             well as colour.
+        superpose: Fit every state onto the first before measuring. On by
+            default because per-residue spread is only a conformational
+            quantity once the states share a frame — see below.
 
     Returns:
         A report, always ending with the spread legend.
+
+    **Why the fit has to happen.** Spread is the RMS of each atom about its own
+    position across states, which measures whatever separates those states —
+    including a rigid-body offset that says nothing about flexibility. PyMOL
+    loads the models of a multi-model PDB as states without aligning them, so
+    an MD trajectory that drifted across the box, or two independently refined
+    ensemble members 2 Å apart, would report that offset at *every* residue and
+    paint an internally rigid molecule red from end to end.
+
+    ``intra_fit`` moves the coordinates in the session; that is a real edit and
+    the report says so. Pass ``superpose=False`` when the states are already in
+    a common frame and you would rather nothing was touched.
     """
     n_states = count_states(port, obj)
     if n_states < 2:
@@ -95,6 +118,11 @@ def ensemble_spread_view(port: PymolPort, obj: str, *, as_putty: bool = True) ->
             f"  If this is a multiconformer model rather than an ensemble, the\n"
             f"  heterogeneity is in altloc groups, not states — use altloc_view."
         )
+
+    # Before any coordinate is read: otherwise the spread below is measuring
+    # rigid-body displacement and calling it flexibility.
+    if superpose:
+        call(port, "intra_fit", obj)
 
     atoms = fetch_atoms(port, obj)
     coords = [fetch_state_coords(port, obj, s) for s in range(1, n_states + 1)]
@@ -107,7 +135,7 @@ def ensemble_spread_view(port: PymolPort, obj: str, *, as_putty: bool = True) ->
 
     stashed = stash_bfactors(obj, atoms)
     for (chain, resi), value in residue_spread.items():
-        call(port, "alter", f"({obj}) and chain {chain} and resi {resi}", f"b={value:.4f}")
+        call(port, "alter", residue_selection(obj, chain, resi), f"b={value:.4f}")
     call(port, "spectrum", "b", "blue_white_red", obj, minimum=0, maximum=round(hi, 4))
     if as_putty:
         call(port, "show", "cartoon", obj)
@@ -123,6 +151,15 @@ def ensemble_spread_view(port: PymolPort, obj: str, *, as_putty: bool = True) ->
             f"ensemble_spread_view({obj})",
             "",
             f"  {n_states} states, {len(atoms)} atoms, {len(residue_spread)} residues.",
+            (
+                "  States fitted onto state 1 first (intra_fit), so this is "
+                "conformational\n  spread, not rigid-body drift. The fit moved "
+                "the coordinates in the session."
+                if superpose
+                else "  NOT superposed (superpose=False), so any rigid-body offset "
+                "between\n  states is counted as spread. Only meaningful if the "
+                "states already share a frame."
+            ),
             f"  Per-residue spread: {lo:.2f} – {hi:.2f} Å (median {median:.2f} Å)",
             f"  Most variable: {widest_text}",
             "",

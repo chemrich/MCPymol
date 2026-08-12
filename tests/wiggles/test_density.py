@@ -52,12 +52,21 @@ def test_absolute_to_sigma_uses_mean_and_rms(loaded):
     assert to_sigma(header, 1.0) == pytest.approx(2.0)
 
 
-def test_zero_rms_cannot_be_converted(tmp_path):
-    """A header with rms=0 makes sigma undefined; say so rather than divide."""
+@pytest.mark.parametrize("rms", [0.0, -1.0])
+def test_unusable_rms_cannot_be_converted(tmp_path, rms):
+    """Neither zero nor negative RMS can define a sigma scale.
+
+    -1 is MRC2014's marker for "statistics not computed" — mrcfile writes it,
+    with dmean=-2, whenever a map is saved without update_header_stats(), and
+    plenty of processing pipelines never rewrite them. It is the more
+    dangerous of the two because it divides cleanly: `if not header.rms`
+    passed it straight through, silently inverting the sign of every
+    conversion.
+    """
     path = write_map(tmp_path, "z.mrc")
     header = read_map_header(path)
-    header = type(header)(**{**header.__dict__, "rms": 0.0})
-    with pytest.raises(ValueError, match="sigma is undefined"):
+    header = type(header)(**{**header.__dict__, "rms": rms})
+    with pytest.raises(ValueError, match="cannot define a sigma scale"):
         to_sigma(header, 1.0)
 
 
@@ -161,3 +170,83 @@ def test_geometry_warnings_reach_the_report(loaded):
     port, obj, _ = loaded("aniso.mrc", nx=100, ny=100, nz=100, cella=(100.0, 100.0, 150.0))
     out = density_view(port, obj, "chain A", level=1.0)
     assert "ANISOTROPIC" in out
+
+
+# ── which number actually reaches isomesh ───────────────────────────────────
+
+
+def _isomesh_level(port):
+    args, _ = port.calls("isomesh")[0]
+    return args[2]
+
+
+def test_normalised_map_is_contoured_in_sigma(loaded):
+    port, obj, _header = loaded()
+    port.responses["get"] = "1"  # normalize_ccp4_maps on
+
+    report = density_view(port, obj, "chain A", level=1.0, units="absolute")
+
+    # dmean=0, rms=0.5, so 1.0 absolute is 2 sigma.
+    assert _isomesh_level(port) == pytest.approx(2.0)
+    assert "is on" in report
+
+
+def test_unnormalised_map_is_contoured_in_absolute_units(loaded):
+    """With normalize_ccp4_maps off, PyMOL reads the level as a raw map value.
+
+    Sending sigma there is the failure this module exists to prevent:
+    EMD-30913's published 0.05 is 3.16 sigma, and 3.16 as a raw density
+    contours nothing at all — an empty mesh under a report claiming the
+    depositor's own level was applied.
+    """
+    port, obj, _header = loaded()
+    port.responses["get"] = "0"  # normalize_ccp4_maps off
+
+    report = density_view(port, obj, "chain A", level=1.0, units="absolute")
+
+    assert _isomesh_level(port) == pytest.approx(1.0), (
+        "sent sigma to an un-normalised map, so the mesh is at the wrong density"
+    )
+    assert "OFF" in report
+    # The sigma/absolute pair still describes the map honestly.
+    assert "2 sigma" in report
+
+
+def test_the_report_says_when_normalisation_could_not_be_determined(loaded):
+    """An older plugin may not expose `get`. Assuming on is the right default,
+    but the report has to say the contour rests on that assumption."""
+    port, obj, _header = loaded()
+    port.responses["get"] = "something unexpected"
+
+    report = density_view(port, obj, "chain A", level=1.0, units="absolute")
+
+    assert _isomesh_level(port) == pytest.approx(2.0)
+    assert "would not report" in report
+
+
+def test_a_deleted_map_is_not_contoured_from_its_stale_header(loaded):
+    """The registry is keyed by object name and nothing evicts from it.
+
+    Without the existence check, deleting a map leaves its header behind, and
+    the next density_view converts levels with the statistics of a volume that
+    is no longer loaded — plus a provenance banner asserting a measurement for
+    whatever now holds the name.
+    """
+    port, obj, _header = loaded()
+    port.responses["get_names"] = []  # the object is gone from the session
+
+    with pytest.raises(PortError, match="was not loaded through load_map"):
+        density_view(port, obj, "chain A", level=1.0, units="absolute")
+
+
+def test_the_report_names_the_file_the_header_came_from(loaded):
+    """A map deleted and replaced under the same name still passes the
+    existence check, because PyMOL does not expose an object's source file.
+    Printing the path is what makes that substitution visible to a reader."""
+    port, obj, _header = loaded()
+    port.responses["get"] = "1"
+
+    report = density_view(port, obj, "chain A", level=1.0, units="absolute")
+
+    assert "Header read from:" in report
+    assert "m.mrc" in report

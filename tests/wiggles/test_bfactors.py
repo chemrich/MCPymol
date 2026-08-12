@@ -109,3 +109,43 @@ def test_preservation_note_is_actionable():
     assert "42" in note
     assert "restore_bfactors" in note
     assert "myobj" in note
+
+
+def test_restashing_keeps_the_original_values():
+    """Two B-factor views in a row must not make the second one's output the
+    thing restore_bfactors puts back.
+
+    occupancy_view stashes the crystallographic B-factors and writes
+    occupancies into the column; qscore_view then fetches atoms and sees those
+    occupancies. If that second stash won, restore would write occupancies
+    into B and report success for having destroyed the real values — with no
+    second copy anywhere, since the stash is the only one.
+    """
+    stash_bfactors("obj", ATOMS)
+
+    overwritten = [Atom(a.chain, a.resi, a.resn, a.name, a.alt, a.q, 0.87) for a in ATOMS]
+    assert stash_bfactors("obj", overwritten) == 3
+
+    port = FakePort()
+    restore_bfactors(port, "obj")
+    pushed = json.loads(next(c for c in port.commands if "stored.wiggles_b" in c).split("=", 1)[1])
+
+    assert sorted(pushed.values()) == [20.5, 22.0, 31.25], (
+        "restore pushed the second stash's values, so the originals are gone"
+    )
+
+
+def test_restore_clears_the_stash_so_a_later_view_can_rebaseline():
+    """First-stash-wins must not pin an object forever: once the column holds
+    the original values again, the next view is entitled to a fresh baseline."""
+    stash_bfactors("obj", ATOMS)
+    restore_bfactors(FakePort(), "obj")
+
+    assert not has_stash("obj")
+
+    later = [Atom(a.chain, a.resi, a.resn, a.name, a.alt, a.q, 5.0) for a in ATOMS]
+    stash_bfactors("obj", later)
+    port = FakePort()
+    restore_bfactors(port, "obj")
+    pushed = json.loads(next(c for c in port.commands if "stored.wiggles_b" in c).split("=", 1)[1])
+    assert set(pushed.values()) == {5.0}

@@ -25,7 +25,12 @@ import gzip
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-from mcpymol.wiggles.atoms import fetch_atoms, group_by_residue
+from mcpymol.wiggles.atoms import (
+    fetch_atoms,
+    group_by_residue,
+    residue_clause,
+    residue_selection,
+)
 from mcpymol.wiggles.bfactors import preservation_note, stash_bfactors
 from mcpymol.wiggles.port import PortError, PymolPort, call
 
@@ -145,9 +150,9 @@ def qscore_view(
     stashed = stash_bfactors(obj, atoms) if preserve_bfactors else 0
     call(port, "alter", obj, "b=0")
     for (chain, resi), value in matched.items():
-        call(port, "alter", f"({obj}) and chain {chain} and resi {resi}", f"b={value:.4f}")
+        call(port, "alter", residue_selection(obj, chain, resi), f"b={value:.4f}")
 
-    scored_sel = " or ".join(f"(chain {c} and resi {r})" for c, r in matched)
+    scored_sel = " or ".join(residue_clause(c, r) for c, r in matched)
     call(
         port,
         "spectrum",
@@ -158,7 +163,7 @@ def qscore_view(
         maximum=1,
     )
     if missing:
-        missing_sel = " or ".join(f"(chain {c} and resi {r})" for c, r in missing)
+        missing_sel = " or ".join(residue_clause(c, r) for c, r in missing)
         call(port, "color", NO_DATA_COLOUR, f"({obj}) and ({missing_sel})")
 
     values = sorted(matched.values())

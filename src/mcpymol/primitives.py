@@ -955,9 +955,12 @@ def spheroid(
         Field(
             description="Object to render as smoothed spheres. This is an object "
             "name, not a selection expression — cmd.spheroid resolves it as an "
-            "object and reports 'Object not found' for anything else."
+            "object and reports 'Object not found' for anything else. The "
+            "default is the empty string, which cmd.spheroid takes to mean "
+            'every object; passing "all" is an error, because no object is '
+            "named that."
         ),
-    ] = "all",
+    ] = "",
 ) -> str:
     """
     Displays atoms as smooth spheres
@@ -1101,6 +1104,13 @@ def frame(
     """
     Sets or queries the current frame
     """
+    # The query half has to be a different PyMOL call: cmd.frame takes a
+    # required argument, so omitting it — which this tool's own schema says
+    # you may do — reached PyMOL as `frame()` and came back "missing 1
+    # required positional argument". The documented behaviour simply did not
+    # exist, and only a call made the way the schema describes would show it.
+    if frame_number is None:
+        return _call("get_frame")
     return _call("frame", frame_number=frame_number)
 
 

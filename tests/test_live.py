@@ -70,12 +70,22 @@ _PROBE_FILES: dict[str, str] = {}
 # ── the signatures that can only mean a misconfigured wrapper ────────────────
 
 WIRING_FAILURES = (
+    # Python could not bind the call at all.
     "unknown action or method not found",
     "invalid literal for int()",
     "required positional argument",
     "unexpected keyword argument",
     "positional arguments but",
     "takes no arguments",
+    # PyMOL bound the call and then rejected what the argument *meant*. This
+    # half was missing entirely, so "the signature was right but the value was
+    # not" passed the sweep silently. Note this does NOT reach a bad *default*:
+    # the sweep supplies most parameters from DEFAULTS below, so a tool whose
+    # own default is unusable is never called with it. test_defaults_are_usable
+    # covers that.
+    "object not found",
+    "invalid selection name",
+    "selector-error",
 )
 
 
@@ -532,6 +542,42 @@ def test_tool_is_wired_correctly(tool_name, tmp_path):
     fn = _tool_functions()[tool_name]
     result = fn(**_arguments_for(fn, tmp_path, tool_name))
     assert_wired(tool_name, str(result))
+
+
+def _fully_defaulted():
+    """Tools every parameter of which has a default, so calling with none is
+    a call the schema says is valid."""
+    import asyncio
+    import inspect
+
+    names = sorted(t.name for t in asyncio.run(mcp.list_tools()))
+    out = []
+    for name in names:
+        if name in EXCLUDED:
+            continue
+        fn = _tool_functions()[name]
+        params = inspect.signature(fn).parameters.values()
+        if params and all(p.default is not inspect.Parameter.empty for p in params):
+            out.append(name)
+    return out
+
+
+@pytest.mark.parametrize("tool_name", _fully_defaulted())
+def test_defaults_are_usable(tool_name):
+    """A tool whose own default cannot be used is misconfigured.
+
+    The sweep above supplies most parameters from DEFAULTS, so it never calls
+    a tool the way the schema says it can be called. `spheroid` shipped with
+    obj="all" while cmd.spheroid resolves that as an object *name* and answers
+    "Object not found" — every no-argument call failed, and the sweep passed
+    it every run because it always passed an explicit object.
+
+    A model reading the schema is exactly the caller that omits an optional
+    argument, so this is the path most likely to be taken in practice and was
+    the only one nothing checked.
+    """
+    fn = _tool_functions()[tool_name]
+    assert_wired(tool_name, str(fn()))
 
 
 # ── journeys: real workflows, real numbers ───────────────────────────────────

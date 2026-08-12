@@ -221,3 +221,69 @@ def test_other_morph_errors_still_raise():
     )
     with pytest.raises(PortError, match="Invalid selection"):
         morph_states(port, "obj")
+
+
+def test_blank_chain_and_negative_resi_stay_scoped():
+    """The same selection defect qscore had, at the ensembles call site.
+
+    The reported fix named qscore.py only; ensembles.py builds the identical
+    string and would have kept writing one residue's spread across a range —
+    or, with a blank chain, across every atom in the session.
+    """
+    rows = [
+        ("", "-3", "MET", "CA", "", 1.0, 20.0),
+        ("", "-2", "ALA", "CA", "", 1.0, 20.0),
+    ]
+    port = make_port(
+        n_states=2,
+        atom_rows=rows,
+        coords_by_state=[[(0.0, 0.0, 0.0), (1.0, 0.0, 0.0)], [(0.5, 0.0, 0.0), (1.5, 0.0, 0.0)]],
+    )
+
+    ensemble_spread_view(port, "obj")
+
+    selections = [args[0] for args, _ in port.calls("alter") if args]
+    assert selections, "no alter issued"
+    for sel in selections:
+        assert "chain  and" not in sel, f"unscoped selection: {sel}"
+    assert any('chain "" and resi "-3"' in s for s in selections), selections
+
+
+def test_states_are_superposed_before_measuring():
+    """Spread measures whatever separates the states, including a rigid-body
+    offset that says nothing about flexibility.
+
+    PyMOL loads a multi-model PDB's models as states without aligning them, so
+    an MD trajectory that drifted across the box would report its drift at
+    every residue and paint an internally rigid molecule red end to end. The
+    fit has to happen before any coordinate is read.
+    """
+    port = make_port(
+        n_states=2,
+        atom_rows=ROWS_2,
+        coords_by_state=[[(0.0, 0.0, 0.0), (1.0, 0.0, 0.0)], [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0)]],
+    )
+
+    report = ensemble_spread_view(port, "obj")
+
+    actions = [name for name, _, _ in port.queries]
+    assert "intra_fit" in actions, "states were never fitted"
+    assert actions.index("intra_fit") < actions.index("get_coords"), (
+        "fitted after reading coordinates, which measures the unfitted states"
+    )
+    assert "intra_fit" in report and "moved the coordinates" in report
+
+
+def test_opting_out_of_the_fit_says_so_plainly():
+    """superpose=False is legitimate when the states already share a frame,
+    but the report must not then read as measured conformational spread."""
+    port = make_port(
+        n_states=2,
+        atom_rows=ROWS_2,
+        coords_by_state=[[(0.0, 0.0, 0.0), (1.0, 0.0, 0.0)], [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0)]],
+    )
+
+    report = ensemble_spread_view(port, "obj", superpose=False)
+
+    assert not port.calls("intra_fit")
+    assert "NOT superposed" in report

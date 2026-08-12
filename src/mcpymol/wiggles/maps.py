@@ -50,9 +50,35 @@ class LoadedMap:
 _LOADED: dict[str, LoadedMap] = {}
 
 
-def loaded_map(obj: str) -> LoadedMap | None:
-    """The record for ``obj``, or None if it was not loaded through load_map."""
-    return _LOADED.get(obj)
+def loaded_map(obj: str, port: PymolPort | None = None) -> LoadedMap | None:
+    """The record for ``obj``, or None if it was not loaded through load_map.
+
+    Pass ``port`` and the record is only returned if an object of that name is
+    still in the session. The registry is keyed by name and nothing evicts
+    from it, so without the check a deleted map leaves its header behind and
+    the next contour is converted with a volume's statistics that is no longer
+    loaded — a wrong number, and the provenance banner asserting a measurement
+    for whatever now holds the name.
+
+    The check cannot catch every case: a map deleted and *replaced* under the
+    same name still passes, because PyMOL does not expose the file an object
+    was loaded from. That is why :func:`mcpymol.wiggles.density.density_view`
+    prints the path the header came from — the one thing that makes a
+    substitution visible to a reader.
+    """
+    record = _LOADED.get(obj)
+    if record is None or port is None:
+        return record
+
+    try:
+        names = port.query("get_names", "objects")
+    except PortError:
+        return record  # cannot check; the stale-name risk beats failing here
+
+    if isinstance(names, (list, tuple)) and obj not in names:
+        forget_map(obj)
+        return None
+    return record
 
 
 def forget_map(obj: str | None = None) -> None:
@@ -155,3 +181,31 @@ def load_map(
         lines += [f"    ! {w}" for w in warnings]
 
     return "\n".join(lines)
+
+
+def normalisation_state(port: PymolPort) -> bool | None:
+    """Is ``normalize_ccp4_maps`` on? None when PyMOL will not say.
+
+    Read now, not at load time, which is the honest limitation: a session that
+    had it off when the map was loaded and on now would report the wrong thing.
+
+    **What a real PyMOL returns, checked rather than assumed:** ``'1'`` — the
+    *string* ``'1'``, not ``'on'`` and not the integer ``1`` (open-source PyMOL,
+    2026-08-09, via ``tools/livefire.py``). The parse stays tolerant of the
+    other spellings because that answer is one build's, and an older plugin may
+    not expose ``get`` at all, which is unknown rather than an error.
+
+    Public because ``tools/livefire.py`` prints the raw answer next to this
+    verdict: what a real PyMOL returns here is the one thing in this module
+    that ``FakePort`` cannot establish.
+    """
+    try:
+        raw = port.query("get", "normalize_ccp4_maps")
+    except PortError:
+        return None
+    text = str(raw).strip().lower()
+    if text in ("on", "1", "1.0", "true", "yes"):
+        return True
+    if text in ("off", "0", "0.0", "false", "no"):
+        return False
+    return None
