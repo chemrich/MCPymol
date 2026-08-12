@@ -61,7 +61,9 @@ ITERATE_TO_LIST = "iterate_to_list"
 #: to stub one of these has a hole in it, so FakePort raises. Everything else
 #: is a command whose result is ignored, and stubbing each one would be noise
 #: that hides the queries that matter.
-DATA_ACTIONS = frozenset({ITERATE_TO_LIST, "count_states", "get_coords", "get_names"})
+DATA_ACTIONS = frozenset(
+    {ITERATE_TO_LIST, "count_states", "get_coords", "get_names", "count_atoms"}
+)
 
 
 class PortError(RuntimeError):

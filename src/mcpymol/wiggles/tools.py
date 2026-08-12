@@ -26,8 +26,12 @@ from pydantic import Field
 from mcpymol.app import mcp
 from mcpymol.bridge import _SLOW_OP_TIMEOUT, send_request
 from mcpymol.wiggles import bfactors as _bfactors
+from mcpymol.wiggles import composition as _composition
+from mcpymol.wiggles import deformation as _deformation
 from mcpymol.wiggles import density as _density
 from mcpymol.wiggles import ensembles as _ensembles
+from mcpymol.wiggles import heterogeneity as _heterogeneity
+from mcpymol.wiggles import latent as _latent
 from mcpymol.wiggles import localres as _localres
 from mcpymol.wiggles import mapinfo as _mapinfo
 from mcpymol.wiggles import maps as _maps
@@ -407,4 +411,237 @@ def local_resolution_view(
         name=name,
         ramp_name=ramp_name,
         validate_only=validate_only,
+    )
+
+
+# ── tier 3: ensembles ────────────────────────────────────────────────────────
+
+
+@mcp.tool()
+def load_ensemble(
+    directory: Annotated[
+        str,
+        Field(
+            description="Path to a heterogeneity job directory (cryoDRGN, 3DVA, RECOVAR, 3DFlex, DynaMight)"
+        ),
+    ],
+    name: Annotated[
+        str | None,
+        Field(description="Prefix for the loaded frame objects (defaults to the directory name)"),
+    ] = None,
+    method: Annotated[
+        str | None,
+        Field(
+            description='Declare the generating method instead of detecting it: "cryodrgn", "3dva", "recovar", "3dflex", "dynamight", "cryospire"'
+        ),
+    ] = None,
+    provenance: Annotated[
+        str,
+        Field(
+            description='How the volumes came to exist. Defaults to "generated" because heterogeneity output is decoder output or subspace interpolation.'
+        ),
+    ] = "generated",
+    max_volumes: Annotated[
+        int, Field(description="Ceiling on frames loaded; any excess is reported, not hidden")
+    ] = 50,
+    trust_pickle: Annotated[
+        bool,
+        Field(
+            description="Permit reading a .pkl latent table. Off by default because unpickling runs arbitrary code from the file."
+        ),
+    ] = False,
+) -> str:
+    """Load a cryo-EM heterogeneity job's volumes in trajectory order.
+
+    Every method in this space writes the same thing: a directory of maps plus a
+    table of latent coordinates. This reads them in trajectory order — naturally,
+    so frame 10 does not sort between 1 and 2 and silently reorder the motion.
+
+    The generating method is identified from documented on-disk markers and is
+    never guessed. A directory that matches nothing loads its volumes fine and
+    stays unidentified, which makes latent views refuse to render: an unlabelled
+    latent plot is what SPEC invariant I2 forbids, because each method's caveat
+    is different and they are not interchangeable. Pass method= if you know.
+
+    Provenance defaults to "generated" rather than "unknown" — nothing observed a
+    decoder's output — and the report says it declared that and on what evidence.
+    """
+    return _report(
+        _heterogeneity.load_ensemble,
+        _port(),
+        directory,
+        name,
+        method=method,
+        provenance=provenance,
+        max_volumes=max_volumes,
+        trust_pickle=trust_pickle,
+    )
+
+
+@mcp.tool()
+def latent_traverse_view(
+    ensemble_name: Annotated[
+        str, Field(description="An ensemble previously loaded through the load_ensemble tool")
+    ],
+    level: Annotated[
+        float | None,
+        Field(description="Contour level. If omitted, 1.5 sigma against the first frame is used."),
+    ] = None,
+    units: Annotated[
+        str,
+        Field(description='Units of `level`: "sigma" (read against frame 1) or "absolute"'),
+    ] = "sigma",
+    name: Annotated[
+        str | None, Field(description='Prefix for the isosurfaces (defaults to "<ensemble>_surf")')
+    ] = None,
+    color: Annotated[
+        str,
+        Field(
+            description="One colour for every frame; a per-frame spectrum would encode frame index as if measured"
+        ),
+    ] = "skyblue",
+    build_movie: Annotated[
+        bool,
+        Field(
+            description="Wire the frames to PyMOL's movie timeline so they can be stepped and played"
+        ),
+    ] = True,
+) -> str:
+    """Step through an ensemble's conformations as a contoured trajectory.
+
+    Refuses when the generating method was never identified. That is SPEC
+    invariant I2 working, not a failure: cryoDRGN's latent density can bear no
+    relation to the truth while 3DVA's frames are linear interpolations no
+    particle occupied, and rendering both the same way asserts something for one
+    that holds only for the other.
+
+    The contour is held at a constant ABSOLUTE value and converted to each
+    frame's own sigma. PyMOL normalises every map independently on load, so a
+    fixed sigma level would contour each frame at its own scale and flatten away
+    the density change the traversal exists to show.
+
+    No latent scatter and no density estimate are drawn, deliberately. In a
+    41-submission blind challenge most methods missed a genuinely present middle
+    state, so an empty region of latent space is a region of unknown occupancy —
+    never evidence that a conformation does not occur.
+    """
+    return _report(
+        _latent.latent_traverse_view,
+        _port(),
+        ensemble_name,
+        level=level,
+        units=units,
+        name=name,
+        color=color,
+        build_movie=build_movie,
+    )
+
+
+@mcp.tool()
+def deformation_view(
+    obj_name: Annotated[
+        str, Field(description="A multi-state object whose states are conformations")
+    ],
+    start_state: Annotated[int, Field(description="The state to measure displacement from")] = 1,
+    end_state: Annotated[
+        int | None, Field(description="The state to measure displacement to (defaults to the last)")
+    ] = None,
+    arrows: Annotated[
+        bool, Field(description="Draw CGO arrows from each residue's start to its end position")
+    ] = True,
+    arrow_scale: Annotated[
+        float,
+        Field(
+            description="Multiply arrow length; above 1.0 this is an exaggeration and is labelled as one"
+        ),
+    ] = 1.0,
+    max_arrows: Annotated[
+        int, Field(description="Ceiling on arrows drawn; anything dropped is reported")
+    ] = 60,
+    as_putty: Annotated[
+        bool, Field(description="Also scale cartoon tube width by displacement")
+    ] = False,
+    uncertainty_path: Annotated[
+        str | None,
+        Field(
+            description="Path to a 'chain resi value' table of half-set uncertainty; colours the arrows when supplied"
+        ),
+    ] = None,
+    preserve_bfactors: Annotated[
+        bool,
+        Field(description="Stash the original B-factors before overwriting them (default True)"),
+    ] = True,
+) -> str:
+    """Colour and arrow a model by how far each residue moved between two states.
+
+    This is the well-supported tool in the tier. A 41-submission blind challenge
+    found the molecular motions these methods recover resemble both each other
+    and the ground truth; it was relative populations that fell apart. So the
+    arrows mean: density moved this way. They do not mean: this fraction of
+    particles moved this way, and no population can be read out of them.
+
+    Refuses when the two states differ in atom count — atoms cannot be paired
+    across them, so a displacement field would be meaningless rather than
+    approximate.
+
+    Where a method estimates deformation on independent half-sets, pass that
+    table and the arrows are coloured by the disagreement. Without it every arrow
+    is drawn with identical confidence and they do not have identical confidence,
+    which the report says rather than leaving the picture to imply otherwise.
+    """
+    return _report(
+        _deformation.deformation_view,
+        _port(),
+        obj_name,
+        start_state=start_state,
+        end_state=end_state,
+        arrows=arrows,
+        arrow_scale=arrow_scale,
+        max_arrows=max_arrows,
+        as_putty=as_putty,
+        uncertainty=uncertainty_path,
+        preserve_bfactors=preserve_bfactors,
+    )
+
+
+@mcp.tool()
+def composition_view(
+    obj_name: Annotated[str, Field(description="The object the table's selections apply to")],
+    table: Annotated[
+        str,
+        Field(
+            description='Presence fractions, inline as "chain A=0.4, chain B=1.0" or a path to a file of selection<TAB>fraction lines'
+        ),
+    ],
+    transparency: Annotated[
+        bool,
+        Field(
+            description="Also make rarely-present parts transparent in proportion, so half-present reads as half there"
+        ),
+    ] = True,
+    label: Annotated[
+        bool, Field(description="Write each part's presence fraction next to it")
+    ] = True,
+) -> str:
+    """Colour parts of a structure by the fraction of particles containing them.
+
+    This is occupancy in SENSE 2 — compositional. A ligand at 40% here means 40%
+    of imaged complexes had it bound. It is not the per-atom crystallographic
+    occupancy q, and it is never derived from q: a model can be q=1.0 at every
+    atom while the subunit it belongs to is present in half the particles. Both
+    statements are true and they answer different questions, so the table must be
+    supplied and this tool never reads an atom property at all. For sense 1, use
+    occupancy_view.
+
+    A selection matching no atoms is refused rather than skipped — PyMOL would
+    accept it silently, colour nothing, and leave a render that looks like a
+    fully-present structure.
+    """
+    return _report(
+        _composition.composition_view,
+        _port(),
+        obj_name,
+        table,
+        transparency=transparency,
+        label=label,
     )

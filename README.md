@@ -852,6 +852,61 @@ local_resolution_view(map_obj="emd30913", res_obj="emd30913_locres",
                       level=0.05, units="absolute")
 ```
 
+### Ensembles — motion, and what not to claim from it
+
+Four tools for heterogeneity job output, and one result governs all of them. The
+Flatiron Institute blind challenge put 41 submissions on the same thyroglobulin
+data: the motions they recovered resembled both each other and the ground truth,
+but the simulated truth had **three** population modes, most submissions found
+**two**, and only three of 41 found all three. The one they missed was the
+middle. So: **motion is recoverable, populations are not**, and these tools draw
+the first and decline to draw the second.
+
+`load_ensemble` reads a job directory — cryoDRGN, 3DVA, RECOVAR, 3DFlex,
+DynaMight — as ordered frames. They all write the same shape to disk: a
+directory of maps plus a table of latent coordinates. Frames are sorted
+naturally, so frame 10 does not land between 1 and 2 and silently reorder the
+motion. The method is identified from documented markers and **never guessed**;
+an unrecognised directory still loads, and simply stays unidentified.
+
+`latent_traverse_view` contours those frames into a steppable trajectory. It
+**refuses** when the method was never identified — that is invariant I2, and the
+refusal is the point: cryoDRGN's latent density can bear no relation to the
+truth while 3DVA's frames are linear interpolations no particle occupied, so
+drawing them identically asserts something for one that holds only for the
+other. It draws no latent scatter and estimates no density, because the
+rendering users most want from latent space is the one the evidence says is most
+often wrong.
+
+It also closes a trap specific to trajectories. PyMOL normalises every map
+independently on load, so contouring each frame at "1.5 σ" contours each at *its
+own* σ — and a traversal is exactly the case where density genuinely changes
+between frames. That is the signal, and per-frame normalisation rescales it
+away, leaving frames that look reassuringly alike whatever the ensemble does. So
+the level is held in **absolute** terms and converted per frame, and the spread
+of the resulting σ values is reported, because that spread *is* the change.
+
+`deformation_view` is the confident one — per-residue displacement between two
+states, as colour and as arrows. It refuses states with differing atom counts,
+since atoms cannot be paired across them. Where a method estimates deformation
+on independent half-sets, pass that table and the arrows are coloured by the
+disagreement; without it, every arrow is drawn with identical confidence and
+they do not have identical confidence, which the report says out loud.
+
+`composition_view` is occupancy in **sense 2** — the fraction of imaged
+particles containing a part, which is a different quantity from the per-atom `q`
+that `occupancy_view` shows. A model can be `q = 1.0` at every atom while the
+subunit it belongs to is present in half the particles; both are true and they
+answer different questions. So the fractions come from an explicit table and are
+**never derived from `q`**. The two tools stay separately named forever.
+
+```
+load_ensemble(directory="job042_cryodrgn", name="drgn", method="cryodrgn")
+latent_traverse_view(ensemble_name="drgn")
+deformation_view(obj_name="1l2y", arrows=True)
+composition_view(obj_name="complex", table="chain A=1.0, chain B=0.38")
+```
+
 ## The name
 
 My best friend in high school once shared an apartment with MC Chris, who voiced MC Pee Pants in Aqua Teen Hunger Force. I'm not saying that was the inspiration for the name of this project, but I'm not denying it either.
