@@ -8,6 +8,7 @@ import pytest
 from mcpymol.pdbtext import Atom, parse_atoms, residue_order
 from mcpymol.structures import (
     _rcsb_metadata,
+    _split_properties,
     atom_properties,
     fetch_structure,
     get_sequence,
@@ -653,3 +654,26 @@ def test_atom_properties_is_registered():
     from mcpymol.server import mcp
 
     assert "atom_properties" in {t.name for t in asyncio.run(mcp.list_tools())}
+
+
+class TestPropertySplitting:
+    """`properties` is a Python expression list evaluated by iterate, so a
+    comma inside brackets or quotes belongs to the expression rather than
+    separating two fields. Splitting on every comma tore those apart and
+    handed PyMOL the fragments as field names."""
+
+    def test_plain_fields_split_as_before(self):
+        assert _split_properties("chain, resi, b") == ["chain", "resi", "b"]
+
+    def test_a_comma_inside_quotes_is_not_a_separator(self):
+        assert _split_properties("chain, resi in ('1','2'), b") == [
+            "chain",
+            "resi in ('1','2')",
+            "b",
+        ]
+
+    def test_a_comma_inside_brackets_is_not_a_separator(self):
+        assert _split_properties("chain, f(x, y), z") == ["chain", "f(x, y)", "z"]
+
+    def test_blank_fields_are_dropped(self):
+        assert _split_properties("  a ,, b  ") == ["a", "b"]

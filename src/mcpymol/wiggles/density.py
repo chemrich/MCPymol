@@ -40,24 +40,58 @@ DEFAULT_SIGMA = 1.5
 DEFAULT_CARVE = 2.0
 
 
+def usable_rms(header: MapHeader) -> bool:
+    """Can this header's RMS define a sigma scale?
+
+    Only a strictly positive RMS can. Two non-positive values occur in real
+    files and neither means "zero spread":
+
+    * ``0`` — a constant map, or statistics never filled in.
+    * ``-1`` — MRC2014/CCP4's marker for *statistics not computed*, which
+      ``mrcfile`` writes (with ``dmean = -2``) whenever a map is saved without
+      ``update_header_stats()``. Many processing pipelines never rewrite them.
+
+    A negative RMS is the dangerous one, because it divides cleanly and
+    silently inverts the sign of every conversion: an ascending set of
+    Ångström breakpoints comes back descending, so the colour ramp binds blue
+    to the *worst*-resolved density while the legend states blue is the best.
+    Testing ``if not header.rms`` catches only the first of the two.
+    """
+    return header.rms > 0
+
+
 def to_sigma(header: MapHeader, absolute: float) -> float:
     """Convert an absolute map value to sigma units.
 
     Raises:
-        ValueError: the header reports zero RMS, so sigma is undefined and no
-            conversion is possible.
+        ValueError: the header's RMS cannot define a sigma scale — see
+            :func:`usable_rms`.
     """
-    if not header.rms:
+    if not usable_rms(header):
         raise ValueError(
-            "header reports rms=0, so sigma is undefined and an absolute level "
-            "cannot be converted. The map may be unnormalised or its header "
-            "statistics stale."
+            f"header reports rms={header.rms:g}, which cannot define a sigma "
+            f"scale, so an absolute level cannot be converted. A negative RMS "
+            f"is MRC's marker for statistics that were never computed; zero "
+            f"means a constant map or the same. Repair the header statistics "
+            f"(mrcfile's update_header_stats) or give the level in absolute units."
         )
     return (absolute - header.dmean) / header.rms
 
 
 def to_absolute(header: MapHeader, sigma: float) -> float:
-    """Convert a sigma level back to an absolute map value."""
+    """Convert a sigma level back to an absolute map value.
+
+    Raises:
+        ValueError: the header's RMS cannot define a sigma scale, so there is
+            no sigma to convert *from* — see :func:`usable_rms`. Returning
+            ``dmean + sigma * rms`` on a negative RMS would hand back a
+            confident number on the wrong side of the mean.
+    """
+    if not usable_rms(header):
+        raise ValueError(
+            f"header reports rms={header.rms:g}, which cannot define a sigma "
+            f"scale, so a sigma level has no absolute equivalent."
+        )
     return header.dmean + sigma * header.rms
 
 
@@ -118,7 +152,7 @@ def density_view(
     if units not in ("sigma", "absolute"):
         raise ValueError(f"units must be 'sigma' or 'absolute', got {units!r}")
 
-    record = loaded_map(map_obj)
+    record = loaded_map(map_obj, port)
     if record is None:
         raise PortError(
             f"{map_obj!r} was not loaded through load_map, so its header is "
@@ -141,7 +175,7 @@ def density_view(
         sigma = float(level)  # type: ignore[arg-type]
         absolute = None
 
-    if absolute is None and header.rms:
+    if absolute is None and usable_rms(header):
         absolute = to_absolute(header, sigma)
 
     # Which number isomesh wants depends on whether PyMOL normalised the volume
@@ -169,12 +203,17 @@ def density_view(
     mesh = name or f"{map_obj}_mesh"
     call(port, "isomesh", mesh, map_obj, level_sent, selection, carve=carve)
 
-    absolute_text = f"{absolute:.6g}" if absolute is not None else "unknown (rms=0)"
+    absolute_text = (
+        f"{absolute:.6g}"
+        if absolute is not None
+        else f"unknown (header rms={header.rms:g} cannot define sigma)"
+    )
     lines = [
         f"density_view({map_obj} around {selection})",
         "",
         f"  Contour: {sigma:.3g} sigma  =  {absolute_text} absolute",
         f"  Map sigma (header rms): {header.rms:.6g}   mean: {header.dmean:.6g}",
+        f"  Header read from: {record.path}",
         f"  Mesh `{mesh}`, carved {carve:g} Å around the selection.",
         _normalisation_note(normalised, level_sent),
         "",
