@@ -246,7 +246,9 @@ def test_blank_chain_and_negative_resi_stay_scoped():
     assert selections, "no alter issued"
     for sel in selections:
         assert "chain  and" not in sel, f"unscoped selection: {sel}"
-    assert any('chain "" and resi "-3"' in s for s in selections), selections
+    assert any('chain "" and resi "\\-3"' in s for s in selections), selections
+    for sel in selections:
+        assert 'resi "-3"' not in sel, f"quoted but not escaped, still a range: {sel}"
 
 
 def test_states_are_superposed_before_measuring():

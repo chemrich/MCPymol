@@ -44,13 +44,22 @@ def quote(value: str) -> str:
     * A **blank chain** — every atom in a file with no chain ID — leaves
       ``chain  and resi 2``, where ``and`` is consumed as the chain name. The
       selection stops being scoped to the object and matches the whole session.
+      Quoting fixes this: ``chain ""`` stays scoped.
     * A **negative residue number**, the remnant of an expression tag in most
       NMR and EM entries, is read as a *range*: ``resi -3`` means 1-3, so one
       residue's value gets written across three.
 
-    Both were verified against PyMOL 3.1.0, in both directions. Quoting fixes
-    both and is a no-op for ordinary values, so every call site quotes rather
-    than testing whether it needs to.
+    **Quoting does not fix the second one.** ``resi "-3"`` is still read as the
+    range — checked against PyMOL 3.1.0 on an object holding residues -3, 1 and
+    2, where it matched all six atoms instead of residue -3's two. The escape
+    the grammar actually honours is a **backslash**, and it composes with the
+    quoting (``resi "\\-3"`` matches exactly residue -3) and with ``+`` lists
+    (``resi \\-3+1`` matches two residues, not four).
+
+    So the value is quoted *and* a leading minus is escaped. The escape is a
+    no-op for every other shape — plain numbers, zero, insertion codes like
+    ``52A``, blank and lowercase chains were all checked, and a chain literally
+    named ``-`` matches under both forms.
 
     Raises:
         ValueError: ``value`` contains a double quote, which would close the
@@ -64,7 +73,9 @@ def quote(value: str) -> str:
             f"identifier {value!r} contains a double quote, which cannot appear "
             f"in a chain or residue identifier — the file is probably corrupt"
         )
-    return f'"{value}"'
+    # A leading '-' is the range operator to PyMOL's parser even inside quotes.
+    escaped = f"\\{value}" if value.startswith("-") else value
+    return f'"{escaped}"'
 
 
 def residue_selection(obj: str, chain: str, resi: str) -> str:
