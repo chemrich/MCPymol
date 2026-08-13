@@ -48,6 +48,20 @@ ROWS = [
     ("A", 2, "CA"),
     ("", 5, "N"),
     ("", 5, "CA"),
+    # A blank chain AND a negative residue together. Both halves of `quote`
+    # apply at once here, and this is the combination the view-level
+    # regression tests in test_qscore/test_deformation/test_ensembles assert
+    # against a FakePort — so without a row for it, `chain "" and resi "\-3"`
+    # was checked by spelling and never by a live atom count.
+    ("", -3, "N"),
+    ("", -3, "CA"),
+    # And a blank-chain residue INSIDE the range -3 reads as. Without it the
+    # blank chain holds only -3 and 5; "≤ 3" excludes 5, so the escaped and
+    # unescaped forms both match 2 and the test cannot tell them apart. A
+    # fixture where the bug and the fix give the same answer proves nothing —
+    # the same trap the first version of this file fell into.
+    ("", 2, "N"),
+    ("", 2, "CA"),
 ]
 
 
@@ -82,8 +96,11 @@ def probe():
 def test_the_probe_is_numbered_the_way_the_assertions_assume(probe):
     """If PyMOL ever stops reading these residue numbers as written, every
     other assertion here would pass or fail for the wrong reason."""
-    assert call(probe, "count_atoms", f"({OBJ})") == 8
+    assert call(probe, "count_atoms", f"({OBJ})") == 12
     assert call(probe, "count_atoms", f'({OBJ}) and chain "A"') == 6
+    # Blank chain holds -3, 2 and 5 — the 2 is what makes the range reading
+    # distinguishable from the literal one.
+    assert call(probe, "count_atoms", f'({OBJ}) and chain ""') == 6
 
 
 def test_a_negative_residue_matches_only_itself(probe):
@@ -122,3 +139,23 @@ def test_the_clause_form_matches_the_same_atoms(probe):
     scoped = f"({OBJ}) and {residue_clause('A', '-3')}"
 
     assert call(probe, "count_atoms", scoped) == 2
+
+
+def test_a_blank_chain_and_a_negative_residue_together(probe):
+    """Both halves of `quote` at once, which is the string the view-level
+    regression tests assert against a FakePort.
+
+    Blank chain alone was covered, negative residue alone was covered, and the
+    combination — the one that actually occurs, since a validation entry with no
+    chain attribute is exactly the kind of file that also carries expression-tag
+    numbering — was covered only by how the string was spelled.
+    """
+    sel = residue_selection(OBJ, "", "-3")
+
+    assert call(probe, "count_atoms", sel) == 2
+
+
+def test_the_unescaped_form_over_matches_here_too(probe):
+    """The guard for the test above: without the backslash this selection also
+    picks up the blank chain's residue 2, because -3 reads as "≤ 3"."""
+    assert call(probe, "count_atoms", f'({OBJ}) and chain "" and resi "-3"') == 4
