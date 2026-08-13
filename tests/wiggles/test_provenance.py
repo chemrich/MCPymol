@@ -213,3 +213,80 @@ def test_a_genuinely_sharpened_name_still_reads_as_sharpened(tmp_path):
     evidence = gather_evidence(read_map_header(path), path)
 
     assert evidence.suggested is Provenance.SHARPENED, evidence.reasons
+
+
+class TestCategoryPriorityNotJustTokenLength:
+    """Longest-token-wins fixed one bug and introduced another.
+
+    It was added because 'sharp' is a substring of 'unsharp', so an
+    `unsharpened` map read as *sharpened* — inverting the one thing its
+    depositor had recorded. Sorting by length fixes that. But it also replaced
+    the declaration-order break, and that break was carrying a **category
+    priority**: `Provenance` documents itself as "ordered from observed to
+    invented", and the warnings are not interchangeable. NN_ENHANCED says
+    "treat this map as a hypothesis, not a measurement"; SHARPENED says
+    features are easier to over-read. Swapping one for the other is the exact
+    thing invariant I1 exists to prevent.
+
+    Three rules are needed, and any two of them produce a different bug:
+
+    1. drop tokens that are substrings of another match (shadowing),
+    2. then rank by the Provenance enum's own severity order,
+    3. then longest token within a category.
+    """
+
+    def _suggest(self, tmp_path, filename):
+        return gather_evidence(read_map_header(write_map(tmp_path, filename)), filename).suggested
+
+    @pytest.mark.parametrize(
+        "filename",
+        [
+            "postprocess_emready.mrc",
+            "postprocess_locscale.mrc",
+            "run_postprocess_cryolvm.mrc",
+        ],
+    )
+    def test_a_network_enhanced_map_is_not_reported_as_merely_sharpened(self, tmp_path, filename):
+        """The ordinary output names for running EMReady, LocScale or CryoLVM on
+        a RELION postprocess map. 'postprocess' (11 chars) is longer than
+        'emready' (7), so length alone picks the weaker warning."""
+        assert self._suggest(tmp_path, filename) is Provenance.NN_ENHANCED
+
+    @pytest.mark.parametrize(
+        "filename",
+        [
+            "cryodrgn_emready.mrc",
+            "kmeans20_emready.mrc",
+            "3dflex_deepemhancer.mrc",
+            "latent_traverse_locscale.mrc",
+        ],
+    )
+    def test_a_generated_volume_stays_generated_after_network_enhancement(self, tmp_path, filename):
+        """The bug that appears if priority is taken from `_TOKENS` declaration
+        order instead of from the enum: that table lists NN_ENHANCED *before*
+        GENERATED, but a decoder volume is the stronger claim — no particle was
+        reconstructed into that density at all."""
+        assert self._suggest(tmp_path, filename) is Provenance.GENERATED
+
+    def test_the_shadowed_token_case_still_works(self, tmp_path):
+        """What longest-token was introduced for, and must survive: 'sharp' is
+        a substring of 'unsharp', read at two lengths, and only the longer
+        reading is real."""
+        assert self._suggest(tmp_path, "unsharpened.mrc") is Provenance.MEASURED
+        assert self._suggest(tmp_path, "emd_1234_unsharpened.mrc") is Provenance.MEASURED
+
+    def test_ordinary_single_token_names_are_unaffected(self, tmp_path):
+        assert self._suggest(tmp_path, "sharpened.mrc") is Provenance.SHARPENED
+        assert self._suggest(tmp_path, "cryodrgn_vol.mrc") is Provenance.GENERATED
+        assert self._suggest(tmp_path, "emd_30913_half1.mrc") is Provenance.MEASURED
+        assert self._suggest(tmp_path, "locscale_sharpened.mrc") is Provenance.NN_ENHANCED
+
+    def test_severity_comes_from_the_enum_not_the_token_table(self):
+        """Pinned directly, so a future divergence fails here rather than
+        surfacing as an obscure filename result."""
+        from mcpymol.wiggles.provenance import _TOKENS
+
+        severity = list(Provenance)
+        assert severity.index(Provenance.GENERATED) > severity.index(Provenance.NN_ENHANCED)
+        # The table may be declared in any order; that is the point.
+        assert {p for p, _ in _TOKENS} <= set(severity)

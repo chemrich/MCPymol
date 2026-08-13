@@ -139,21 +139,54 @@ def gather_evidence(header: MapHeader, path: str | Path | None = None) -> Eviden
 
     haystack = f"{name} {joined}".lower()
 
-    # Longest matching token wins, not the first in declaration order. These
-    # tokens are substrings of one another: 'sharp' occurs inside 'unsharp',
-    # and SHARPENED is declared first, so a file named emd_1234_unsharpened.mrc
-    # was suggested as *sharpened* — inverting the one thing its depositor had
-    # taken the trouble to record. Sorting by length makes the more specific
-    # token win whatever order the table is written in; ties keep declaration
-    # order, since sorted() is stable.
-    candidates = [
+    # Three rules, and any two of them produce a different bug.
+    #
+    # Longest-token-wins was introduced because these tokens are substrings of
+    # one another: 'sharp' occurs inside 'unsharp', so emd_1234_unsharpened.mrc
+    # was suggested as *sharpened*, inverting the one thing its depositor had
+    # taken the trouble to record. That part was right, and stays.
+    #
+    # But it replaced a declaration-order break that was carrying a CATEGORY
+    # PRIORITY, and dropping that is its own defect: 'postprocess' (11 chars)
+    # is longer than 'emready' (7), so postprocess_emready.mrc — the ordinary
+    # name for running EMReady on a RELION postprocess map — reported
+    # SHARPENED. The user was offered "features are easier to over-read than in
+    # the unsharpened map" instead of "treat this map as a hypothesis, not a
+    # measurement", and the whole point of NN_ENHANCED is that its warning is
+    # not interchangeable with sharpening. Same in the other direction wherever
+    # the network token happens to be the longer one: kmeans20_emready.mrc and
+    # 3dflex_deepemhancer.mrc lost GENERATED, which is stronger still.
+    #
+    # Priority therefore comes from the `Provenance` enum, which documents
+    # itself as "ordered from observed to invented" — NOT from _TOKENS'
+    # declaration order, which lists NN_ENHANCED before GENERATED and would
+    # invert that pair. Reordering _TOKENS changes nothing; reordering
+    # Provenance changes classification.
+    #
+    # What separates the two situations is *shadowing*. In 'unsharpened' one
+    # token contains the other: the same evidence read at two lengths, and only
+    # the longer reading is real. In 'postprocess_emready' the tokens are
+    # independent matches at different positions and both are true, so the
+    # category order decides which warning the user gets.
+    #
+    # So: drop tokens contained in another match, then most-cautionary first,
+    # then longest within a category.
+    severity = {provenance: rank for rank, provenance in enumerate(Provenance)}
+    matched = [
         (provenance, token)
         for provenance, tokens in _TOKENS
         for token in tokens
         if token in haystack
     ]
+    candidates = [
+        (provenance, token)
+        for provenance, token in matched
+        if not any(token != other and token in other for _p, other in matched)
+    ]
     if candidates:
-        provenance, hit = sorted(candidates, key=lambda pair: -len(pair[1]))[0]
+        provenance, hit = sorted(candidates, key=lambda pair: (-severity[pair[0]], -len(pair[1])))[
+            0
+        ]
         evidence.suggested = provenance
         evidence.reasons.append(
             f"the name or labels contain {hit!r}, which suggests {provenance.value}"
