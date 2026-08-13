@@ -11,6 +11,7 @@ from mcpymol.wiggles.atoms import (
     fetch_atoms,
     fetch_state_coords,
     group_by_residue,
+    quote,
     residue_clause,
     residue_selection,
 )
@@ -122,6 +123,13 @@ class TestSelectionQuoting:
     no longer scoped to the object. With `resi -3`, an object whose only
     residue was numbered 2 matched all 7 of its atoms, because -3 parses as
     the range 1-3.
+
+    What was *not* checked, until it turned out to be false, is that quoting
+    fixes the second one. It does not: `resi "-3"` is still read as the range.
+    These tests therefore assert the escape that PyMOL actually honours, and
+    `test_selection_live.py` asserts the atom counts a live session returns —
+    because a test that only checks how the string was spelled is what let the
+    original bug ship as fixed.
     """
 
     def test_blank_chain_cannot_swallow_the_next_token(self):
@@ -130,17 +138,25 @@ class TestSelectionQuoting:
         assert 'chain ""' in sel
         assert "chain  and" not in sel
 
-    def test_negative_residue_is_not_a_range(self):
+    def test_negative_residue_is_escaped_not_merely_quoted(self):
+        """Quoting alone leaves the range reading intact — see the class
+        docstring. The backslash is the part that does the work."""
         sel = residue_selection("obj", "A", "-3")
 
-        assert 'resi "-3"' in sel
+        assert 'resi "\\-3"' in sel
+        assert 'resi "-3"' not in sel
         assert "resi -3 " not in sel + " "
 
     def test_insertion_codes_and_ordinary_values_survive(self):
         assert residue_selection("obj", "A", "52A") == '(obj) and chain "A" and resi "52A"'
 
+    def test_the_escape_is_a_no_op_for_ordinary_values(self):
+        """Only a leading minus is touched, so nothing else changes shape."""
+        for value in ("1", "0", "52A", "999", "A"):
+            assert quote(value) == f'"{value}"'
+
     def test_clause_form_quotes_the_same_way(self):
-        assert residue_clause("", "-3") == '(chain "" and resi "-3")'
+        assert residue_clause("", "-3") == '(chain "" and resi "\\-3")'
 
     def test_a_quote_in_an_identifier_is_refused_not_guessed_at(self):
         """Quoting is only safe while the value cannot close it. Nothing in
