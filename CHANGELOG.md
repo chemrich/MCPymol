@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A fresh install of 1.5.1 no longer starts.** `fastmcp` and `mcp` had lower bounds only. fastmcp 4.0 (2026-08-31) pulls in mcp 2.x, which removed `mcp.server.fastmcp`, so `pip install mcpymol` now resolves to versions where `import mcpymol.server` raises `ModuleNotFoundError`. Existing installs were unaffected until something upgraded them. Both are now capped below those majors (`fastmcp<4`, `mcp<2`). Moving to mcp 2's `MCPServer` is separate work.
+
 ### Added
 
 - **`mcpymol.wiggles` tier 3: ensembles.** `load_ensemble`, `latent_traverse_view`, `deformation_view`, `composition_view`. One blind-challenge result governs all four: put on the same thyroglobulin data, 41 submissions recovered molecular motions that resembled both each other and the ground truth, but the simulated truth had three population modes, most found two, and only three of 41 found all three — the missed one being the middle. So these tools draw motion and decline to draw populations. `deformation_view` is built with confidence; `latent_traverse_view` renders no latent scatter and estimates no density at all.

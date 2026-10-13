@@ -33,8 +33,10 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Visualization",
 ]
 dependencies = [
-    "fastmcp>=3.4.5",
-    "mcp>=1.27.1",
+    # Capped below the majors that removed `mcp.server.fastmcp`, which
+    # app.py imports. Lift these when the server moves to mcp 2's MCPServer.
+    "fastmcp>=3.4.5,<4",
+    "mcp>=1.27.1,<2",
 ]
 
 [project.urls]
