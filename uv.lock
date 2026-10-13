@@ -1079,8 +1079,8 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "fastmcp", specifier = ">=3.4.5" },
-    { name = "mcp", specifier = ">=1.27.1" },
+    { name = "fastmcp", specifier = ">=3.4.5,<4" },
+    { name = "mcp", specifier = ">=1.27.1,<2" },
     { name = "networkx", marker = "extra == 'print'", specifier = ">=3.0" },
     { name = "pymeshlab", marker = "extra == 'print'", specifier = ">=2023.12" },
     { name = "scikit-image", marker = "extra == 'print'", specifier = ">=0.22" },
