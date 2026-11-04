@@ -73,6 +73,8 @@ from mcpymol.bridge import (
     _clock_with_sleep,
     _warnings_note,
     format_measurement,
+    format_per_state_rmsd,
+    format_superposition,
     send_request,
 )
 from mcpymol.comparison import (
@@ -591,6 +593,8 @@ __all__ = [
     "fetch_alphafold",
     "fetch_structure",
     "format_measurement",
+    "format_per_state_rmsd",
+    "format_superposition",
     "forward",
     "fragment",
     "frame",

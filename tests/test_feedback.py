@@ -543,3 +543,61 @@ def test_frame_without_an_argument_says_which_frame(mock_sr):
 
     assert frame() == "Current frame: 7"
     assert mock_sr.call_args.args == ("get_frame",)
+
+
+# ── align, super, intra_*: the numbers, not "Executed X successfully." ──────
+# Shapes as PyMOL 3.1.0 returns them through the plugin (issue #15, section C).
+
+
+@patch("mcpymol.bridge.send_request")
+def test_align_reports_its_rmsd(mock_sr):
+    from mcpymol.primitives import align
+
+    mock_sr.return_value = {"status": "success", "result": [8.0608, 214, 1, 8.0608, 214, 80.0, 14]}
+
+    assert align(mobile="aaa", target="bbb") == (
+        "RMSD 8.06 A over 214 atoms after 1 refinement cycle (before refinement: "
+        "8.06 A over 214 atoms); 14 residues aligned."
+    )
+
+
+@patch("mcpymol.bridge.send_request")
+def test_super_reports_its_rmsd(mock_sr):
+    from mcpymol.primitives import super_tool as super_
+
+    mock_sr.return_value = {"status": "success", "result": [0.0, 9, 2, 0.5022, 10, 0.0, 1]}
+
+    assert super_(mobile="aaa", target="bbb").startswith(
+        "RMSD 0.00 A over 9 atoms after 2 refinement cycles (before refinement: 0.50 A"
+    )
+
+
+@patch("mcpymol.bridge.send_request")
+def test_intra_rms_reports_each_state(mock_sr):
+    mock_sr.return_value = {"status": "success", "result": [-1.0, 8.0608, 0.0]}
+
+    assert intra_rms(selection="ens") == (
+        "RMSD of each state against state 1: state 2: 8.06 A, state 3: 0.00 A."
+    )
+
+
+@patch("mcpymol.bridge.send_request")
+def test_intra_fit_says_it_moved_the_coordinates(mock_sr):
+    from mcpymol.primitives import intra_fit
+
+    mock_sr.return_value = {"status": "success", "result": [-1.0, 8.0608, 0.0]}
+
+    out = intra_fit(selection="ens")
+
+    assert out.startswith("RMSD of each state against state 1: state 2: 8.06 A")
+    assert out.endswith("their coordinates in the session have changed.")
+
+
+@pytest.mark.parametrize("result", [None, "OK", [], [1.0, 2.0], ["x"] * 7])
+@patch("mcpymol.bridge.send_request")
+def test_an_unrecognised_answer_falls_back_rather_than_misreporting(mock_sr, result):
+    from mcpymol.primitives import align
+
+    mock_sr.return_value = {"status": "success", "result": result}
+
+    assert align(mobile="a", target="b") == "Executed align successfully."

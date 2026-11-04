@@ -10,6 +10,7 @@ import os
 import socket
 import sys
 import time
+from collections.abc import Callable
 from typing import Any
 
 HOST = "127.0.0.1"
@@ -248,12 +249,64 @@ def format_measurement(
     return f"{label}: {number:.2f} {unit}{stored}."
 
 
+def format_superposition(result: Any) -> str | None:
+    """align's and super's 7-number answer, in words; None if it is not one.
+
+    PyMOL returns (RMSD after refinement, atoms in it, refinement cycles, RMSD
+    before refinement, atoms before, raw score, residues aligned).
+    """
+    if not isinstance(result, (list, tuple)) or len(result) < 7:
+        return None
+    try:
+        rms, atoms, cycles, rms0, atoms0 = (
+            float(result[0]),
+            int(result[1]),
+            int(result[2]),
+            float(result[3]),
+            int(result[4]),
+        )
+        residues = int(result[6])
+    except (TypeError, ValueError):
+        return None
+    return (
+        f"RMSD {rms:.2f} A over {atoms} atoms after {cycles} refinement "
+        f"cycle{'s' if cycles != 1 else ''} (before refinement: {rms0:.2f} A over "
+        f"{atoms0} atoms); {residues} residues aligned."
+    )
+
+
+def format_per_state_rmsd(result: Any, moved: bool = False) -> str | None:
+    """intra_rms / intra_fit's per-state RMSDs, in words; None if not that shape.
+
+    PyMOL answers one value per state, with -1.0 at the reference state.
+    """
+    if not isinstance(result, (list, tuple)) or not result:
+        return None
+    try:
+        values = [float(v) for v in result]
+    except (TypeError, ValueError):
+        return None
+    reference = next((i for i, v in enumerate(values) if v == -1.0), None)
+    others = [(i + 1, v) for i, v in enumerate(values) if i != reference]
+    if reference is None or not others:
+        return None
+    listed = ", ".join(f"state {n}: {v:.2f} A" for n, v in others)
+    text = f"RMSD of each state against state {reference + 1}: {listed}."
+    if moved:
+        text += (
+            f" States were fitted onto state {reference + 1}, so their coordinates in "
+            f"the session have changed."
+        )
+    return text
+
+
 def _call(
     _action: str,
     /,
     *,
     _timeout: float = _DEFAULT_TIMEOUT,
     _measures: tuple[str, str] | tuple[str, str, bool] | None = None,
+    _format: Callable[[Any], str | None] | None = None,
     **values: str | None,
 ) -> str:
     """Forward a primitive PyMOL command and report the outcome.
@@ -273,7 +326,10 @@ def _call(
 
     ``_measures`` is ``(label, unit)`` — or ``(label, unit, signed)`` — for
     commands that return a quantity; with it, the result is reported as a
-    number instead of "Executed ... successfully".
+    number instead of "Executed ... successfully". ``_format`` does the same
+    for a structured answer (align's seven numbers, intra_rms's list); it
+    returns None for anything it does not recognise, which falls back to the
+    plain wording rather than misreporting.
 
     Warnings PyMOL printed while the command ran are appended either way.
     """
@@ -297,6 +353,10 @@ def _call(
     res = send_request(_action, args=args, timeout=_timeout)
     if res.get("status") == "error":
         return res.get("error", "Unknown error")
+    if _format is not None:
+        text = _format(res.get("result"))
+        if text is not None:
+            return text + _warnings_note(res)
     if _measures is not None:
         label, unit = _measures[0], _measures[1]
         signed = bool(_measures[2]) if len(_measures) > 2 else False
