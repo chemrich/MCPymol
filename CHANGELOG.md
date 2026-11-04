@@ -19,6 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   where the plugin file wouldn't even parse. Re-run `mcpymol --install-plugin`
   to get the new block. The README says older Incentive 2.x builds aren't
   supported.
+- **`--install-plugin` writes a block that survives any path.** The plugin's
+  path was pasted into a Python string as is, so a Windows path
+  (`C:\Users\...`) or one containing a quote was a SyntaxError that stopped
+  PyMOL reading the rest of `.pymolrc.py`, the user's own settings included.
 - **A name can no longer delete what it doesn't name.** The loaders delete the
   object they replace by name, and PyMOL's `delete` takes patterns and lists:
   `load_structure`, `fetch_structure` or `fetch_alphafold` given `*`, `all` or

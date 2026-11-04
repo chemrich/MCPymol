@@ -1575,6 +1575,10 @@ def load_quietly() -> None:
     """Register `start_mcp` and `stop_mcp` without binding the port."""
     if cmd is None:
         return
+    too_old = _python_too_old()
+    if too_old:  # don't invite a start_mcp that can only refuse
+        print(too_old)
+        return
 
     def stop_quietly() -> None:
         server = globals().get("mcp_bridge_plugin")

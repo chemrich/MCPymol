@@ -41,7 +41,7 @@ def test_install_writes_a_runnable_line(tmp_path):
     message = install_plugin(rc)
 
     body = rc.read_text()
-    assert f'cmd.do("run {plugin_path()}")' in body
+    assert f"cmd.do({f'run {plugin_path()}'!r})" in body
     assert "from pymol import cmd" in body
     assert "Added" in message
 
@@ -277,3 +277,27 @@ def test_the_block_explains_itself_on_an_older_python(tmp_path, monkeypatch, cap
     monkeypatch.setattr(sys, "version_info", (3, 7, 12))
     assert _run_block(tmp_path, monkeypatch) == []
     assert "needs a PyMOL running Python 3.10 or newer" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        r"C:\Users\bob\AppData\Roaming\uv\tools\mcpymol\Lib\site-packages\mcpymol\plugin.py",
+        '/home/o"brien/mcpymol/plugin.py',
+        "/Users/a b/new\tdir/plugin.py",
+    ],
+)
+def test_the_block_survives_any_path(path, monkeypatch):
+    """The path sits inside a Python string literal. Pasted raw, a Windows
+    path was a SyntaxError (\\U starts an escape), and that stops PyMOL
+    reading the whole .pymolrc.py, the user's own settings included."""
+    import types
+
+    from mcpymol.cli import _block
+
+    ran = []
+    fake_pymol = types.ModuleType("pymol")
+    fake_pymol.cmd = types.SimpleNamespace(do=ran.append)
+    monkeypatch.setitem(sys.modules, "pymol", fake_pymol)
+    exec(compile(_block(path), "pymolrc", "exec"), {})
+    assert ran == [f"run {path}"]
