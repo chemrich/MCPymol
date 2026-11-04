@@ -58,11 +58,12 @@ jobs:
           from mcpymol.app import mcp  # noqa: F401
 
           # print extra: the libraries printing.py reaches, directly or via trimesh.
+          import manifold3d  # noqa: F401
           import pymeshlab  # noqa: F401
           import scipy.ndimage  # noqa: F401
           import skimage.measure  # noqa: F401
           import trimesh  # noqa: F401
 
-          pkgs = ("mcp", "pydantic", "trimesh", "pymeshlab", "scipy", "scikit-image", "numpy")
+          pkgs = ("mcp", "pydantic", "trimesh", "pymeshlab", "manifold3d", "scipy", "scikit-image", "numpy")
           print("resolved:", ", ".join(f"{p} {md.version(p)}" for p in pkgs))
           EOF
