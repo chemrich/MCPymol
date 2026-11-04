@@ -670,7 +670,7 @@ stays in the same coordinate frame, so a slicer can load them as aligned
 multi-material parts.
 
 This tool needs the optional `print` extra (trimesh, pymeshlab, scipy,
-scikit-image, networkx):
+scikit-image):
 
 Install it into **the same environment MCPymol is already in** — a bare
 `pip install` picks whatever `pip` is first on your PATH, which is usually a
