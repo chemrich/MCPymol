@@ -37,10 +37,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`conservation_view` stops waiting when the answer won't change.** Its
   poll of the MMseqs2 server skipped every failed status check and kept going
   on any state but COMPLETE or ERROR, for up to ten minutes while every other
-  tool queued behind it. An expired ticket (a 404 on every poll) or a
-  RATELIMIT now ends it at once with the server's answer; network blips are
-  tolerated six times in a row. As in ColabFold's own client, only PENDING,
-  RUNNING and UNKNOWN mean wait. The User-Agent carries the real version, and
+  tool queued behind it. A job the server has forgotten (it answers UNKNOWN
+  once a job expires) now ends the wait after 30 s, a refused status check
+  or an unexpected state at once, and a rate-limited submission says so
+  instead of a bare "HTTP Error 429"; network blips are tolerated six times
+  in a row. The User-Agent carries the real version, and
   the README says plainly that the chain's sequence goes to the server.
 - **`list_objects` lists every object, not only molecules.** It used
   `get_object_list`, which PyMOL backs with the selector, so a session holding

@@ -4,6 +4,7 @@ import io
 import json
 import math
 import tarfile
+import urllib.error
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -653,6 +654,48 @@ def test_a_blip_between_answers_resets_the_count(mock_urlopen, no_wait):
     blip = urllib.error.URLError("reset")
     polls = [blip] * 5 + [_resp({"status": "RUNNING"})] + [blip] * 5 + [_resp({"status": "ERROR"})]
     mock_urlopen.side_effect = [_resp({"id": "t"}), *polls]
+    with pytest.raises(RuntimeError, match="MMseqs2 search failed"):
+        _run_mmseqs2("ACDEF")
+
+
+@patch("mcpymol.conservation.urllib.request.urlopen")
+def test_a_rate_limited_submission_says_why_and_does_not_retry(mock_urlopen, no_wait):
+    """MMseqs2-App's rate limiter answers 429 with a RATELIMIT body; the
+    submit loop used to retry it twice a second apart and then report a bare
+    "HTTP Error 429"."""
+    body = json.dumps({"status": "RATELIMIT", "reason": "too many jobs"}).encode()
+    error = urllib.error.HTTPError("https://x/ticket/msa", 429, "Too Many", {}, io.BytesIO(body))
+    mock_urlopen.side_effect = [error]
+    with pytest.raises(
+        RuntimeError, match=r"rate-limiting.*HTTP 429: too many jobs.*MCPYMOL_MMSEQS_URL"
+    ):
+        _run_mmseqs2("ACDEF")
+    assert mock_urlopen.call_count == 1
+
+
+@pytest.mark.parametrize("code", [429, 500, 503])
+@patch("mcpymol.conservation.urllib.request.urlopen")
+def test_a_throttled_or_failing_status_check_is_a_blip(mock_urlopen, no_wait, code):
+    mock_urlopen.side_effect = [_resp({"id": "t"}), _http_error(code), _resp({"status": "ERROR"})]
+    with pytest.raises(RuntimeError, match="MMseqs2 search failed"):
+        _run_mmseqs2("ACDEF")
+
+
+@patch("mcpymol.conservation.urllib.request.urlopen")
+def test_a_job_the_server_has_forgotten_is_not_waited_on(mock_urlopen, no_wait):
+    """An expired job is HTTP 200 {"status": "UNKNOWN"} on every poll, not a 404."""
+    mock_urlopen.side_effect = [_resp({"id": "t"})] + [_resp({"status": "UNKNOWN"})] * 6
+    with pytest.raises(RuntimeError, match=r"no longer knows job t.*probably expired"):
+        _run_mmseqs2("ACDEF")
+    assert mock_urlopen.call_count == 7
+
+
+@patch("mcpymol.conservation.urllib.request.urlopen")
+def test_a_brief_unknown_is_waited_through(mock_urlopen, no_wait):
+    polls = [{"status": "UNKNOWN"}] * 5 + [{"status": "RUNNING"}] + [{"status": "UNKNOWN"}] * 5
+    mock_urlopen.side_effect = (
+        [_resp({"id": "t"})] + [_resp(p) for p in polls] + [_resp({"status": "ERROR"})]
+    )
     with pytest.raises(RuntimeError, match="MMseqs2 search failed"):
         _run_mmseqs2("ACDEF")
 
