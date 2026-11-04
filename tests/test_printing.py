@@ -513,6 +513,17 @@ def test_print_export_passes_on_why_pymol_rejected_a_selection(tmp_path):
     )
 
 
+def test_a_redraw_warning_is_not_a_rejected_selection(tmp_path):
+    """PyMOL prints some warnings while it redraws, and they land in whichever
+    request is running (KNOWN-ISSUES §5). Only a Selector-Error means the
+    selection was refused; anything else here once failed a valid export."""
+    pymol = _PyMOL(warnings=["Extrude-Warning: no cartoon data"])
+
+    result, _ = _export(pymol, tmp_path, groups="x=lig", representation="cartoon")
+
+    assert "rejected the selection" not in result, result
+
+
 def test_print_export_cannot_create_its_output_folder(tmp_path):
     blocker = tmp_path / "file"
     blocker.write_text("")

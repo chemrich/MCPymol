@@ -537,9 +537,13 @@ def _resolve_group(sel: str) -> "tuple[list[str], list[tuple[str, str]]]":
     if res.get("status") == "error":
         raise RuntimeError(str(res.get("error")))
     molecules = [str(obj) for obj in _result_list(res)]
-    if not molecules and res.get("warnings"):
-        # A typo in the selection: the newer plugin passes PyMOL's reason on.
-        raise RuntimeError(f"PyMOL rejected the selection: {'; '.join(res['warnings'])}")
+    # A typo in the selection: PyMOL prints a Selector-Error and the newer
+    # plugin passes it on. Only that counts. Any other warning here was
+    # printed by a redraw and landed in this request (KNOWN-ISSUES §5): taken
+    # as a rejection, an Extrude-Warning would have failed a valid export.
+    rejected = [str(w) for w in res.get("warnings") or [] if "Selector-Error" in str(w)]
+    if not molecules and rejected:
+        raise RuntimeError(f"PyMOL rejected the selection: {'; '.join(rejected)}")
     return molecules, others
 
 

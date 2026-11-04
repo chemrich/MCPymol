@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- `print_export` no longer fails a valid group because a warning PyMOL printed
+  while redrawing landed in its selection check; only a `Selector-Error`
+  counts as a rejected selection.
 - **A name can no longer delete what it doesn't name.** The loaders delete the
   object they replace by name, and PyMOL's `delete` takes patterns and lists:
   `load_structure`, `fetch_structure` or `fetch_alphafold` given `*`, `all` or
