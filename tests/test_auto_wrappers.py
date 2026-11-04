@@ -97,7 +97,7 @@ def _check_send_request(mock_socket, expected_action, expected_args):
     payload = json.loads(mock_socket.sendall.call_args[0][0])
     assert payload["action"] == expected_action
 
-    # FastMCP tools often drop optional None arguments or pass them as str.
+    # MCP tools often drop optional None arguments or pass them as str.
     # Check that whatever args were passed match expectation.
     assert payload["args"] == expected_args
 

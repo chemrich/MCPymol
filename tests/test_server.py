@@ -1224,7 +1224,7 @@ def test_every_tool_has_a_description_and_schema():
     assert len(tools) > 100
     for name, tool in tools.items():
         assert (tool.description or "").strip(), f"{name} has no description"
-        assert tool.inputSchema.get("type") == "object", f"{name} has no object schema"
+        assert tool.input_schema.get("type") == "object", f"{name} has no object schema"
 
 
 @pytest.mark.parametrize(
@@ -1241,7 +1241,7 @@ def test_every_tool_has_a_description_and_schema():
 )
 def test_wrapper_schemas_match_their_signatures(name, required, optional):
     """Including the three tools whose MCP name differs from the Python name."""
-    schema = _registered_tools()[name].inputSchema
+    schema = _registered_tools()[name].input_schema
 
     assert sorted(schema.get("required", [])) == sorted(required)
     assert sorted(schema["properties"]) == sorted(required + optional)

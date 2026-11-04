@@ -44,7 +44,7 @@ import pytest
 import mcpymol.bridge as bridge
 
 # Importing mcpymol.server is what registers the tools: mcpymol.app only holds
-# the empty FastMCP instance, so importing it alone yields a sweep of nothing.
+# the empty MCPServer instance, so importing it alone yields a sweep of nothing.
 import mcpymol.server  # noqa: F401
 from mcpymol.app import mcp
 from mcpymol.bridge import send_request
@@ -617,7 +617,7 @@ def hiv_protease():
 
 def test_journey_render_returns_a_real_image(hiv_protease):
     """The whole point of render: pixels come back, and they are not blank."""
-    from mcp.server.fastmcp import Image
+    from mcp.server.mcpserver import Image
 
     from mcpymol.rendering import _looks_blank, render
 

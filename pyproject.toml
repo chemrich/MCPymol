@@ -36,11 +36,11 @@ classifiers = [
 # uv.lock, so a bound left open here is invisible until a user resolves fresh:
 # mcp 2.0 removed mcp.server.fastmcp, and 1.5.x broke on install once nothing
 # held mcp below it. Raise a cap only after the fresh-install job passes on it.
-#   mcp       FastMCP server and Image (mcp.server.fastmcp, app.py/rendering.py).
-#             The 1.30.0 floor carries every mcp security fix released for 1.x.
+#   mcp       MCPServer and Image (mcp.server.mcpserver, app.py/rendering.py).
+#             2.x: synchronous tools run on worker threads, hence app.SESSION_LOCK.
 #   pydantic  Field metadata on every tool signature.
 dependencies = [
-    "mcp>=1.30.0,<2",
+    "mcp>=2.3.0,<3",
     "pydantic>=2,<3",
 ]
 

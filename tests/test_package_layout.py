@@ -71,7 +71,7 @@ def test_all_matches_what_is_actually_exported():
 
 
 def test_every_module_registers_against_one_app():
-    """Tools must land on a single FastMCP instance or half of them vanish."""
+    """Tools must land on a single MCPServer instance or half of them vanish."""
     from mcpymol.app import mcp
 
     assert server.mcp is mcp
@@ -120,15 +120,15 @@ def _all_tools():
 def test_every_parameter_has_a_schema_description():
     """Parameter docs must live on the parameter, not only in the docstring.
 
-    FastMCP builds the JSON schema from the signature, so an Args: block never
-    reaches inputSchema.properties[].description — the model would be left
+    MCPServer builds the JSON schema from the signature, so an Args: block never
+    reaches input_schema.properties[].description — the model would be left
     inferring arguments from names. Descriptions come from
     Annotated[..., Field(description=...)].
     """
     undocumented = [
         f"{tool.name}.{param}"
         for tool in _all_tools()
-        for param, spec in (tool.inputSchema.get("properties") or {}).items()
+        for param, spec in (tool.input_schema.get("properties") or {}).items()
         if not spec.get("description")
     ]
 
@@ -154,7 +154,7 @@ def test_descriptions_are_substantive():
     thin = [
         f"{tool.name}.{param}"
         for tool in _all_tools()
-        for param, spec in (tool.inputSchema.get("properties") or {}).items()
+        for param, spec in (tool.input_schema.get("properties") or {}).items()
         if len(spec.get("description", "")) < 15
     ]
 

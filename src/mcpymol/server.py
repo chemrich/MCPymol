@@ -8,7 +8,7 @@ imports below are load-bearing rather than decorative.
 The implementation lives in focused modules:
 
 ========================  ====================================================
-``mcpymol.app``           the shared FastMCP application object
+``mcpymol.app``           the shared MCPServer application object
 ``mcpymol.bridge``        the socket protocol to the in-PyMOL plugin
 ``mcpymol.structures``    fetching/loading structures, session introspection
 ``mcpymol.primitives``    one thin tool per ``pymol.cmd`` function
