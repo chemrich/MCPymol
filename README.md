@@ -329,21 +329,22 @@ MCPYMOL_PORT=9867 mcpymol             # bridge
 uv run pytest
 ```
 
-555 tests run by default. They mock the socket layer and PyMOL's `cmd` module, so they need neither PyMOL nor a network, and cover the socket payloads, the bridge framing, the conservation pipeline (A3M parsing, Shannon entropy, MMseqs2 mocking, MSA→B-factor mapping), the mesh-repair paths, and every view. `tests/test_bridge_roundtrip.py` additionally runs the real bridge against the real plugin listener over TCP on an ephemeral port, so the wire format is checked against itself rather than against a mock.
+The tests that run by default mock the socket layer and PyMOL's `cmd` module, so they need neither PyMOL nor a network, and cover the socket payloads, the bridge framing, the conservation pipeline (A3M parsing, Shannon entropy, MMseqs2 mocking, MSA→B-factor mapping), the mesh-repair paths, and every view. `tests/test_bridge_roundtrip.py` additionally runs the real bridge against the real plugin listener over TCP on an ephemeral port, so the wire format is checked against itself rather than against a mock.
 
 ### The two opt-in suites
 
-A further 122 tests are **deselected by default**, because they need things CI does not have. Both are worth running before a release tag:
+The rest are **deselected by default**, because they need things CI does not have. Both are worth running before a release tag:
 
 ```bash
-uv run pytest -m live      # needs a running PyMOL with the plugin loaded
+uv run pytest -m live      # needs a test PyMOL on its own port: see CONTRIBUTING.md
 uv run pytest -m network   # hits real external APIs
 ```
 
-> **`-m live` clears the PyMOL session it connects to.** It drives your actual
-> PyMOL. Don't run it against a session you care about.
+> **`-m live` clears the PyMOL session it connects to.** So it runs only
+> against a port you name for testing; your everyday PyMOL's port, 9876 or an
+> `MCPYMOL_PORT` in your shell, is never assumed to be disposable.
 
-`-m live` exists because a mocked suite asserts the payload we *send*, which can never tell you whether PyMOL will accept it — and that gap is where every wiring bug has lived: tools calling `cmd` functions that don't exist, arguments bound in the wrong order, renders that come back blank. It calls every registered tool once and asserts only that each is *wired* (the action resolves, the arguments bind), not that it succeeds, since many tools error honestly without the right context. New tools are swept automatically. It skips cleanly when no PyMOL is listening, and detects a wedged session rather than reporting a hundred confusing failures.
+`-m live` exists because a mocked suite asserts the payload we *send*, which can never tell you whether PyMOL will accept it — and that gap is where every wiring bug has lived: tools calling `cmd` functions that don't exist, arguments bound in the wrong order, renders that come back blank. It calls every registered tool once and asserts only that each is *wired* (the action resolves, the arguments bind), not that it succeeds, since many tools error honestly without the right context. New tools are swept automatically. Asking for it and having no live test pass is a failure, not a green run of skips, and it detects a wedged session rather than reporting a hundred confusing failures.
 
 Treat a green default run as necessary, not sufficient.
 

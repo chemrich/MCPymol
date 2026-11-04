@@ -67,11 +67,27 @@ them before a release.
 
 ```bash
 pytest -m network   # AlphaFold DB's API still returns what we assume
-pytest -m live      # every tool, called once against a running PyMOL
+
+# every tool, called against a disposable headless PyMOL on a test port
+MCPYMOL_PORT=9898 pymol -ckqK src/mcpymol/plugin.py &
+MCPYMOL_TEST_PORT=9898 MCPYMOL_LIVE_MIN_PASSED=230 pytest -m live
 ```
 
-**`-m live` clears the PyMOL session it connects to.** Save your work first.
-It skips cleanly if no plugin is listening.
+**`-m live` clears the PyMOL session it connects to**, so it runs only against
+`MCPYMOL_TEST_PORT`, a port you named for testing. Without it the run refuses
+to start: neither 9876 nor an `MCPYMOL_PORT` in your shell is assumed to be
+disposable, since that is how people move their everyday PyMOL off a clashing
+port. Point it at 9876 only if the session there really is disposable.
+
+Launch the test PyMOL exactly as above: loading `plugin.py` some other way
+(`runpy`, a wrapper script) puts its globals out of the tests' reach, and one
+test then skips instead of running.
+
+A run that selects live tests and passes none of them fails, rather than
+reporting a green row of skips: that is what pointing at the wrong port, or at
+no PyMOL, used to look like. Before a release, set `MCPYMOL_LIVE_MIN_PASSED`
+near the full count (237 at 1.6.0, plus 3 tests that need a GUI PyMOL).
+`--collect-only` lists live tests without either check.
 
 It exists because the mocked suite asserts the payload we *send*, which cannot
 tell you whether PyMOL will accept it — and every wiring bug this project has

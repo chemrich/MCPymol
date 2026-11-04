@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **`pytest -m live` no longer drives your own PyMOL.** The live suites clear
+  the session they reach, and with nothing set that was port 9876, a
+  developer's everyday PyMOL. They now run only against `MCPYMOL_TEST_PORT`, a
+  port named for testing, and refuse to start without one. A run that selects
+  live tests and passes none of them now fails instead of reporting a row of
+  skips, and `MCPYMOL_LIVE_MIN_PASSED` sets the bar for a release gate.
+
 ## [1.6.0] - 2026-11-04
 
 The release that drains a long Unreleased section: the cryo-EM tools in
