@@ -72,7 +72,10 @@ print = [
 ]
 
 [project.scripts]
-mcpymol = "mcpymol.server:main"
+# The CLI, not mcpymol.server: the plugin flags must work even when the MCP
+# stack can't be imported (how 1.5.0 broke), so you can still find, install
+# or remove the plugin. Bare `mcpymol` imports the server itself.
+mcpymol = "mcpymol.cli:main"
 
 [dependency-groups]
 dev = [

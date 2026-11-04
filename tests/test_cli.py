@@ -193,3 +193,44 @@ def test_install_reports_a_missing_plugin(tmp_path, monkeypatch):
 
     assert message.startswith("Error")
     assert run(["--install-plugin", "--pymolrc", str(tmp_path / "x.py")]) == 1
+
+
+# ── The plugin flags must not need the MCP stack ─────────────────────────────
+
+import subprocess
+import sys
+import tomllib
+
+_WITHOUT_MCP = """
+import runpy, sys
+sys.modules["mcp"] = None  # what an mcp release that breaks our imports looks like
+sys.argv = ["mcpymol", "--plugin-path"]
+{run}
+"""
+
+
+@pytest.mark.parametrize(
+    "run",
+    [
+        "runpy.run_module('mcpymol', run_name='__main__')",  # python -m mcpymol
+        "from mcpymol.cli import main; main()",  # the console script's target
+    ],
+)
+def test_the_plugin_flags_work_when_mcp_cannot_be_imported(run):
+    """1.5.0 broke on import when mcp 2 removed a module, and the console
+    script took the plugin flags down with it: the way to find or remove the
+    plugin failed exactly when it was needed."""
+    done = subprocess.run(
+        [sys.executable, "-c", _WITHOUT_MCP.format(run=run)],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.strip() == str(plugin_path())
+
+
+def test_the_console_script_is_the_cli():
+    pyproject = pathlib.Path(__file__).parent.parent / "pyproject.toml"
+    scripts = tomllib.loads(pyproject.read_text())["project"]["scripts"]
+    assert scripts == {"mcpymol": "mcpymol.cli:main"}

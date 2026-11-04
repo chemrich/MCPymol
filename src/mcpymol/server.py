@@ -1,9 +1,9 @@
-"""The MCPymol bridge server — entry point and public surface.
+"""The MCPymol bridge server — its public surface.
 
-This module is what the MCP client launches (``mcpymol = mcpymol.server:main``).
-Importing it pulls in every tool module, and importing a tool module is what
-registers its tools on the shared :data:`mcpymol.app.mcp` application, so the
-imports below are load-bearing rather than decorative.
+Bare ``mcpymol`` (``mcpymol.cli:main``) imports this module to serve. Importing
+it pulls in every tool module, and importing a tool module is what registers
+its tools on the shared :data:`mcpymol.app.mcp` application, so the imports
+below are load-bearing rather than decorative.
 
 The implementation lives in focused modules:
 
@@ -718,7 +718,8 @@ __all__ = [
 
 
 def main() -> None:
-    """Console-script entry point; delegates to the CLI in mcpymol.cli."""
+    """The CLI in mcpymol.cli, kept here for anything that still calls
+    ``mcpymol.server:main`` (the console script did, up to 1.6.0)."""
     from mcpymol.cli import main as cli_main
 
     cli_main()
