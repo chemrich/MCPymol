@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **`list_objects` lists every object, not only molecules.** It used
+  `get_object_list`, which PyMOL backs with the selector, so a session holding
+  just a map read "No objects are loaded", and a structure's maps,
+  measurements and groups went unlisted. It now names them all, a
+  non-molecule with its type (`emd_1234 (map)`); molecules read as before.
+  `load_session`'s summary of what the session now holds had the same gap.
 - **`pytest -m live` no longer drives your own PyMOL.** The live suites clear
   the session they reach, and with nothing set that was port 9876, a
   developer's everyday PyMOL. They now run only against `MCPYMOL_TEST_PORT`, a

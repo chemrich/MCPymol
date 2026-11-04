@@ -53,14 +53,18 @@ def test_parallel_tool_calls_run_one_at_a_time(monkeypatch):
 def test_an_unexpected_exception_reaches_the_client_with_its_text(monkeypatch):
     """mcp 2.x reduces an unexpected exception to "Error executing tool X". The
     model needs the cause, as it had under 1.x, so the wrapper passes it on."""
-    _patch_send_request(monkeypatch, lambda *a, **kw: {"status": "success", "result": 42})
+
+    def explode(*_a, **_kw):
+        raise RuntimeError("the socket layer exploded")
+
+    _patch_send_request(monkeypatch, explode)
 
     with pytest.raises(ToolError) as caught:
         asyncio.run(mcp.call_tool("list_objects", {}))
 
     assert type(caught.value) is ToolError, "reduced to UnexpectedToolError: the text was dropped"
     assert not isinstance(caught.value, UnexpectedToolError)
-    assert str(caught.value) == "Error executing tool list_objects: can only join an iterable"
+    assert str(caught.value) == "Error executing tool list_objects: the socket layer exploded"
 
 
 def test_the_server_reports_mcpymols_version():

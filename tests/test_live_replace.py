@@ -83,3 +83,24 @@ def test_add_mode_keeps_everything(tmp_path):
     load_structure(file_path=str(new_file), obj_name="newcomer", replace=False)
 
     assert {"oldmol", "oldmap", "newcomer"} <= set(_objects())
+
+
+def test_list_objects_names_every_kind_of_object():
+    """get_object_list lists molecules only: a session holding just a map
+    read "No objects are loaded", and a structure's map, measurement and
+    group went unlisted (PyMOL 3.1.0)."""
+    from mcpymol.structures import list_objects
+
+    _do("fab AAAA, mol1")
+    _do("map_new themap, gaussian, 1.0, mol1")
+    _do("distance d1, mol1 and name CA and resi 1, mol1 and name CA and resi 2")
+    _do("group grp, mol1")
+    out = list_objects()
+    assert out.startswith("Loaded objects: "), out
+    listed = out.removeprefix("Loaded objects: ").split(", ")
+    assert sorted(listed) == sorted(["mol1", "themap (map)", "d1 (measurement)", "grp (group)"]), (
+        out
+    )
+
+    _do("delete mol1 or d1 or grp")
+    assert list_objects() == "Loaded objects: themap (map)"
