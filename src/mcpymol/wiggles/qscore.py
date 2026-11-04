@@ -24,6 +24,7 @@ from __future__ import annotations
 import gzip
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from typing import BinaryIO
 
 from mcpymol.wiggles.atoms import (
     fetch_atoms,
@@ -52,7 +53,7 @@ QSCORE_LEGEND = (
 )
 
 
-def _open_maybe_gzip(path: Path):
+def _open_maybe_gzip(path: Path) -> gzip.GzipFile | BinaryIO:
     with open(path, "rb") as fh:
         magic = fh.read(2)
     return gzip.open(path, "rb") if magic == b"\x1f\x8b" else open(path, "rb")

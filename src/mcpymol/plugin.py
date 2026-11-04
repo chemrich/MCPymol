@@ -29,7 +29,10 @@ import threading
 import time
 import traceback
 import uuid
-from typing import IO
+from typing import IO, TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 # Read once at import so the whole session is consistent.
 MCP_PORT = int(os.environ.get("MCPYMOL_PORT", 9876))
@@ -154,7 +157,7 @@ def _error_bytes(message: str) -> bytes:
     return json.dumps({"status": "error", "error": message}).encode("utf-8")
 
 
-def _jsonable(value):
+def _jsonable(value: object) -> object:
     """Best-effort conversion of a PyMOL return value into JSON-able data.
 
     Several ``pymol.cmd`` functions return numpy arrays — ``get_coords`` and
@@ -207,7 +210,7 @@ def _dumps_response(response: dict) -> bytes:
         return _error_bytes("PyMOL returned a value that could not be serialized to JSON.")
 
 
-def _resolve_dotted(name: str):
+def _resolve_dotted(name: str) -> Callable[..., Any] | None:
     """Resolve a dotted action name like ``util.cbc`` to a callable.
 
     Falls back through ``pymol.util`` for ``util.*`` and through ``cmd`` for
@@ -352,7 +355,7 @@ class _Tap(io.StringIO):
     the stream each part belongs to.
     """
 
-    def __init__(self, record: list[tuple[str, str]], stream_name: str, original) -> None:
+    def __init__(self, record: list[tuple[str, str]], stream_name: str, original: IO[str]) -> None:
         super().__init__()
         self._record = record
         self._stream_name = stream_name
@@ -483,7 +486,7 @@ class _OutputCapture:
             pass
         return b"".join(chunks)
 
-    def __exit__(self, *exc_info) -> None:
+    def __exit__(self, *exc_info: object) -> None:
         sys.stdout, sys.stderr = self._streams["stdout"], self._streams["stderr"]
         raw = b""
         if self._saved_fd is not None:
@@ -616,7 +619,7 @@ def _failure_message(text: str) -> str:
 class _MainThreadJob:
     """One piece of work for PyMOL's main thread, as the plugin thread sees it."""
 
-    def __init__(self, func) -> None:
+    def __init__(self, func: Callable[[], Any]) -> None:
         self._func = func
         self._lock = threading.Lock()
         self.started = threading.Event()
@@ -673,7 +676,7 @@ def _on_pymol_main_thread() -> bool:
     return isinstance(gui_thread, int) and gui_thread == threading.get_ident()
 
 
-def _modal_draw(api) -> bool:
+def _modal_draw(api: Any) -> bool:
     """True while PyMOL renders frames in a modal draw loop (``mpng`` with
     ``modal=1``), during which it refuses every queued command.  Called with
     the API lock held."""
@@ -734,7 +737,7 @@ def _queue_job(token: str, deadline: float, timeout: float) -> None:
         time.sleep(0.1)
 
 
-def _on_main_thread(func, start_timeout: float | None = None):
+def _on_main_thread(func: Callable[[], Any], start_timeout: float | None = None) -> Any:
     """Run ``func`` on PyMOL's main thread and return what it returns.
 
     Waits up to ``start_timeout`` (default ``DO_START_TIMEOUT``) for the main
@@ -777,7 +780,7 @@ def _on_main_thread(func, start_timeout: float | None = None):
     return job.value
 
 
-def _new_parser():
+def _new_parser() -> Any:
     """A private command parser for one request.
 
     Never the console's cmd._parser: its state (an open python block, a
@@ -896,7 +899,7 @@ def _run_lines(lines: list[str]) -> dict:
     }
 
 
-def _do_response(commands, lines: list[str], report: dict) -> dict:
+def _do_response(commands: object, lines: list[str], report: dict) -> dict:
     """The reply to a `do`.  ``output`` is always present: the bridge reads its
     absence as a plugin too old to report errors at all."""
     response: dict = {
@@ -926,7 +929,7 @@ def _do_response(commands, lines: list[str], report: dict) -> dict:
     return response
 
 
-def run_do(commands) -> dict:
+def run_do(commands: object) -> dict:
     """Run PyMOL command-language text and report what PyMOL made of it.
 
     Splits ``commands`` into lines the way cmd.do does, runs them on PyMOL's
@@ -985,7 +988,7 @@ class _ObjCRuntime:
         if not send:
             raise OSError("objc_msgSend not found")
 
-        def method(restype, *argtypes):
+        def method(restype: Any, *argtypes: Any) -> Any:
             # objc_msgSend has to be called through a prototype that matches
             # the method exactly.  On arm64, variadic and fixed arguments are
             # passed differently, so the generic signature scrambles them — a
@@ -999,7 +1002,7 @@ class _ObjCRuntime:
         self._void_id = method(None, ctypes.c_void_p)
         self._void = method(None)
 
-    def _process_info(self):
+    def _process_info(self) -> int | None:
         cls = self._objc.objc_getClass(b"NSProcessInfo")
         return self._id(cls, self._objc.sel_registerName(b"processInfo"))
 
@@ -1065,7 +1068,12 @@ class _AppNapGuard:
     one printed line; it never affects request handling.
     """
 
-    def __init__(self, idle_s: float | None = None, runtime=None, clock=None) -> None:
+    def __init__(
+        self,
+        idle_s: float | None = None,
+        runtime: Any = None,
+        clock: Callable[[], float] | None = None,
+    ) -> None:
         self.idle_s = APP_NAP_IDLE_S if idle_s is None else idle_s
         self._runtime = runtime
         self._clock = clock or time.monotonic
@@ -1147,7 +1155,7 @@ _CRASHES_ON_UNRESOLVED_SELECTION: dict[str, tuple[str, ...]] = {
 }
 
 
-def _refuse_crashing_selection(action, args, kwargs) -> dict | None:
+def _refuse_crashing_selection(action: Any, args: list[Any], kwargs: dict[str, Any]) -> dict | None:
     """The error to answer instead of running ``action``, or None to run it."""
     params = _CRASHES_ON_UNRESOLVED_SELECTION.get(action)
     if params is None:
@@ -1205,7 +1213,7 @@ class PyMOLSocketServer:
         self._replaces = replaces
 
     # ── Request dispatch ────────────────────────────────────────────────
-    def handle_request(self, payload):
+    def handle_request(self, payload: object) -> dict:
         """Execute the requested PyMOL command and return a JSON-able dict."""
         if cmd is None:
             return {"status": "error", "error": "PyMOL cmd module not available."}
@@ -1257,7 +1265,7 @@ class PyMOLSocketServer:
                     response["error"] = error.rstrip() + "\n" + "\n".join(extra)
         return response
 
-    def _dispatch(self, action, args, kwargs):
+    def _dispatch(self, action: Any, args: list[Any], kwargs: dict[str, Any]) -> dict:
         """Run one action other than `do`.  Exceptions become error responses."""
         refused = _refuse_crashing_selection(action, args, kwargs)
         if refused is not None:

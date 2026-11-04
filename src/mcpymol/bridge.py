@@ -10,6 +10,7 @@ import os
 import socket
 import sys
 import time
+from typing import Any
 
 HOST = "127.0.0.1"
 
@@ -219,7 +220,7 @@ def _warnings_note(res: dict) -> str:
 
 
 def format_measurement(
-    label: str, value, unit: str, name: str | None = None, signed: bool = False
+    label: str, value: Any, unit: str, name: str | None = None, signed: bool = False
 ) -> str:
     """Render a numeric PyMOL result as an answer rather than an acknowledgement.
 

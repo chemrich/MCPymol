@@ -115,16 +115,15 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
-# Lenient start: these are deliberate style choices in this codebase, not
-# bugs — left ignored for now so CI is green; revisit in a cleanup pass.
-#   E701   single-line `if cond: stmt` bodies
-#   E501   a handful of long lines
-#   SIM105 try/except/pass preferred over contextlib.suppress here
-#   RUF001/RUF002/RUF003  intentional en dashes in prose strings, docstrings
-#          and comments. RUF002 joined the other two when mcpymol.wiggles
-#          landed: its docstrings quote real ranges ("±5–15%", "0–1"), and a
-#          hyphen there would misstate them.
-ignore = ["E701", "E501", "SIM105", "RUF001", "RUF002", "RUF003"]
+# Deliberate style choices, not deferred fixes (counts as of 2026-11-04, from
+# `ruff check --isolated --line-length 100 --select <rule> .`):
+#   E501   92 long lines, nearly all prose in strings and docstrings that the
+#          formatter leaves alone; code itself is held to 100 by ruff format
+#   SIM105 13 try/except/pass blocks, kept over contextlib.suppress
+#   RUF001/RUF002/RUF003  60 intentional en dashes in strings, docstrings and
+#          comments. They mark real ranges ("±5–15%", "0–1"), and a hyphen
+#          there would misstate them.
+ignore = ["E501", "SIM105", "RUF001", "RUF002", "RUF003"]
 
 [tool.ruff.lint.per-file-ignores]
 # Tests mock `pymol` in sys.modules before importing the package under test,
@@ -134,9 +133,10 @@ ignore = ["E701", "E501", "SIM105", "RUF001", "RUF002", "RUF003"]
 [tool.mypy]
 files = ["src"]
 python_version = "3.11"
-# Lenient start: catch obvious mistakes without demanding full annotation
-# coverage. Tighten (disallow_untyped_defs, strict) in a follow-up.
+# Every function is annotated (disallow_untyped_defs). ignore_missing_imports
+# stays: pymol, pymeshlab and manifold3d ship no type information.
 ignore_missing_imports = true
 warn_redundant_casts = true
-warn_unused_ignores = false
+warn_unused_ignores = true
 check_untyped_defs = true
+disallow_untyped_defs = true

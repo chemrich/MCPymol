@@ -510,6 +510,10 @@ def _arguments_for(fn, tmp_path, tool_name: str = "") -> dict:
             args[name] = str(tmp_path / "live_probe.png")
         elif name in ("out_dir", "path"):
             args[name] = str(tmp_path)
+        elif name == "prefix" and tool_name == "mpng":
+            # mpng's prefix is a file path, not an object name as it is for
+            # symexp: left relative, the frames land in PyMOL's working dir.
+            args[name] = str(tmp_path / "_live_frame")
         elif name in DEFAULTS:
             value = DEFAULTS[name]
             if value is not None:

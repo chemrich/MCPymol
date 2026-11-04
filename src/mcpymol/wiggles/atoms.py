@@ -138,7 +138,7 @@ def count_states(port: PymolPort, obj: str) -> int:
     """How many states (models) the object has."""
     raw = port.query("count_states", obj)
     try:
-        return int(raw)  # type: ignore[arg-type]
+        return int(raw)
     except (TypeError, ValueError) as exc:
         raise PortError(f"count_states({obj!r}) returned {raw!r}") from exc
 
@@ -153,7 +153,7 @@ def fetch_state_coords(
     out: list[tuple[float, float, float]] = []
     for point in raw:
         try:
-            x, y, z = point  # type: ignore[misc]
+            x, y, z = point
         except (TypeError, ValueError) as exc:
             raise PortError(f"malformed coordinate {point!r}") from exc
         out.append((float(x), float(y), float(z)))
