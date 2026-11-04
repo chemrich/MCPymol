@@ -142,6 +142,18 @@ def test_frames_load_in_order_and_register(job):
     assert loaded == list(ensemble.objects), port.call_log
 
 
+def test_a_prefix_with_a_space_still_names_one_object_per_frame(job):
+    """A frame that fails to arrive is cleaned up by deleting each frame's
+    name; `delete my run_f01` would have deleted an object called `my`."""
+    root = job(2, marker="z.pkl")
+    port = FakePort({"get_names": ["my_run_f01"]})  # second never arrives
+
+    with pytest.raises(PortError, match="did not arrive"):
+        load_ensemble(port, root, "my run")
+
+    assert [args[0] for args, _ in port.calls("delete")] == ["my_run_f01", "my_run_f02"]
+
+
 def test_provenance_is_declared_generated_and_says_so(job):
     """Not the inference I1 forbids — I1 exists to stop a generated volume being
     called measured, and this asserts the conservative direction."""

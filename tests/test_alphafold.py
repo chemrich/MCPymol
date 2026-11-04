@@ -19,6 +19,8 @@ from mcpymol.views import _PLDDT_BANDS, _read_ca_bfactors, plddt_view
 
 
 def _sr_ok(action, args=None, kwargs=None, **_ignored):
+    if action == "get_legal_name":  # PyMOL keeps a plain name as is
+        return {"status": "success", "result": args[0]}
     if action == "count_atoms":
         return {"status": "success", "result": 1200}
     if action == "get_object_list":
@@ -36,6 +38,8 @@ def _pdb_line(resi, bfactor):
 
 def _sr_with_bfactors(values):
     def fake(action, args=None, kwargs=None, **_ignored):
+        if action == "get_legal_name":  # PyMOL keeps a plain name as is
+            return {"status": "success", "result": args[0]}
         if action == "get_pdbstr":
             body = "\n".join(_pdb_line(i + 1, v) for i, v in enumerate(values))
             return {"status": "success", "result": body}
@@ -316,7 +320,8 @@ def test_fetch_alphafold_propagates_download_failure(mock_open, mock_resolve, mo
     result = fetch_alphafold(uniprot_id="P00000")
 
     assert "no prediction for 'P00000'" in result
-    mock_sr.assert_not_called()
+    # Only the read-only name check reached PyMOL: nothing deleted or loaded.
+    assert [c.args[0] for c in mock_sr.call_args_list] == ["get_legal_name"]
 
 
 @patch("mcpymol.structures.send_request")
@@ -327,6 +332,8 @@ def test_fetch_alphafold_reports_a_load_failure(mock_open, mock_resolve, mock_sr
     mock_open.return_value.__enter__.return_value.read.return_value = b"data_AF\n"
 
     def fake(action, args=None, kwargs=None, **_ignored):
+        if action == "get_legal_name":  # PyMOL keeps a plain name as is
+            return {"status": "success", "result": args[0]}
         if action == "load":
             return {"status": "error", "error": "unrecognized file format"}
         return {"status": "success", "result": "OK"}

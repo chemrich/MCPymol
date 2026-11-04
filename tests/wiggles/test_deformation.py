@@ -138,6 +138,16 @@ def test_arrows_are_drawn_as_cgo():
     assert 27.0 in cgo, "a cone opcode makes the head"
 
 
+def test_the_arrow_object_is_one_name_even_for_a_selection():
+    """The old arrows are deleted by name first; given a selection, `delete
+    obj and chain A_arrows` would have deleted the object itself."""
+    port = _port([0.0, 0.0, 3.0, 6.0])
+    deformation_view(port, "obj and chain A")
+
+    assert [args[0] for args, _ in port.calls("delete")] == ["obj_and_chain_A_arrows"]
+    assert port.calls("load_cgo")[0][0][1] == "obj_and_chain_A_arrows"
+
+
 def test_only_ca_atoms_get_arrows():
     """One arrow per residue, at its CA — an arrow per atom is a thicket."""
     port = _port([5.0, 5.0, 5.0, 5.0])

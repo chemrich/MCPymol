@@ -104,3 +104,54 @@ def test_list_objects_names_every_kind_of_object():
 
     _do("delete mol1 or d1 or grp")
     assert list_objects() == "Loaded objects: themap (map)"
+
+
+# ── A name must never delete what it does not name ─────────────────────────────
+
+
+def _bystanders() -> tuple[list[str], int]:
+    """Two objects the call under test must leave alone, one of them recoloured."""
+    _do("fab AAAAA, keepme1")
+    _do("fab GGGGG, keepme2")
+    _do("color red, keepme2")
+    return _objects(), _red_atoms()
+
+
+def _red_atoms() -> int:
+    res = send_request("count_atoms", args=["keepme2 and color red"])
+    return int(res.get("result") or 0)
+
+
+@pytest.mark.parametrize("name", ["*", "all", "keep*", "pep two", "a;b"])
+def test_a_name_that_is_a_pattern_is_refused_and_deletes_nothing(tmp_path, name):
+    """`delete` takes patterns and lists. Given `*`, `all` or `keep*`,
+    load_structure deleted every other object and reported success, even
+    with replace=False; `pep two` loaded as `pep_two` and then said nothing
+    had loaded. Seen on PyMOL 3.1.0 before the fix."""
+    source = tmp_path / "pep.pdb"
+    _do("fab CCC, src")
+    assert send_request("save", args=[str(source), "src"]).get("status") == "success"
+    _do("delete src")
+    before = _bystanders()
+
+    out = load_structure(file_path=str(source), obj_name=name, replace=False)
+
+    assert out.startswith("Error:") and "can't be used as an object name" in out, out
+    assert (_objects(), _red_atoms()) == before
+
+
+def test_a_preset_given_a_selection_does_not_delete_its_object():
+    """crosslink_view names its distance objects after obj_name and deletes the
+    old ones first. Given a selection, `delete keep1 and chain A_disulfides`
+    deleted the object keep1 itself (PyMOL 3.1.0)."""
+    from mcpymol.views import crosslink_view
+
+    _do("fab CACAC, keep1, chain=A")
+    _do("fab GGG, keep2")
+
+    out = crosslink_view(obj_name="keep1 and chain A")
+
+    assert not out.startswith("Error"), out
+    names = _objects()
+    assert {"keep1", "keep2"} <= set(names), names
+    assert "keep1_and_chain_A_disulfides" in names, names

@@ -132,6 +132,8 @@ class FakePort:
         if action in self.responses:
             response = self.responses[action]
             return response(*args, **kwargs) if callable(response) else response
+        if action == "get_legal_name":
+            return args[0]  # as PyMOL does for a plain name; stub it to differ
         if action in DATA_ACTIONS:
             raise KeyError(
                 f"FakePort has no response for data action {action!r}, whose "

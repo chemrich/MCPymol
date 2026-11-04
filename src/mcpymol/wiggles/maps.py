@@ -129,6 +129,16 @@ def load_map(
     path = Path(path)
     header = read_map_header(path)  # fails here, before PyMOL sees anything
     obj = name or _default_name(path)
+    if name:
+        # PyMOL would load `all` as `all_`, find no `all`, and the cleanup
+        # below would then run `delete all`; `keep*` deleted every keep...
+        legal = port.query("get_legal_name", name)
+        if isinstance(legal, str) and legal != name:
+            raise PortError(
+                f"{name!r} can't be used as an object name: PyMOL would call it "
+                f"{legal!r}, and cleaning up by that name could delete other objects. "
+                f"Use letters, digits and underscores. Nothing was loaded."
+            )
 
     if isinstance(provenance, str):
         provenance = Provenance(provenance)

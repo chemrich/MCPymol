@@ -290,3 +290,16 @@ class TestCategoryPriorityNotJustTokenLength:
         assert severity.index(Provenance.GENERATED) > severity.index(Provenance.NN_ENHANCED)
         # The table may be declared in any order; that is the point.
         assert {p for p, _ in _TOKENS} <= set(severity)
+
+
+@pytest.mark.parametrize(("name", "legal"), [("all", "all_"), ("keep*", "keep"), ("*", "")])
+def test_a_name_pymol_would_change_is_refused_before_loading(tmp_path, name, legal):
+    """PyMOL would load `all` as `all_`, find no `all`, and the cleanup would
+    then run `delete all` over the whole session."""
+    p = write_map(tmp_path, "m.mrc")
+    port = FakePort({"get_legal_name": legal, "get_names": ["bystander"]})
+
+    with pytest.raises(PortError, match="can't be used as an object name"):
+        load_map(port, p, name)
+
+    assert not port.calls("load") and not port.calls("delete"), port.call_log

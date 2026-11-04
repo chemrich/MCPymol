@@ -12,7 +12,14 @@ overwrite every atom in the session; moved here when the same raw
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
+
+# What PyMOL keeps in an object name: cmd.get_legal_name turns everything
+# else (spaces, '*', ';', '/', parentheses, quotes) into '_' or drops it.
+# Checked on PyMOL 3.1.0, where '.', '+' and '-' all survive, and an object
+# named with them still deletes and selects exactly itself.
+_NOT_IN_A_NAME = re.compile(r"[^A-Za-z0-9_.+\-]+")
 
 
 def quote(value: str) -> str:
@@ -71,3 +78,32 @@ def chain_clause(chains: str | Iterable[str]) -> str:
     """
     ids = chains.split("+") if isinstance(chains, str) else list(chains)
     return "chain " + "+".join(quote(c.strip()) for c in ids)
+
+
+def plain_name(name: str) -> str:
+    """``name`` with every character PyMOL would not keep replaced by ``_``.
+
+    For object names built from what a caller typed, which is often a
+    selection rather than a name. The result is one name that PyMOL creates
+    verbatim, so a later ``delete`` or ``disable`` of it, or of
+    ``<it>_*``, cannot turn into a pattern or a list. A plain name such as
+    ``1ubq`` is unchanged.
+
+    PyMOL hides objects whose names start with ``_``. A hidden name stays
+    hidden; a leading ``_`` that only the replacement made (``*``, ``(sele)``)
+    is dropped, so it doesn't hide the object.
+    """
+    plain = _NOT_IN_A_NAME.sub("_", name)
+    return plain if name.startswith("_") else plain.lstrip("_")
+
+
+def derived_name(base: str, suffix: str) -> str:
+    """The name of a helper object made for ``base``: ``1ubq_disulfides``.
+
+    Presets name the objects they create after the caller's object, and
+    delete the previous one by that name first. ``base`` is often a selection
+    rather than a name, though, and ``delete`` reads a space-separated list:
+    ``delete 1ubq and chain A_disulfides`` deleted the object ``1ubq`` itself
+    (PyMOL 3.1.0). See :func:`plain_name`, which this applies.
+    """
+    return plain_name(f"{base}_{suffix}") or suffix
