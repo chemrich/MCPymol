@@ -27,15 +27,29 @@ from mcpymol.style import black_background
 # MMseqs2 server for evolutionary conservation (ColabFold public API by default)
 MMSEQS_URL = os.environ.get("MCPYMOL_MMSEQS_URL", "https://api.colabfold.com")
 
-# Ticket states that mean "still working", as ColabFold's own client polls
-# them. Anything else ends the wait: COMPLETE and ERROR, and also RATELIMIT,
+# Ticket states that mean "still working", the set ColabFold's own client polls
+# on. Anything else ends the wait: COMPLETE and ERROR, and also RATELIMIT,
 # MAINTENANCE or a state added later, which used to spin for the full ten
-# minutes while every other tool queued behind this one.
+# minutes while every other tool queued behind this one. (ColabFold resubmits
+# on an unexpected state; this reports it instead.)
 _STILL_WORKING = frozenset({"PENDING", "RUNNING", "UNKNOWN"})
 
 # Polls 5 s apart that may fail in a row (network blips, a 5xx) before the
 # server counts as gone: 30 s. Every failure used to be skipped silently.
 _POLL_FAILURES_ALLOWED = 6
+
+# UNKNOWN answers in a row before the job counts as gone (see the poll loop).
+_UNKNOWN_POLLS_ALLOWED = 6
+
+
+def _reason(error: urllib.error.HTTPError) -> str:
+    """The server's own explanation from an error response, or the HTTP status."""
+    try:
+        body = json.loads(error.read().decode())
+    except (ValueError, OSError, AttributeError):
+        body = None
+    reason = body.get("reason") if isinstance(body, dict) else None
+    return f"HTTP {error.code}: {reason}" if reason else f"HTTP {error.code} {error.reason}"
 
 
 def _user_agent() -> str:
@@ -87,6 +101,22 @@ def _run_mmseqs2(sequence: str, server_url: str | None = None, use_env: bool = T
             with urllib.request.urlopen(req, timeout=30) as resp:
                 ticket = json.loads(resp.read().decode())
             break
+        except urllib.error.HTTPError as e:
+            if e.code != 429:
+                if attempt == max_retries - 1:
+                    raise RuntimeError(
+                        f"Failed to submit MMseqs2 job after {max_retries} attempts: {e}"
+                    ) from e
+                time.sleep(2**attempt)
+                continue
+            # The server's rate limit answers 429 with {"status": "RATELIMIT",
+            # "reason": ...} (MMseqs2-App's ratelimit.go). Retrying a second
+            # later only spends more of the limit, so say why and stop.
+            raise RuntimeError(
+                f"The MMseqs2 server at {host} is rate-limiting requests from this machine "
+                f"({_reason(e)}). Wait a few minutes, or set MCPYMOL_MMSEQS_URL to a "
+                f"server of your own."
+            ) from e
         except (urllib.error.URLError, TimeoutError) as e:
             if attempt == max_retries - 1:
                 raise RuntimeError(
@@ -105,7 +135,7 @@ def _run_mmseqs2(sequence: str, server_url: str | None = None, use_env: bool = T
 
     # 2. Poll until complete
     poll_url = f"{host}/ticket/{ticket_id}"
-    failures = 0
+    failures = unknown = 0
     for _ in range(120):  # up to ~10 minutes with 5s intervals
         time.sleep(5)
         try:
@@ -131,6 +161,16 @@ def _run_mmseqs2(sequence: str, server_url: str | None = None, use_env: bool = T
                 raise RuntimeError(f"MMseqs2 search failed: {status}")
             if state not in _STILL_WORKING:
                 raise RuntimeError(f"MMseqs2 search stopped with status {state!r}: {status}")
+            # The server answers UNKNOWN, with HTTP 200, once a job's files are
+            # gone (MMseqs2-App's jobsystem.go), so an expired job would read
+            # as "still working" for the full ten minutes.
+            unknown = unknown + 1 if state == "UNKNOWN" else 0
+            if unknown >= _UNKNOWN_POLLS_ALLOWED:
+                raise RuntimeError(
+                    f"The MMseqs2 server no longer knows job {ticket_id} (UNKNOWN for "
+                    f"{unknown} status checks in a row): it has probably expired. "
+                    f"Run conservation_view again to resubmit."
+                )
             continue
         if failures >= _POLL_FAILURES_ALLOWED:
             raise RuntimeError(
