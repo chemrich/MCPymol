@@ -1,0 +1,68 @@
+name: Fresh install
+
+# Every job in ci.yml installs from uv.lock, so it tests the versions we pinned
+# rather than the ones a user gets. `pip install mcpymol` ignores the lock and
+# resolves pyproject's ranges against today's PyPI. That gap shipped 1.5.0 and
+# 1.5.1 broken: once fastmcp 4 let mcp 2.x in, `import mcpymol.server` raised
+# ModuleNotFoundError, and CI stayed green throughout.
+#
+# This job installs the built wheel the way a user would. It runs on a schedule
+# as well, because an upstream release can break a fresh install without any
+# commit here.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 6 * * 1" # Mondays 06:17 UTC
+  workflow_dispatch:
+
+concurrency:
+  group: fresh-install-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  fresh-install:
+    name: Fresh install (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The ends of the supported range, which resolve differently: several
+        # print-extra dependencies have dropped older Pythons.
+        python-version: ["3.10", "3.13"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      - name: Build the wheel
+        run: uv build --wheel
+      # `uv pip` never reads uv.lock: this resolves the wheel's own metadata,
+      # newest versions first, exactly as `pip install 'mcpymol[print]'` would.
+      - name: Install it into a clean venv, without the lockfile
+        run: |
+          uv venv --python ${{ matrix.python-version }} /tmp/fresh
+          uv pip install --python /tmp/fresh/bin/python \
+            "mcpymol[print] @ file://$(ls "$PWD"/dist/*.whl)"
+      # -I so the checkout's own files can't shadow the installed package.
+      - name: Import every entry point
+        run: |
+          /tmp/fresh/bin/python -I - <<'EOF'
+          import importlib.metadata as md
+
+          import mcpymol.server  # registers every tool
+          import mcpymol.wiggles
+          from mcpymol.app import mcp  # noqa: F401
+
+          # print extra: the libraries printing.py reaches, directly or via trimesh.
+          import pymeshlab  # noqa: F401
+          import scipy.ndimage  # noqa: F401
+          import skimage.measure  # noqa: F401
+          import trimesh  # noqa: F401
+
+          pkgs = ("mcp", "pydantic", "trimesh", "pymeshlab", "scipy", "scikit-image", "numpy")
+          print("resolved:", ", ".join(f"{p} {md.version(p)}" for p in pkgs))
+          EOF

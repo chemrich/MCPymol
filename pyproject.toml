@@ -32,9 +32,16 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Bio-Informatics",
     "Topic :: Scientific/Engineering :: Visualization",
 ]
+# Declare what src/ imports, and cap each at the next major. CI installs from
+# uv.lock, so a bound left open here is invisible until a user resolves fresh:
+# mcp 2.0 removed mcp.server.fastmcp, and 1.5.x broke on install once nothing
+# held mcp below it. Raise a cap only after the fresh-install job passes on it.
+#   mcp       FastMCP server and Image (mcp.server.fastmcp, app.py/rendering.py).
+#             The 1.30.0 floor carries every mcp security fix released for 1.x.
+#   pydantic  Field metadata on every tool signature.
 dependencies = [
-    "fastmcp>=3.4.5",
-    "mcp>=1.27.1",
+    "mcp>=1.30.0,<2",
+    "pydantic>=2,<3",
 ]
 
 [project.urls]
@@ -45,12 +52,17 @@ Changelog = "https://github.com/chemrich/MCPymol/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 # 3D-print export (print_export tool): mesh repair to watertight STL.
+# Only trimesh and pymeshlab are imported; the rest are trimesh's undeclared
+# soft dependencies for the calls printing.py makes.
+#   pymeshlab     poisson method. 2023.12.post2 is the first with macOS arm64 wheels.
+#   scipy         voxelized().fill().
+#   scikit-image  marching_cubes in the voxel method, which is also auto's fallback;
+#                 without it voxel raises ModuleNotFoundError. Pulls in networkx.
 print = [
-    "trimesh>=5.0.0",
-    "pymeshlab>=2023.12",
+    "trimesh>=4.0",
+    "pymeshlab>=2023.12.post2",
     "scipy>=1.11",
     "scikit-image>=0.22",
-    "networkx>=3.0",
 ]
 
 [project.scripts]

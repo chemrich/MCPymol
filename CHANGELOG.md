@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A fresh install of 1.5.0 or 1.5.1 no longer starts.** `mcp` had a floor and no ceiling. mcp 2.0 removed `mcp.server.fastmcp`, which `app.py` imports. What kept mcp 2 out was an accident: `fastmcp`, a dependency nothing in `src/` imports, pinned `mcp<2` throughout its 3.x line. fastmcp 4.0 (2026-08-31) lifted that pin, and since then `pip install mcpymol` has resolved to fastmcp 4 and mcp 2.3, where `import mcpymol.server` raises `ModuleNotFoundError`. Existing installs kept working until something upgraded them. CI never saw it because every job installs from `uv.lock`.
+- **The dependencies are now what the code imports.** `fastmcp` is gone, along with the 39 packages that came only with it (authlib, keyring, websockets, opentelemetry and others). `mcp` is capped at `<2`, and its floor rises to 1.30.0, which carries every security fix released for 1.x. `pydantic` was imported by nine modules without being declared, and now is. Moving to mcp 2's `MCPServer` is separate work.
+- **The `print` extra's bounds now match what works.** These ranges were checked by running the real mesh repair, not just the mocked suite. `pymeshlab>=2023.12` allowed a release with no macOS arm64 wheel; the floor is now 2023.12.post2. `trimesh>=5.0.0` was only Dependabot raising the floor, and trimesh 4.0 repairs the same meshes, so it is back to `>=4.0`. `networkx` was redundant, since scikit-image already requires it. scikit-image itself is required: it provides `marching_cubes` for the voxel method, which is also what `auto` falls back on.
+- **A new `Fresh install` workflow installs the built wheel without the lockfile and imports it.** It runs on every PR and every Monday, because an upstream release can break a fresh install with no commit here.
+- **The lockfile picks up the security fixes now within reach:** mcp 1.30.0, pyjwt 2.15.1, python-multipart, starlette, cryptography, pillow and others. pip-audit is clean except pillow on Python 3.10, where the fixes only exist in pillow 13 and pillow 13 requires 3.11.
+
 ### Added
 
 - **`mcpymol.wiggles` tier 3: ensembles.** `load_ensemble`, `latent_traverse_view`, `deformation_view`, `composition_view`. One blind-challenge result governs all four: put on the same thyroglobulin data, 41 submissions recovered molecular motions that resembled both each other and the ground truth, but the simulated truth had three population modes, most found two, and only three of 41 found all three — the missed one being the middle. So these tools draw motion and decline to draw populations. `deformation_view` is built with confidence; `latent_traverse_view` renders no latent scatter and estimates no density at all.
