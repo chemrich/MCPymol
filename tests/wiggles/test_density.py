@@ -32,7 +32,9 @@ def loaded(tmp_path):
         obj = filename.split(".")[0]
         port = FakePort({"get_names": [obj]})
         load_map(port, path, obj, provenance=Provenance.MEASURED)
-        return FakePort({"get_names": [obj]}), obj, read_map_header(path)
+        # normalize_ccp4_maps on, PyMOL's default. Said explicitly: "get" is a
+        # data action, so an unstubbed one raises rather than answering "OK".
+        return FakePort({"get_names": [obj], "get": "1"}), obj, read_map_header(path)
 
     return _load
 
@@ -114,7 +116,7 @@ def test_emdb_map_points_at_the_author_contour(tmp_path):
     port = FakePort({"get_names": ["emd_30913"]})
     load_map(port, path, "emd_30913")
 
-    port = FakePort({"get_names": ["emd_30913"]})
+    port = FakePort({"get_names": ["emd_30913"], "get": "1"})
     out = density_view(port, "emd_30913", "chain A")
 
     assert "EMD-30913 has an author-recommended contour" in out

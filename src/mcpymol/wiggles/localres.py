@@ -62,6 +62,10 @@ from mcpymol.wiggles.provenance import provenance_banner
 #: 0.7999967 rather than 0.8, and exact equality would refuse a matched pair.
 GRID_RTOL = 1e-4
 
+#: Absolute tolerance (degrees) for comparing cell angles. Angles are float32
+#: too, and 90° survives a round trip exactly, so this only absorbs noise.
+ANGLE_ATOL = 1e-3
+
 #: Absolute tolerance (Å) for comparing map origins. Origins are written as
 #: float32, so a round trip through a processing package perturbs the last bits.
 ORIGIN_ATOL = 1e-3
@@ -117,6 +121,14 @@ def grid_differences(a: MapHeader, b: MapHeader) -> list[str]:
                 f"voxel size along {axis} differs: {va:.6g} vs {vb:.6g} Å — "
                 f"every sampled position drifts, and the drift grows with "
                 f"distance from the origin"
+            )
+
+    for name, ga, gb in zip(("alpha", "beta", "gamma"), a.cellb, b.cellb, strict=True):
+        if abs(ga - gb) > ANGLE_ATOL:
+            out.append(
+                f"cell angle {name} differs: {ga:.6g}° vs {gb:.6g}° — the grid axes "
+                f"are not parallel, so matching extents, sampling and voxel sizes "
+                f"still put the same voxel index at different points in space"
             )
 
     if (a.nxstart, a.nystart, a.nzstart) != (b.nxstart, b.nystart, b.nzstart):
