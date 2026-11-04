@@ -95,8 +95,11 @@ def test_load_session_restores_and_lists_objects(mock_sr, tmp_path):
     session.write_bytes(b"\x00")
 
     def fake(action, args=None, kwargs=None, **_ignored):
-        if action == "get_object_list":
-            return {"status": "success", "result": ["1ubq", "1ubq_spine"]}
+        if action == "get_names":
+            return {"status": "success", "result": ["1ubq", "1ubq_spine", "1ubq_map"]}
+        if action == "get_type":
+            kind = "map" if args[0] == "1ubq_map" else "molecule"
+            return {"status": "success", "result": f"object:{kind}"}
         return {"status": "success", "result": "OK"}
 
     mock_sr.side_effect = fake
@@ -104,7 +107,7 @@ def test_load_session_restores_and_lists_objects(mock_sr, tmp_path):
     result = load_session(filename=str(session))
 
     assert "Loaded session" in result
-    assert "1ubq, 1ubq_spine" in result
+    assert "1ubq, 1ubq_spine, 1ubq_map (map)" in result
     load_calls = [c for c in mock_sr.call_args_list if c.args[0] == "load"]
     assert load_calls[0].kwargs["kwargs"] == {}
 
@@ -162,7 +165,7 @@ def test_load_session_survives_an_object_list_failure(mock_sr, tmp_path):
     session.write_bytes(b"\x00")
 
     def fake(action, args=None, kwargs=None, **_ignored):
-        if action == "get_object_list":
+        if action == "get_names":
             return {"status": "error", "error": "busy"}
         return {"status": "success", "result": "OK"}
 

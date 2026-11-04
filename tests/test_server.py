@@ -501,10 +501,30 @@ def test_mutation_view_invalid_input(mock_sr):
 
 @patch("mcpymol.structures.send_request")
 def test_list_objects_with_objects(mock_sr):
-    mock_sr.return_value = {"status": "success", "result": ["1ubq", "lig"]}
-    result = list_objects()
-    assert "1ubq" in result and "lig" in result
-    assert mock_sr.call_args.args[0] == "get_object_list"
+    types = {"1ubq": "object:molecule", "lig": "object:molecule", "emd_1": "object:map"}
+
+    def fake(action, args=None, **_ignored):
+        if action == "get_names":
+            assert args == ["objects"]
+            return {"status": "success", "result": list(types)}
+        if action == "get_type":
+            return {"status": "success", "result": types[args[0]]}
+        raise AssertionError(action)
+
+    mock_sr.side_effect = fake
+    # Molecules read as they always did; anything else carries its type.
+    assert list_objects() == "Loaded objects: 1ubq, lig, emd_1 (map)"
+
+
+@patch("mcpymol.structures.send_request")
+def test_a_session_holding_only_a_map_is_not_empty(mock_sr):
+    """get_object_list lists molecules only, so this read "No objects are
+    loaded" (PyMOL 3.1.0)."""
+    mock_sr.side_effect = lambda action, args=None, **_kw: {
+        "status": "success",
+        "result": ["emd_1234"] if action == "get_names" else "object:map",
+    }
+    assert list_objects() == "Loaded objects: emd_1234 (map)"
 
 
 @patch("mcpymol.structures.send_request")

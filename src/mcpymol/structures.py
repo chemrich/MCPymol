@@ -889,8 +889,8 @@ def load_session(
     if res.get("status") == "error":
         return f"Error loading session: {res.get('error')}"
 
-    listed = send_request("get_object_list", args=["all"])
-    objects = listed.get("result") or [] if listed.get("status") == "success" else []
+    listed = _describe_objects()
+    objects = listed if isinstance(listed, list) else []
     how = "Merged" if merge else "Loaded"
     summary = ", ".join(objects) if objects else "no objects"
     return f"{how} session {path}. Objects now in the session: {summary}."
@@ -907,13 +907,33 @@ def list_objects() -> str:
     example before composing a selection or running a view tool that needs
     an ``obj_name``.
     """
-    res = send_request("get_object_list", args=["all"])
-    if res.get("status") == "error":
-        return res.get("error", "Unknown error")
-    objs = res.get("result") or []
-    if not objs:
+    listed = _describe_objects()
+    if isinstance(listed, str):
+        return listed
+    if not listed:
         return "No objects are loaded."
-    return "Loaded objects: " + ", ".join(objs)
+    return "Loaded objects: " + ", ".join(listed)
+
+
+def _describe_objects() -> list[str] | str:
+    """Every object in the session, a non-molecule tagged with its type.
+
+    get_names("objects"), not get_object_list: that one is selector-backed and
+    lists molecules only, so a session holding just a map read as "No objects
+    are loaded", and a structure's maps, measurements and groups went
+    unlisted (PyMOL 3.1.0). Molecules read as before, ``1ubq``; anything else
+    as ``emd_1234 (map)``. Returns PyMOL's error text if it can't be asked.
+    """
+    res = send_request("get_names", args=["objects"])
+    if res.get("status") == "error":
+        return str(res.get("error", "Unknown error"))
+    names = res.get("result")
+    entries = []
+    for name in names if isinstance(names, list) else []:
+        kind = send_request("get_type", args=[name]).get("result")
+        kind = kind.removeprefix("object:") if isinstance(kind, str) else ""
+        entries.append(name if kind in ("molecule", "") else f"{name} ({kind})")
+    return entries
 
 
 @mcp.tool()
