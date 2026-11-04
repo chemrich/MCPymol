@@ -1636,3 +1636,16 @@ def test_an_old_python_is_refused_with_a_reason(monkeypatch, mocker, capsys):
 
 def test_a_current_python_is_not_refused():
     assert plugin_module._python_too_old() is None
+
+
+def test_an_old_python_does_not_invite_a_start_mcp_that_can_only_refuse(
+    monkeypatch, mocker, capsys
+):
+    extend = mocker.patch.object(plugin_module.cmd, "extend")
+    monkeypatch.setattr(sys, "version_info", (3, 9, 6))
+
+    plugin_module.load_quietly()
+
+    extend.assert_not_called()
+    out = capsys.readouterr().out
+    assert "needs Python 3.10" in out and "Type start_mcp" not in out

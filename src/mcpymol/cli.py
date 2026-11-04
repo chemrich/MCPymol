@@ -37,7 +37,10 @@ def _block(path: pathlib.Path) -> str:
         f"# Checked here, not only in the plugin: on a much older Python the\n"
         f"# plugin file might not even parse, and this says why instead.\n"
         f"if sys.version_info >= (3, 10):\n"
-        f'    cmd.do("run {path}")\n'
+        # repr: the path goes into a Python string literal, and a Windows
+        # path (C:\Users\...) or one with a quote in it was a SyntaxError
+        # that took the user's whole .pymolrc.py down with it.
+        f"    cmd.do({f'run {path}'!r})\n"
         f"else:\n"
         f'    print("MCPymol plugin not loaded: it needs a PyMOL running Python 3.10 or newer.")\n'
         f"{BLOCK_END}\n"
