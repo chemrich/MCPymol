@@ -7,6 +7,7 @@ for spectrum colouring.
 """
 
 import hashlib
+import importlib.metadata
 import json
 import math
 import os
@@ -25,6 +26,25 @@ from mcpymol.style import black_background
 
 # MMseqs2 server for evolutionary conservation (ColabFold public API by default)
 MMSEQS_URL = os.environ.get("MCPYMOL_MMSEQS_URL", "https://api.colabfold.com")
+
+# Ticket states that mean "still working", as ColabFold's own client polls
+# them. Anything else ends the wait: COMPLETE and ERROR, and also RATELIMIT,
+# MAINTENANCE or a state added later, which used to spin for the full ten
+# minutes while every other tool queued behind this one.
+_STILL_WORKING = frozenset({"PENDING", "RUNNING", "UNKNOWN"})
+
+# Polls 5 s apart that may fail in a row (network blips, a 5xx) before the
+# server counts as gone: 30 s. Every failure used to be skipped silently.
+_POLL_FAILURES_ALLOWED = 6
+
+
+def _user_agent() -> str:
+    try:
+        version = importlib.metadata.version("mcpymol")
+    except importlib.metadata.PackageNotFoundError:
+        version = "unknown"
+    return f"mcpymol/{version} (github.com/chemrich/MCPymol)"
+
 
 # Standard amino acid alphabet for Shannon entropy calculation
 _AA_ALPHABET = set("ACDEFGHIKLMNPQRSTVWY")
@@ -59,7 +79,7 @@ def _run_mmseqs2(sequence: str, server_url: str | None = None, use_env: bool = T
         }
     ).encode()
     req = urllib.request.Request(f"{host}/ticket/msa", data=data)
-    req.add_header("User-Agent", "mcpymol/1.0.0 (github.com/chemrich/MCPymol)")
+    req.add_header("User-Agent", _user_agent())
 
     max_retries = 3
     for attempt in range(max_retries):
@@ -74,24 +94,49 @@ def _run_mmseqs2(sequence: str, server_url: str | None = None, use_env: bool = T
                 ) from e
             time.sleep(2**attempt)
 
+    if ticket.get("status") in ("RATELIMIT", "MAINTENANCE"):
+        raise RuntimeError(
+            f"The MMseqs2 server at {host} did not take the job ({ticket['status']}). "
+            f"Try again later, or set MCPYMOL_MMSEQS_URL to a server of your own."
+        )
     ticket_id = ticket.get("id")
     if not ticket_id:
         raise RuntimeError(f"MMseqs2 server returned no ticket ID: {ticket}")
 
     # 2. Poll until complete
     poll_url = f"{host}/ticket/{ticket_id}"
+    failures = 0
     for _ in range(120):  # up to ~10 minutes with 5s intervals
         time.sleep(5)
         try:
             with urllib.request.urlopen(poll_url, timeout=10) as resp:
                 status = json.loads(resp.read().decode())
-        except (urllib.error.URLError, TimeoutError):
+        except urllib.error.HTTPError as e:
+            if 400 <= e.code < 500 and e.code != 429:
+                # Not a blip: the ticket is unknown or the request is refused,
+                # and asking again for ten minutes would not change that.
+                raise RuntimeError(
+                    f"The MMseqs2 server refused the status check for job {ticket_id}: "
+                    f"HTTP {e.code} {e.reason}"
+                ) from e
+            failures, last_error = failures + 1, f"HTTP {e.code} {e.reason}"
+        except (urllib.error.URLError, TimeoutError, ValueError) as e:
+            failures, last_error = failures + 1, str(e)
+        else:
+            failures = 0
+            state = status.get("status") if isinstance(status, dict) else None
+            if state == "COMPLETE":
+                break
+            if state == "ERROR":
+                raise RuntimeError(f"MMseqs2 search failed: {status}")
+            if state not in _STILL_WORKING:
+                raise RuntimeError(f"MMseqs2 search stopped with status {state!r}: {status}")
             continue
-
-        if status.get("status") == "COMPLETE":
-            break
-        if status.get("status") == "ERROR":
-            raise RuntimeError(f"MMseqs2 search failed: {status}")
+        if failures >= _POLL_FAILURES_ALLOWED:
+            raise RuntimeError(
+                f"Lost contact with the MMseqs2 server at {host}: {failures} status checks "
+                f"in a row failed (last: {last_error})."
+            )
     else:
         raise RuntimeError("MMseqs2 search timed out after 10 minutes")
 

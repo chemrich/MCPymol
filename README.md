@@ -92,7 +92,7 @@ Optional, per feature:
 | --- | --- |
 | `poisson_boltzmann_view` | `apbs` and `pdb2pqr` on `PATH` |
 | `print_export`, `print_ribbon_view` | the `print` extra — install it the way you installed MCPymol, e.g. `uv tool install 'mcpymol[print]'` (see [3D Printing Export](#-3d-printing-export)) |
-| `conservation_view` | network access to an MMseqs2 server (ColabFold's public API by default) |
+| `conservation_view` | network access to an MMseqs2 server (ColabFold's public API by default). The chain's sequence is sent to that server, so for an unpublished sequence point `MCPYMOL_MMSEQS_URL` at one you run |
 | `fetch_structure`, `structure_info` | network access to the RCSB |
 
 ## Installation
@@ -436,7 +436,7 @@ Full Poisson-Boltzmann potential via [APBS](https://github.com/Electrostatics/ap
 
 ### `conservation_view` — evolutionary conservation
 
-Pipeline: extract the chain's sequence → submit to MMseqs2 (ColabFold public API by default; override with `MCPYMOL_MMSEQS_URL`) → parse the A3M alignment → compute per-position Shannon entropy → map onto B-factor and color via `cyan_white_magenta` spectrum.
+Pipeline: extract the chain's sequence → submit to MMseqs2 (ColabFold public API by default, so **the sequence leaves your machine**; override with `MCPYMOL_MMSEQS_URL`) → parse the A3M alignment → compute per-position Shannon entropy → map onto B-factor and color via `cyan_white_magenta` spectrum.
 
 Magenta = conserved, white = moderate, cyan = variable. First call takes 30 s – few minutes depending on sequence length; results are cached in memory by sequence, so re-running on the same protein (or changing only the color scale) is instant.
 
