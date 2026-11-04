@@ -23,6 +23,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   path was pasted into a Python string as is, so a Windows path
   (`C:\Users\...`) or one containing a quote was a SyntaxError that stopped
   PyMOL reading the rest of `.pymolrc.py`, the user's own settings included.
+- **Tools leave your settings and folders as they found them.**
+  `interface_report` set `dot_solvent` and `dot_density` globally and left
+  them, which also changed how every dot representation in the session was
+  drawn; it now puts them back. `fetch_structure` wrote each downloaded file
+  into PyMOL's working directory (wherever PyMOL was launched); it now uses a
+  cache directory, unless you have set PyMOL's `fetch_path` yourself.
+- **`list_ligands` lists five-character ligand names whole.** It read residue
+  names from PDB text columns, which hold three characters, so `A1AAA` was
+  listed as `A1A`; the CCD has issued five-character codes since the
+  three-character ones ran out.
 - **A name can no longer delete what it doesn't name.** The loaders delete the
   object they replace by name, and PyMOL's `delete` takes patterns and lists:
   `load_structure`, `fetch_structure` or `fetch_alphafold` given `*`, `all` or

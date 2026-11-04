@@ -125,6 +125,28 @@ def _unusable_name(name: str) -> str | None:
     )
 
 
+# Where fetched files go when PyMOL's fetch_path is its default, "." (PyMOL's
+# working directory, usually wherever it was launched: a home directory or a
+# checkout). Eleven .cif files built up in this repo's root that way.
+FETCH_CACHE = os.path.join(tempfile.gettempdir(), "mcpymol-fetch")
+
+
+def _fetch_kwargs() -> dict[str, str]:
+    """``path=`` for cmd.fetch, unless the user chose a fetch_path of their own.
+
+    Passed per call, not by setting fetch_path: a global setting changed
+    behind the user's back is its own defect, and `reinitialize settings` on
+    every replace would reset it anyway. PyMOL and this server share a
+    machine (the bridge only talks to 127.0.0.1), so the path means the same
+    to both.
+    """
+    current = send_request("get", args=["fetch_path"])
+    if current.get("status") != "success" or str(current.get("result")).strip() != ".":
+        return {}
+    os.makedirs(FETCH_CACHE, exist_ok=True)
+    return {"path": FETCH_CACHE}
+
+
 def _verify_loaded(name: str, source: str) -> str | None:
     """Return an error message if ``name`` came out empty, else None.
 
@@ -369,7 +391,7 @@ def fetch_structure(
     # cannot cost the caller everything they had loaded.
     send_request("delete", args=[name])
 
-    res = send_request("fetch", args=[pdb_code, name])
+    res = send_request("fetch", args=[pdb_code, name], kwargs=_fetch_kwargs())
     if res.get("status") == "error":
         return f"Error fetching {pdb_code}: {res.get('error')}"
 
@@ -1033,22 +1055,21 @@ def list_ligands(
 
     Call this before :func:`ligand_view`, :func:`pocket_view`, or
     :func:`pharmacophore_view` when you don't already know the ligand's
-    3-letter residue name.
+    residue name (three characters, or five for newer CCD codes).
     """
-    # We could use `iterate (...) and organic, stored.ligs.add(resn)` and then
-    # read `stored.ligs` back, but PyMOL doesn't have a built-in "send me a
-    # variable" command, so we'd need a side channel. Cheaper: ask PyMOL to
-    # dump the organic atoms as PDB text and parse the resn column.
-    fetch = send_request("get_pdbstr", args=[f"({obj_name}) and organic"])
-    if fetch.get("status") == "error":
-        return fetch.get("error", "Unknown error")
-    pdb = fetch.get("result") or ""
-    ligs: set[str] = set()
-    for line in pdb.splitlines():
-        if line.startswith(("HETATM", "ATOM  ")):
-            resn = line[17:20].strip()
-            if resn:
-                ligs.add(resn)
+    # The residue names themselves, through iterate_to_list. Reading them from
+    # PDB text took columns 18-20, which cut a longer name short: a ligand
+    # named ABCDE was listed as ABC (PyMOL 3.1.0), and the CCD has been
+    # issuing five-character codes since the three-character ones ran out.
+    res = send_request("iterate_to_list", args=[f"({obj_name}) and organic", "resn"])
+    if res.get("status") == "error":
+        return str(res.get("error", "Unknown error"))
+    rows = res.get("result")
+    ligs = {
+        str(row[0]).strip()
+        for row in (rows if isinstance(rows, list) else [])
+        if isinstance(row, list) and row and str(row[0]).strip()
+    }
     if not ligs:
         return f"No organic ligands found in '{obj_name}'."
     return f"Ligands in '{obj_name}': " + ", ".join(sorted(ligs))

@@ -186,6 +186,10 @@ def _sr_structure(chains=("A", "B"), counts=None, pdb="", states=1, symmetry=Non
             return {"status": "success", "result": symmetry}
         if action == "get_pdbstr":
             return {"status": "success", "result": ligands if "organic" in args[0] else pdb}
+        if action == "iterate_to_list" and "organic" in args[0]:
+            # One [resn] row per ligand atom, as PyMOL answers `resn`.
+            rows = [[line[17:20].strip()] for line in ligands.splitlines() if line.strip()]
+            return {"status": "success", "result": rows}
         return {"status": "success", "result": "OK"}
 
     return fake
@@ -768,3 +772,22 @@ def test_an_alphafold_id_that_is_not_an_accession_is_refused(bad):
     assert "is not a UniProt accession" in out, out
     download.assert_not_called()
     sr.assert_not_called()
+
+
+# ── fetch writes into a cache, not PyMOL's working directory ─────────────────
+
+
+@pytest.mark.parametrize(
+    ("answer", "expected"),
+    [
+        ({"status": "success", "result": "."}, "cache"),  # PyMOL's default
+        ({"status": "success", "result": "/data/pdb"}, None),  # the user's own choice
+        ({"status": "error", "error": "busy"}, None),  # can't tell: leave PyMOL alone
+    ],
+)
+def test_fetch_goes_to_the_cache_only_when_fetch_path_is_the_default(answer, expected):
+    from mcpymol.structures import FETCH_CACHE, _fetch_kwargs
+
+    with patch("mcpymol.structures.send_request", return_value=answer):
+        kwargs = _fetch_kwargs()
+    assert kwargs == ({"path": FETCH_CACHE} if expected == "cache" else {})
