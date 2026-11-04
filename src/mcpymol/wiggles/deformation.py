@@ -26,6 +26,7 @@ from __future__ import annotations
 import math
 import re
 from pathlib import Path
+from typing import Any
 
 from mcpymol.wiggles.atoms import (
     Atom,
@@ -346,7 +347,7 @@ def _draw_arrows(
     return len(chosen), skipped_short, dropped
 
 
-def _report(**kw) -> str:
+def _report(**kw: Any) -> str:
     obj, hi = kw["obj"], kw["hi"]
     biggest = sorted(kw["residue_shift"].items(), key=lambda kv: -kv[1])[:5]
     biggest_text = ", ".join(f"{c}/{r} {v:.2f}Å" for (c, r), v in biggest)

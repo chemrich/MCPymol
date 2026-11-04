@@ -15,13 +15,19 @@ import os
 import re
 import shutil
 import tempfile
+import typing
 from collections import Counter
+from collections.abc import Iterable
 from typing import Annotated, Any, NamedTuple, cast
 
 from pydantic import Field
 
 from mcpymol.app import mcp
 from mcpymol.bridge import _SLOW_OP_TIMEOUT, send_request
+
+if typing.TYPE_CHECKING:
+    import numpy as np
+    import trimesh
 
 # ── 3D printing export ───────────────────────────────────────────────────────
 #
@@ -245,7 +251,7 @@ def _parse_groups(groups: str) -> "list[tuple[str, str]]":
 # ── result text ──────────────────────────────────────────────────────────────
 
 
-def _format_dims(lo, hi) -> str:
+def _format_dims(lo: Iterable[float], hi: Iterable[float]) -> str:
     """``"25.1 x 14.2 x 18.0"``: the extent along x, y and z."""
     return " x ".join(f"{top - bottom:.1f}" for bottom, top in zip(lo, hi, strict=True))
 
@@ -255,7 +261,7 @@ def _format_volume(volume: float) -> str:
     return f"{volume / 1000:,.2f} cm³" if volume >= 1000 else f"{volume:.3g} mm³"
 
 
-def _describe_size(bounds, volume: float) -> str:
+def _describe_size(bounds: Iterable[Iterable[float]], volume: float) -> str:
     """``"25.1 x 14.2 x 18.0 mm, 1.23 cm³"`` for a group's line in the result."""
     return f"{_format_dims(*bounds)} mm, {_format_volume(volume)}"
 
@@ -499,7 +505,7 @@ def _save_in_model_frame(paths: "list[str]") -> float:
 _SELECTION_TOKEN = r"[^\s()!&|]+"
 
 
-def _atoms_only(sel: str, names) -> str:
+def _atoms_only(sel: str, names: Iterable[str]) -> str:
     """``sel`` with each of ``names`` (objects without atoms) swapped for "none".
 
     Named in a selection, a distance or CGO object makes PyMOL's selector
@@ -573,7 +579,7 @@ def _census(objs: "list[str]") -> "dict[str, dict[str, int]]":
     return census
 
 
-def _shown_reps(counts: "dict[str, int]", reps) -> str:
+def _shown_reps(counts: "dict[str, int]", reps: Iterable[str]) -> str:
     return ", ".join(f"{rep} ({counts[rep]:,} atoms)" for rep in reps if counts.get(rep))
 
 
@@ -635,7 +641,9 @@ def _thinnest_cartoon(objs: "list[str]") -> "tuple[float, str, float, str, str] 
     return best
 
 
-def _thin_cartoon_warning(thin, voxel_pitch: float) -> "str | None":
+def _thin_cartoon_warning(
+    thin: "tuple[float, str, float, str, str] | None", voxel_pitch: float
+) -> "str | None":
     if thin is None:
         return None
     thickness, setting, value, obj, feature = thin
@@ -763,7 +771,7 @@ def _read_obj_triangles(path: str) -> "tuple[Any, int]":
     return triangles[~marker], int(marker.sum())
 
 
-def _write_obj(path: str, triangles) -> None:
+def _write_obj(path: str, triangles: "np.ndarray") -> None:
     import numpy as np
 
     vertices = triangles.reshape(-1, 3)
@@ -813,7 +821,7 @@ def _parse_pov(path: str, z_shift: float = 0.0) -> dict:
 # ── mesh repair ──────────────────────────────────────────────────────────────
 
 
-def _select_bodies(mesh, pitch: "float | None", keep: str) -> "tuple[list, dict]":
+def _select_bodies(mesh: Any, pitch: "float | None", keep: str) -> "tuple[list, dict]":
     """Split a mesh into bodies and apply the body policy.
 
     Call before fix_normals: PyMOL and Poisson wind enclosed cavity shells
@@ -850,7 +858,7 @@ def _select_bodies(mesh, pitch: "float | None", keep: str) -> "tuple[list, dict]
     return kept, {"dropped": dropped, "cavities": filled, "debris": debris}
 
 
-def _closed_apart_from_debris(mesh) -> bool:
+def _closed_apart_from_debris(mesh: "trimesh.Trimesh") -> bool:
     """Watertight once stray fragments are set aside (1hsg's surface went to
     Poisson only because of three loose faces)."""
     if mesh.is_watertight:
@@ -859,7 +867,9 @@ def _closed_apart_from_debris(mesh) -> bool:
     return bool(bodies) and all(b.is_watertight for b in bodies)
 
 
-def _room_to_inset(vox, body, pitch: float):
+def _room_to_inset(
+    vox: "trimesh.voxel.VoxelGrid", body: "trimesh.Trimesh", pitch: float
+) -> "np.ndarray":
     """How far each vertex of a voxel body may move in: half the part's thickness.
 
     The thickness along the vertex's inward normal is where a walk from the
@@ -886,7 +896,7 @@ def _room_to_inset(vox, body, pitch: float):
     return np.maximum(thickness / 2 - _INSET_MARGIN * pitch, 0.0)
 
 
-def _inset(body, distance: float, room=None) -> int:
+def _inset(body: "trimesh.Trimesh", distance: float, room: "np.ndarray | None" = None) -> int:
     """Move every vertex ``distance`` in along its normal, without folding.
 
     ``room`` caps each vertex's move (see _room_to_inset). On the vertices of
@@ -904,7 +914,7 @@ def _inset(body, distance: float, room=None) -> int:
     if room is not None:
         amount = np.minimum(amount, room)
 
-    def folded():
+    def folded() -> "np.ndarray":
         body.vertices = start - amount[:, None] * normals
         return real & (np.einsum("ij,ij->i", before, body.face_normals) <= 0)
 
@@ -939,7 +949,9 @@ def _sphere_circumscribe(segments: int) -> float:
     return 1.0 / float(np.abs(np.einsum("ij,ij->i", normals, tri[:, 0])).min())
 
 
-def _merge_continuing_rods(cylinders, cyl_open, tol: float = 1e-4):
+def _merge_continuing_rods(
+    cylinders: "np.ndarray", cyl_open: "np.ndarray", tol: float = 1e-4
+) -> "tuple[np.ndarray, np.ndarray]":
     """Join open cylinders that continue each other into one, and drop duplicates.
 
     PyMOL draws a bond as two half-cylinders, one per atom colour, that meet
@@ -995,7 +1007,7 @@ def _merge_continuing_rods(cylinders, cyl_open, tol: float = 1e-4):
     return cyl, opened
 
 
-def _union_primitives(primitives: dict, solid=None):
+def _union_primitives(primitives: dict, solid: Any = None) -> "trimesh.Trimesh | None":
     """The exact boolean union of spheres, cylinders and an optional solid.
 
     Returns a trimesh in Å with its vertices merged by position, as an STL is
@@ -1081,7 +1093,7 @@ def _poisson_reconstruct(src: str, dst: str, depth: int) -> None:
     """Screened-Poisson rebuild of the mesh ``src`` into the STL ``dst``, in this process."""
     import pymeshlab
 
-    def apply_first(ms, names, **kw):
+    def apply_first(ms: Any, names: list[str], **kw: Any) -> None:
         last = None
         for n in names:
             try:
@@ -1195,7 +1207,7 @@ def _repair_to_stl(
     # bodies that the triangles alone leave apart.
     policy = "all" if (n_rods or n_balls) else bodies
 
-    def _finish(body):
+    def _finish(body: "trimesh.Trimesh") -> "trimesh.Trimesh":
         body.merge_vertices()
         body.update_faces(body.unique_faces())
         body.update_faces(body.nondegenerate_faces())
@@ -1204,11 +1216,13 @@ def _repair_to_stl(
         trimesh.repair.fill_holes(body)
         return body
 
-    def _light(raw):
+    def _light(raw: "trimesh.Trimesh") -> "tuple[list[trimesh.Trimesh], dict]":
         kept, stats = _select_bodies(raw, None, policy)
         return [_finish(b) for b in kept], stats
 
-    def _voxel(src, pitch):
+    def _voxel(
+        src: Any, pitch: float
+    ) -> "tuple[list[trimesh.Trimesh], dict, trimesh.voxel.VoxelGrid]":
         # force="mesh" collapses a scene into a single Trimesh, but the
         # declared return type is the Geometry base class, so narrow it.
         m = cast("trimesh.Trimesh", trimesh.load(src, force="mesh"))
@@ -1220,7 +1234,7 @@ def _repair_to_stl(
         # The grid too: it says how thick each part is, for the inset.
         return [_finish(b) for b in kept], stats, vox
 
-    def _poisson(src, depth):
+    def _poisson(src: Any, depth: int) -> "tuple[list[trimesh.Trimesh], dict]":
         # Written beside the source, not as the STL: the body policy still has
         # to fill the cavity voids Poisson keeps.
         rebuilt = f"{src}.poisson.stl"
@@ -1233,7 +1247,7 @@ def _repair_to_stl(
         kept, stats = _select_bodies(mesh, None, policy)
         return [_finish(b) for b in kept], stats
 
-    def _triangles(how):
+    def _triangles(how: str) -> "tuple[list[trimesh.Trimesh], dict, str, float]":
         """Repair the OBJ: (pieces, stats, method text, inset)."""
         if how == "auto":
             raw = cast("trimesh.Trimesh", trimesh.load(src_obj, force="mesh", process=True))
@@ -1352,7 +1366,7 @@ _RIBBON_VOXEL_PITCH = 0.2  # Å, for the export the result suggests
 _CA_LIKE = re.compile(r"CA\d+")
 
 
-def _ribbon_call(action: str, *args, notes: "list[str]"):
+def _ribbon_call(action: str, *args: object, notes: "list[str]") -> Any:
     """Send one PyMOL call and return its result; RuntimeError if PyMOL refused it.
 
     Every call is direct, and none goes through `do`: older plugins queue a
@@ -1376,7 +1390,7 @@ def _ribbon_call(action: str, *args, notes: "list[str]"):
     return res.get("result")
 
 
-def _by_index(obj: str, indices) -> str:
+def _by_index(obj: str, indices: Iterable[int]) -> str:
     """``(obj) and index 1+2+3``: atoms picked by index, so no chain or segment
     identifier ever has to be quoted into a selection."""
     return f"({obj}) and index {'+'.join(str(i) for i in indices)}"
@@ -1643,7 +1657,7 @@ def print_ribbon_view(
         "cartoon_rect_width": str(strand_thickness),
     }
 
-    def call(action: str, *args):
+    def call(action: str, *args: object) -> Any:
         return _ribbon_call(action, *args, notes=notes)
 
     try:
@@ -1806,7 +1820,7 @@ class _SurfaceIndex:
     comes from the vertex normals interpolated at that point.
     """
 
-    def __init__(self, mesh, max_edge: float) -> None:
+    def __init__(self, mesh: "trimesh.Trimesh", max_edge: float) -> None:
         import numpy as np
         import trimesh
         from scipy.spatial import cKDTree
@@ -1834,7 +1848,7 @@ class _SurfaceIndex:
         self.reach = float(np.linalg.norm(self.triangles - centres[:, None, :], axis=2).max())
         self.tree = cKDTree(centres)
 
-    def signed_distance(self, points, k: int = 16):
+    def signed_distance(self, points: "np.ndarray", k: int = 16) -> "np.ndarray":
         import numpy as np
         import trimesh
 

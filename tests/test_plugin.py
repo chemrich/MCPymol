@@ -627,13 +627,13 @@ def test_empty_do_does_not_wait_on_the_main_thread(monkeypatch):
     assert run_do("") == {"status": "success", "result": "Executed command: ", "output": ""}
 
 
-def test_parser_crash_reports_the_error_it_was_printing(fake_parser, monkeypatch):
+def test_parser_crash_reports_the_error_it_was_printing(fake_parser, monkeypatch, mocker):
     """`alter all, name='CA'; rebuild`: alter takes the rest of the line
     literally, so 'rebuild' is evaluated per atom and raises NameError.  Under
     Python 3.14 PyMOL's error printer then fails with a TypeError of its own,
     which escapes parse(); the NameError is at the root of its context."""
     monkeypatch.setattr(mock_pymol, "parsing", SimpleNamespace(LITERAL=20), raising=False)
-    monkeypatch.setattr(mock_pymol.cmd, "keyword", {"alter": [None, 0, 0, "", 21]}, raising=False)
+    mocker.patch.object(mock_pymol.cmd, "keyword", {"alter": [None, 0, 0, "", 21]}, create=True)
     printer_failure = TypeError("'wrapper.Wrapper' object is not iterable")
     printer_failure.__context__ = NameError("name 'rebuild' is not defined")
     fake_parser([0], raises={1: printer_failure})
@@ -682,9 +682,9 @@ def test_do_echoes_and_logs_each_line_as_cmd_do_did(fake_parser, capsys):
     assert parser.lines == ["set ray_shadow, 1", "set ray_shadow, 0", "cmd._mcpymol_noop()"]
 
 
-def test_multi_line_do_defers_updates_and_restores_them(fake_parser, monkeypatch):
+def test_multi_line_do_defers_updates_and_restores_them(fake_parser, monkeypatch, mocker):
     fake_parser([1, 1])
-    monkeypatch.setattr(mock_pymol.cmd, "get_setting_int", MagicMock(return_value=0))
+    mocker.patch.object(mock_pymol.cmd, "get_setting_int", MagicMock(return_value=0))
 
     run_do("show sticks\nhide lines")
 
@@ -848,7 +848,7 @@ class CmdException(Exception):
     """Named like pymol.CmdException, which _error_text keys on."""
 
 
-def test_generic_action_success_carries_pymol_warnings(plugin_server, monkeypatch):
+def test_generic_action_success_carries_pymol_warnings(plugin_server, monkeypatch, mocker):
     """cmd.set returns None and raises nothing for a value stored at a level
     PyMOL never reads; the C-level warning on fd 1 is the only trace."""
 
@@ -856,7 +856,7 @@ def test_generic_action_success_carries_pymol_warnings(plugin_server, monkeypatc
         os.write(1, b' Setting: cartoon_tube_radius set for 43 atoms in object "ub".\n')
         os.write(1, b" Setting-Warning: 'cartoon_tube_radius' is a object-state-level setting\n")
 
-    monkeypatch.setattr(mock_pymol.cmd, "set", fake_set)
+    mocker.patch.object(mock_pymol.cmd, "set", fake_set)
 
     res = plugin_server.handle_request(
         {"action": "set", "args": ["cartoon_tube_radius", "0.5", "ub and resi 1-5"]}
@@ -868,7 +868,7 @@ def test_generic_action_success_carries_pymol_warnings(plugin_server, monkeypatc
     ]
 
 
-def test_generic_action_error_gets_the_reason_pymol_printed(plugin_server, monkeypatch):
+def test_generic_action_error_gets_the_reason_pymol_printed(plugin_server, monkeypatch, mocker):
     """super/align on a bad selection raise CmdException(' Error: ') and print
     the reason only as C feedback: the reply used to be 'PyMOL execution
     error:  Error: ' and nothing else."""
@@ -877,7 +877,7 @@ def test_generic_action_error_gets_the_reason_pymol_printed(plugin_server, monke
         os.write(1, b' Selector-Error: Invalid selection name "nosuch1".\nnosuch1<--\n')
         raise CmdException(" Error: ")
 
-    monkeypatch.setattr(mock_pymol.cmd, "super", fake_super)
+    mocker.patch.object(mock_pymol.cmd, "super", fake_super)
 
     res = plugin_server.handle_request({"action": "super", "args": ["nosuch1", "ub"]})
 
@@ -885,8 +885,8 @@ def test_generic_action_error_gets_the_reason_pymol_printed(plugin_server, monke
     assert 'Selector-Error: Invalid selection name "nosuch1". nosuch1<--' in res["error"]
 
 
-def test_generic_action_quiet_success_has_no_warnings_key(plugin_server, monkeypatch):
-    monkeypatch.setattr(mock_pymol.cmd, "zoom", lambda *a, **k: None)
+def test_generic_action_quiet_success_has_no_warnings_key(plugin_server, monkeypatch, mocker):
+    mocker.patch.object(mock_pymol.cmd, "zoom", lambda *a, **k: None)
 
     res = plugin_server.handle_request({"action": "zoom", "args": ["ub"]})
 
@@ -894,7 +894,7 @@ def test_generic_action_quiet_success_has_no_warnings_key(plugin_server, monkeyp
 
 
 @pytest.mark.parametrize("action", ["alter", "iterate_to_list"])
-def test_failing_traceback_printer_still_answers(plugin_server, monkeypatch, action):
+def test_failing_traceback_printer_still_answers(plugin_server, monkeypatch, action, mocker):
     """alter('all', 'b=undefined_name') and iterate_to_list with a NameError
     expression returned 'Empty response from PyMOL plugin.': under Python 3.14
     traceback.print_exc() itself raised TypeError ('wrapper.Wrapper' object
@@ -906,8 +906,8 @@ def test_failing_traceback_printer_still_answers(plugin_server, monkeypatch, act
     def broken_print_exc(*args, **kwargs):
         raise TypeError("'wrapper.Wrapper' object is not iterable")
 
-    monkeypatch.setattr(mock_pymol.cmd, "alter", name_error)
-    monkeypatch.setattr(mock_pymol.cmd, "iterate", name_error)
+    mocker.patch.object(mock_pymol.cmd, "alter", name_error)
+    mocker.patch.object(mock_pymol.cmd, "iterate", name_error)
     monkeypatch.setattr(plugin_module.traceback, "print_exc", broken_print_exc)
 
     res = plugin_server.handle_request({"action": action, "args": ["all", "b=undefined_name"]})
@@ -962,13 +962,13 @@ class FakeCmdApi:
 
 
 @pytest.fixture
-def pymol_api(monkeypatch):
+def pymol_api(monkeypatch, mocker):
     """Install a FakeCmdApi as cmd._cmd, with a real lock as PyMOL's API lock."""
 
     def install(**kwargs):
         api = FakeCmdApi(**kwargs)
-        monkeypatch.setattr(mock_pymol.cmd, "_cmd", api, raising=False)
-        monkeypatch.setattr(mock_pymol.cmd, "lock_api", threading.RLock(), raising=False)
+        mocker.patch.object(mock_pymol.cmd, "_cmd", api, create=True)
+        mocker.patch.object(mock_pymol.cmd, "lock_api", threading.RLock(), create=True)
         return api
 
     return install
@@ -1468,7 +1468,7 @@ def test_objc_runtime_begins_and_ends_a_real_activity():
 # ── selections PyMOL crashes on are vetted in the dispatcher ────────────────
 
 
-def _vetting(monkeypatch, atoms_by_selection):
+def _vetting(mocker, atoms_by_selection):
     """count_atoms answers from ``atoms_by_selection``; a name it lacks raises,
     as PyMOL does for a selection it cannot resolve."""
 
@@ -1477,9 +1477,9 @@ def _vetting(monkeypatch, atoms_by_selection):
             raise Exception(f' Error: Invalid selection name "{selection}".')
         return atoms_by_selection[selection]
 
-    monkeypatch.setattr(mock_pymol.cmd, "count_atoms", MagicMock(side_effect=count_atoms))
+    mocker.patch.object(mock_pymol.cmd, "count_atoms", MagicMock(side_effect=count_atoms))
     for action in ("rms", "rms_cur", "fit", "intra_rms", "intra_rms_cur", "intra_fit", "pair_fit"):
-        monkeypatch.setattr(mock_pymol.cmd, action, MagicMock(return_value=0.25))
+        mocker.patch.object(mock_pymol.cmd, action, MagicMock(return_value=0.25))
 
 
 @pytest.mark.parametrize(
@@ -1493,11 +1493,11 @@ def _vetting(monkeypatch, atoms_by_selection):
     ],
 )
 def test_an_unresolvable_selection_never_reaches_a_call_that_crashes_pymol(
-    plugin_server, monkeypatch, action, args
+    plugin_server, mocker, action, args
 ):
     """PyMOL 3.1 aborts (rms, rms_cur, fit) or segfaults (intra_rms,
     intra_rms_cur) on these, taking the user's session with it."""
-    _vetting(monkeypatch, {"a": 76})
+    _vetting(mocker, {"a": 76})
 
     res = plugin_server.handle_request(json.dumps({"action": action, "args": args}))
 
@@ -1507,8 +1507,8 @@ def test_an_unresolvable_selection_never_reaches_a_call_that_crashes_pymol(
     getattr(mock_pymol.cmd, action).assert_not_called()
 
 
-def test_a_selection_given_by_keyword_is_vetted_too(plugin_server, monkeypatch):
-    _vetting(monkeypatch, {"a": 76})
+def test_a_selection_given_by_keyword_is_vetted_too(plugin_server, mocker):
+    _vetting(mocker, {"a": 76})
 
     res = plugin_server.handle_request(
         json.dumps({"action": "rms_cur", "kwargs": {"mobile": "a", "target": "nosuch"}})
@@ -1518,9 +1518,9 @@ def test_a_selection_given_by_keyword_is_vetted_too(plugin_server, monkeypatch):
     mock_pymol.cmd.rms_cur.assert_not_called()
 
 
-def test_an_empty_selection_is_refused_rather_than_measured(plugin_server, monkeypatch):
+def test_an_empty_selection_is_refused_rather_than_measured(plugin_server, mocker):
     """It does not crash, but rms_cur over nothing answers 1.4e-45."""
-    _vetting(monkeypatch, {"a": 76, "a and resn ZZZ": 0})
+    _vetting(mocker, {"a": 76, "a and resn ZZZ": 0})
 
     res = plugin_server.handle_request(
         json.dumps({"action": "rms_cur", "args": ["a and resn ZZZ", "a"]})
@@ -1533,8 +1533,8 @@ def test_an_empty_selection_is_refused_rather_than_measured(plugin_server, monke
     mock_pymol.cmd.rms_cur.assert_not_called()
 
 
-def test_resolvable_selections_run_as_sent(plugin_server, monkeypatch):
-    _vetting(monkeypatch, {"a": 76, "b": 76})
+def test_resolvable_selections_run_as_sent(plugin_server, mocker):
+    _vetting(mocker, {"a": 76, "b": 76})
 
     res = plugin_server.handle_request(json.dumps({"action": "rms_cur", "args": ["a", "b"]}))
 
@@ -1544,11 +1544,11 @@ def test_resolvable_selections_run_as_sent(plugin_server, monkeypatch):
 
 @pytest.mark.parametrize("action, args", [("intra_fit", ["nosuch"]), ("pair_fit", ["a", "nosuch"])])
 def test_calls_that_report_a_bad_selection_themselves_are_not_vetted(
-    plugin_server, monkeypatch, action, args
+    plugin_server, mocker, action, args
 ):
     """intra_fit and pair_fit answer an invalid selection with a plain error
     (PyMOL 3.1.0), so they pay no extra count_atoms."""
-    _vetting(monkeypatch, {"a": 76})
+    _vetting(mocker, {"a": 76})
 
     plugin_server.handle_request(json.dumps({"action": action, "args": args}))
 

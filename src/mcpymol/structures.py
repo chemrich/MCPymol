@@ -13,7 +13,7 @@ import re
 import tempfile
 import urllib.error
 import urllib.request
-from typing import Annotated
+from typing import Annotated, Any
 
 from pydantic import Field
 
@@ -102,7 +102,7 @@ def _verify_loaded(name: str, source: str) -> str | None:
     )
 
 
-def _apply_ghost_heart(name: str):
+def _apply_ghost_heart(name: str) -> None:
     """Applies the ghost heart visualization style to an object.
 
     Ghost heart = cartoon + semi-transparent surface, chains colored in
@@ -139,7 +139,7 @@ def _apply_ghost_heart(name: str):
     send_request("do", args=[f"origin {name}"])
 
 
-def _apply_multimer_heuristic(name: str, cutoff: float = DEFAULT_MULTIMER_CUTOFF):
+def _apply_multimer_heuristic(name: str, cutoff: float = DEFAULT_MULTIMER_CUTOFF) -> None:
     """BFS expansion to find all connected chains in a multimer."""
     # 1. Get initial chains
     res = send_request("get_chains", args=[name])
@@ -475,7 +475,7 @@ def _int_result(action: str, args: list) -> int | None:
         return None
 
 
-def _rcsb_get(path: str, timeout: float = 20.0):
+def _rcsb_get(path: str, timeout: float = 20.0) -> Any:
     """Best-effort GET against the RCSB data API. Returns None on any failure.
 
     Metadata is a nice-to-have on top of what PyMOL already knows, so a slow
@@ -799,7 +799,7 @@ def atom_properties(
     return "\n".join(lines)
 
 
-def _format_atom_value(value) -> str:
+def _format_atom_value(value: object) -> str:
     """Render one property value compactly; floats to 2 dp, blanks visible."""
     if isinstance(value, float):
         return f"{value:.2f}"

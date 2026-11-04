@@ -59,3 +59,34 @@ def _keep_unit_tests_off_a_real_pymol(request, monkeypatch):
         return real_connect(sock, address)
 
     monkeypatch.setattr(socket.socket, "connect", connect)
+
+
+@pytest.fixture(scope="session")
+def _pymol_working_in_a_temp_dir(tmp_path_factory):
+    """Point the live PyMOL's working directory at a temp dir for the run.
+
+    PyMOL writes fetched .cif files and mpng frames into its own working
+    directory: wherever it was launched, which is usually the checkout. Live
+    runs left eleven .cif files and _live_sym*.png frames there. A setting
+    such as fetch_path would not hold, because the suites reinitialize all
+    the time; the process working directory survives that. Put back after.
+    """
+    from mcpymol.bridge import send_request
+
+    res = send_request("do", args=["pwd"], timeout=10)
+    if res.get("status") != "success":
+        yield None  # no PyMOL listening; the live tests skip themselves
+        return
+    lines = str(res.get("output") or "").strip().splitlines()
+    original = lines[-1].strip() if lines else None
+    work = tmp_path_factory.mktemp("pymol_cwd")
+    send_request("do", args=[f"cd {work}"], timeout=10)
+    yield work
+    if original:
+        send_request("do", args=[f"cd {original}"], timeout=10)
+
+
+@pytest.fixture(autouse=True)
+def _live_tests_leave_the_checkout_alone(request):
+    if request.node.get_closest_marker("live"):
+        request.getfixturevalue("_pymol_working_in_a_temp_dir")

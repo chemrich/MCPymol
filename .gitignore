@@ -39,3 +39,7 @@ main.py
 *.png
 !assets/*.png
 !assets/*.gif
+
+# Test coverage data
+.coverage
+coverage.xml

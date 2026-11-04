@@ -183,7 +183,7 @@ def _read_header_bytes(path: Path) -> bytes:
     with open(path, "rb") as fh:
         head = fh.read(2)
     opener = gzip.open if head == b"\x1f\x8b" else open
-    with opener(path, "rb") as fh:  # type: ignore[operator]
+    with opener(path, "rb") as fh:
         raw = fh.read(HEADER_SIZE)
     if len(raw) < HEADER_SIZE:
         raise ValueError(

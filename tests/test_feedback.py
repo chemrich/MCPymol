@@ -488,7 +488,7 @@ class _OneLineFails:
         return 1
 
 
-def test_execute_reports_a_rejected_line_over_the_real_wire(monkeypatch):
+def test_execute_reports_a_rejected_line_over_the_real_wire(monkeypatch, mocker):
     """The whole chain: the plugin's listener queues the lines for PyMOL's
     main thread (here a thread draining a queue, as PyMOL's does), waits for
     them to run, and the tool returns PyMOL's verdict on each."""
@@ -502,7 +502,7 @@ def test_execute_reports_a_rejected_line_over_the_real_wire(monkeypatch):
         ),
         raising=False,
     )
-    monkeypatch.setattr(mock_pymol.cmd, "lock_api", threading.RLock(), raising=False)
+    mocker.patch.object(mock_pymol.cmd, "lock_api", threading.RLock(), create=True)
 
     def pymol_main_loop():
         while (line := queued.get()) is not None:
