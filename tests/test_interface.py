@@ -5,6 +5,7 @@ the per-side interface area people quote. These tests drive it with known
 areas so the numbers are checked rather than mocked.
 """
 
+import re
 from unittest.mock import patch
 
 import pytest
@@ -43,7 +44,8 @@ def _sr_interface(free, bound, fail_area=False, fail_create=False):
         if action == "get_pdbstr":
             sel = args[0]
             source = bound if sel.startswith("_iface_bound") else free
-            chain = sel[-1] if "chain " in sel else ("A" if sel.endswith("free_a") else "B")
+            quoted = re.search(r'chain "([^"]*)"\s*$', sel)
+            chain = quoted.group(1) if quoted else ("A" if sel.endswith("free_a") else "B")
             rows = source.get(chain, {})
             return {
                 "status": "success",

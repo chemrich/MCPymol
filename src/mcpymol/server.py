@@ -299,6 +299,7 @@ from mcpymol.rendering import (
     render,
     turntable,
 )
+from mcpymol.selection import chain_clause, quote
 from mcpymol.structures import (
     _GHOST_HEART_GREENS,
     _PDB_ID_RE,
@@ -570,6 +571,7 @@ __all__ = [
     "cartoon",
     "cd",
     "center",
+    "chain_clause",
     "cinematic_view",
     "clip",
     "color",
@@ -649,6 +651,7 @@ __all__ = [
     "putty_view",
     "pwd",
     "qscore_view",
+    "quote",
     "ray",
     "rebuild",
     "refresh",

@@ -20,6 +20,7 @@ from pydantic import Field
 from mcpymol.app import mcp
 from mcpymol.bridge import send_request
 from mcpymol.pdbtext import Atom, distance3d, parse_atoms, residue_order
+from mcpymol.selection import chain_clause
 
 # ── Interaction criteria ─────────────────────────────────────────────────────
 #
@@ -447,9 +448,9 @@ def interface_report(
     free_a, free_b, bound = "_iface_free_a", "_iface_free_b", "_iface_bound"
     try:
         for tmp, sel in (
-            (free_a, f"({obj_name}) and chain {chain_a} and polymer"),
-            (free_b, f"({obj_name}) and chain {chain_b} and polymer"),
-            (bound, f"({obj_name}) and chain {chain_a}+{chain_b} and polymer"),
+            (free_a, f"({obj_name}) and {chain_clause(chain_a)} and polymer"),
+            (free_b, f"({obj_name}) and {chain_clause(chain_b)} and polymer"),
+            (bound, f"({obj_name}) and {chain_clause([chain_a, chain_b])} and polymer"),
         ):
             send_request("delete", args=[tmp])
             res = send_request("create", args=[tmp, sel])
@@ -461,8 +462,8 @@ def interface_report(
             chain_b: _residue_sasa(free_b),
         }
         complexed = {
-            chain_a: _residue_sasa(f"{bound} and chain {chain_a}"),
-            chain_b: _residue_sasa(f"{bound} and chain {chain_b}"),
+            chain_a: _residue_sasa(f"{bound} and {chain_clause(chain_a)}"),
+            chain_b: _residue_sasa(f"{bound} and {chain_clause(chain_b)}"),
         }
     finally:
         for tmp in (free_a, free_b, bound):

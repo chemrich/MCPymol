@@ -20,6 +20,7 @@ from pydantic import Field
 
 from mcpymol.app import mcp
 from mcpymol.bridge import send_request
+from mcpymol.selection import chain_clause
 from mcpymol.style import black_background
 
 # MMseqs2 server for evolutionary conservation (ColabFold public API by default)
@@ -254,7 +255,7 @@ def conservation_view(
             return f"Error: could not get protein chains from {obj_name}"
         chain = chains_res["result"][0]
 
-    chain_sel = f"({obj_name}) and chain {chain} and polymer.protein"
+    chain_sel = f"({obj_name}) and {chain_clause(chain)} and polymer.protein"
 
     # 2. Extract the sequence via FASTA
     fasta_res = send_request("get_fastastr", args=[chain_sel])
@@ -344,7 +345,7 @@ def conservation_view(
     )
 
     # Show other chains as gray ghost for context
-    other_chains_sel = f"({obj_name}) and polymer.protein and not chain {chain}"
+    other_chains_sel = f"({obj_name}) and polymer.protein and not {chain_clause(chain)}"
     send_request("color", args=["gray50", other_chains_sel])
     send_request("set", args=["cartoon_transparency", "0.5", other_chains_sel])
 

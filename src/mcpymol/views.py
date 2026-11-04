@@ -13,6 +13,7 @@ from pydantic import Field
 from mcpymol.app import mcp
 from mcpymol.bridge import send_request
 from mcpymol.pdbtext import parse_atoms
+from mcpymol.selection import chain_clause
 from mcpymol.style import black_background, set_background
 
 # Wall-clock ceiling for the external APBS/PDB2PQR binaries.  Without one a
@@ -241,19 +242,19 @@ def interface_view(
     if missing:
         return missing
     missing = _nothing_matches(
-        f"({obj_name}) and chain {chain_a} and polymer.protein",
+        f"({obj_name}) and {chain_clause(chain_a)} and polymer.protein",
         f"chain {chain_a} protein in {obj_name}",
     )
     if missing:
         return missing
     missing = _nothing_matches(
-        f"({obj_name}) and chain {chain_b} and polymer.protein",
+        f"({obj_name}) and {chain_clause(chain_b)} and polymer.protein",
         f"chain {chain_b} protein in {obj_name}",
     )
     if missing:
         return missing
-    sel_a = f"({obj_name}) and chain {chain_a} and polymer.protein"
-    sel_b = f"({obj_name}) and chain {chain_b} and polymer.protein"
+    sel_a = f"({obj_name}) and {chain_clause(chain_a)} and polymer.protein"
+    sel_b = f"({obj_name}) and {chain_clause(chain_b)} and polymer.protein"
     iface_a = f"byres ({sel_a} and ({sel_b} around 4))"
     iface_b = f"byres ({sel_b} and ({sel_a} around 4))"
 
