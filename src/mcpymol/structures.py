@@ -941,9 +941,10 @@ def load_session(
         return f"Error loading session: {res.get('error')}"
 
     listed = _describe_objects()
-    objects = listed if isinstance(listed, list) else []
     how = "Merged" if merge else "Loaded"
-    summary = ", ".join(objects) if objects else "no objects"
+    if isinstance(listed, str):  # loaded, but the listing failed: don't claim "no objects"
+        return f"{how} session {path}, but couldn't list its objects ({listed})."
+    summary = ", ".join(listed) if listed else "no objects"
     return f"{how} session {path}. Objects now in the session: {summary}."
 
 
@@ -973,17 +974,32 @@ def _describe_objects() -> list[str] | str:
     lists molecules only, so a session holding just a map read as "No objects
     are loaded", and a structure's maps, measurements and groups went
     unlisted (PyMOL 3.1.0). Molecules read as before, ``1ubq``; anything else
-    as ``emd_1234 (map)``. Returns PyMOL's error text if it can't be asked.
+    as ``emd_1234 (map)``, or ``(type unknown)`` if PyMOL won't say. Returns
+    PyMOL's error text if it can't be asked at all.
+
+    Two calls plus one per non-molecule: get_object_list names the molecules
+    in one go, so get_type is asked only about the rest. A session of
+    split_states or docking poses can hold hundreds of molecules, and each
+    request is its own round trip.
     """
     res = send_request("get_names", args=["objects"])
     if res.get("status") == "error":
-        return str(res.get("error", "Unknown error"))
+        return f"Error listing objects: {res.get('error', 'no reply from PyMOL')}"
     names = res.get("result")
+    molecules_res = send_request("get_object_list", args=["all"])
+    molecules = molecules_res.get("result") if molecules_res.get("status") == "success" else None
+    known = set(molecules) if isinstance(molecules, list) else set()
     entries = []
     for name in names if isinstance(names, list) else []:
+        if name in known:
+            entries.append(name)
+            continue
         kind = send_request("get_type", args=[name]).get("result")
-        kind = kind.removeprefix("object:") if isinstance(kind, str) else ""
-        entries.append(name if kind in ("molecule", "") else f"{name} ({kind})")
+        if not isinstance(kind, str) or not kind.startswith("object:"):
+            entries.append(f"{name} (type unknown)")
+            continue
+        kind = kind.removeprefix("object:")
+        entries.append(name if kind == "molecule" else f"{name} ({kind})")
     return entries
 
 

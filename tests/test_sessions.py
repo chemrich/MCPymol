@@ -174,7 +174,9 @@ def test_load_session_survives_an_object_list_failure(mock_sr, tmp_path):
     result = load_session(filename=str(session))
 
     assert "Loaded session" in result
-    assert "no objects" in result
+    # The session did load; the listing failing must not read as an empty one.
+    assert "no objects" not in result
+    assert "couldn't list its objects" in result and "busy" in result
 
 
 def test_session_tools_are_registered():

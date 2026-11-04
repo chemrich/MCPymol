@@ -513,6 +513,8 @@ def test_list_objects_with_objects(mock_sr):
         if action == "get_names":
             assert args == ["objects"]
             return {"status": "success", "result": list(types)}
+        if action == "get_object_list":
+            return {"status": "success", "result": ["1ubq", "lig"]}
         if action == "get_type":
             return {"status": "success", "result": types[args[0]]}
         raise AssertionError(action)
@@ -520,6 +522,48 @@ def test_list_objects_with_objects(mock_sr):
     mock_sr.side_effect = fake
     # Molecules read as they always did; anything else carries its type.
     assert list_objects() == "Loaded objects: 1ubq, lig, emd_1 (map)"
+    # get_type is asked only about what get_object_list didn't name.
+    asked = [c.kwargs["args"][0] for c in mock_sr.call_args_list if c.args[0] == "get_type"]
+    assert asked == ["emd_1"]
+
+
+def _listing(names, molecules, types):
+    def fake(action, args=None, **_ignored):
+        if action == "get_names":
+            return names
+        if action == "get_object_list":
+            return molecules
+        return types.get(args[0], {"status": "error", "error": "gone"})
+
+    return fake
+
+
+@patch("mcpymol.structures.send_request")
+def test_list_objects_when_pymol_cannot_be_asked_says_so(mock_sr):
+    """Not "No objects are loaded": that would be a confident wrong answer."""
+    mock_sr.side_effect = _listing({"status": "error", "error": "Connection refused"}, None, {})
+    out = list_objects()
+    assert out.startswith("Error listing objects:") and "Connection refused" in out
+
+
+@patch("mcpymol.structures.send_request")
+def test_an_object_whose_type_cannot_be_read_is_marked_not_passed_off(mock_sr):
+    ok = {"status": "success"}
+    mock_sr.side_effect = _listing(
+        {**ok, "result": ["1ubq", "vanished"]}, {**ok, "result": ["1ubq"]}, {}
+    )
+    assert list_objects() == "Loaded objects: 1ubq, vanished (type unknown)"
+
+
+@patch("mcpymol.structures.send_request")
+def test_without_the_molecule_list_every_object_is_typed(mock_sr):
+    ok = {"status": "success"}
+    mock_sr.side_effect = _listing(
+        {**ok, "result": ["1ubq", "m"]},
+        {"status": "error", "error": "busy"},
+        {"1ubq": {**ok, "result": "object:molecule"}, "m": {**ok, "result": "object:map"}},
+    )
+    assert list_objects() == "Loaded objects: 1ubq, m (map)"
 
 
 @patch("mcpymol.structures.send_request")
