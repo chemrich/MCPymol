@@ -1,6 +1,6 @@
 """The package split must not change what the outside world sees.
 
-mcpymol.server is the documented entry point and the historical import
+mcpymol.server is the server's public surface and the historical import
 location for every tool, so it has to keep re-exporting the whole surface even
 though the code now lives in focused modules.
 """

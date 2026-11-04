@@ -25,6 +25,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   no `all`, cleaned up with `delete all`; it now refuses such a name too.
 - `fetch_alphafold` refuses an identifier that isn't an accession; one with a
   `/` in it raised a bare `FileNotFoundError`.
+- **`mcpymol --install-plugin` and the other plugin flags no longer need a
+  working MCP stack.** The console script pointed at `mcpymol.server`, which
+  imports every tool and mcp itself, so when an mcp release broke that import
+  (as with 1.5.0), finding, installing or removing the plugin broke too. The
+  script and `python -m mcpymol` now start in the CLI, which imports the
+  server only to serve.
 - **`list_objects` lists every object, not only molecules.** It used
   `get_object_list`, which PyMOL backs with the selector, so a session holding
   just a map read "No objects are loaded", and a structure's maps,
