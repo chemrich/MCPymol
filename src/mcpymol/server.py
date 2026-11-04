@@ -88,11 +88,14 @@ from mcpymol.comparison import (
 )
 from mcpymol.conservation import (
     _AA_ALPHABET,
+    _POLL_FAILURES_ALLOWED,
+    _STILL_WORKING,
     MMSEQS_URL,
     _compute_shannon_entropy,
     _conservation_cache,
     _parse_a3m,
     _run_mmseqs2,
+    _user_agent,
     conservation_view,
 )
 from mcpymol.pdbtext import (
@@ -442,6 +445,7 @@ __all__ = [
     "_PNG_EOF",
     "_POISSON_CHILD",
     "_POLAR_ELEMENTS",
+    "_POLL_FAILURES_ALLOWED",
     "_POV_KNOWN_KINDS",
     "_POV_NUM",
     "_POV_VEC",
@@ -459,6 +463,7 @@ __all__ = [
     "_SLICER_METRES_BELOW_MM3",
     "_SLOW_OP_TIMEOUT",
     "_SMOOTHED_TOLERANCE",
+    "_STILL_WORKING",
     "_STRAND_DRAWN",
     "_THIN_ROD_MM",
     "_THIN_VOXELS",
@@ -561,6 +566,7 @@ __all__ = [
     "_union_primitives",
     "_unit_guess_warning",
     "_unusable_name",
+    "_user_agent",
     "_verify_loaded",
     "_warnings_note",
     "_write_obj",

@@ -1,7 +1,9 @@
 """Tests for evolutionary conservation analysis (conservation_view + helpers)."""
 
+import io
 import json
 import math
+import tarfile
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -566,3 +568,114 @@ def test_conservation_view_uniform_entropy_falls_back(mock_sr, mock_mmseqs):
     # Should not crash; falls back to absolute when range is 0
     assert "conservation view" in result.lower()
     assert "relative scale" in result
+
+
+# ── polling: stop when the answer won't change ──────────────────────────────
+
+
+def _resp(payload):
+    resp = MagicMock()
+    resp.read.return_value = json.dumps(payload).encode()
+    resp.__enter__ = MagicMock(return_value=resp)
+    resp.__exit__ = MagicMock(return_value=False)
+    return resp
+
+
+def _http_error(code):
+    import urllib.error
+
+    return urllib.error.HTTPError("https://x/ticket/t", code, "nope", {}, None)
+
+
+@pytest.fixture
+def no_wait(monkeypatch):
+    monkeypatch.setattr("mcpymol.conservation.time.sleep", lambda _s: None)
+
+
+@pytest.mark.parametrize("state", ["RATELIMIT", "MAINTENANCE", "SOMETHING_NEW"])
+@patch("mcpymol.conservation.urllib.request.urlopen")
+def test_a_state_that_is_not_still_working_ends_the_wait(mock_urlopen, no_wait, state):
+    """Only PENDING, RUNNING and UNKNOWN mean wait, as in ColabFold's client;
+    anything else used to spin for the full ten minutes."""
+    mock_urlopen.side_effect = [
+        _resp({"id": "t"}),
+        _resp({"status": "RUNNING"}),
+        _resp({"status": state}),
+    ]
+    with pytest.raises(RuntimeError, match=f"stopped with status '{state}'"):
+        _run_mmseqs2("ACDEF")
+    assert mock_urlopen.call_count == 3
+
+
+@patch("mcpymol.conservation.urllib.request.urlopen")
+def test_still_working_states_keep_waiting(mock_urlopen, no_wait):
+    tar = io.BytesIO()
+    with tarfile.open(fileobj=tar, mode="w:gz") as t:
+        data = b">query\nACDEF\n"
+        info = tarfile.TarInfo("r.a3m")
+        info.size = len(data)
+        t.addfile(info, io.BytesIO(data))
+    download = MagicMock()
+    download.read.return_value = tar.getvalue()
+    download.__enter__ = MagicMock(return_value=download)
+    download.__exit__ = MagicMock(return_value=False)
+    states = ["PENDING", "UNKNOWN", "RUNNING", "COMPLETE"]
+    mock_urlopen.side_effect = (
+        [_resp({"id": "t"})] + [_resp({"status": s}) for s in states] + [download]
+    )
+    assert ">query" in _run_mmseqs2("ACDEF")
+
+
+@patch("mcpymol.conservation.urllib.request.urlopen")
+def test_a_refused_status_check_fails_at_once(mock_urlopen, no_wait):
+    """An expired ticket is a 404 on every poll; it used to be retried silently
+    for ten minutes."""
+    mock_urlopen.side_effect = [_resp({"id": "t"}), _http_error(404)]
+    with pytest.raises(RuntimeError, match=r"refused the status check.*HTTP 404"):
+        _run_mmseqs2("ACDEF")
+
+
+@patch("mcpymol.conservation.urllib.request.urlopen")
+def test_blips_are_tolerated_but_a_dead_server_is_reported(mock_urlopen, no_wait):
+    import urllib.error
+
+    blip = urllib.error.URLError("connection reset")
+    mock_urlopen.side_effect = [_resp({"id": "t"})] + [blip] * 6
+    with pytest.raises(RuntimeError, match=r"6 status checks in a row failed.*connection reset"):
+        _run_mmseqs2("ACDEF")
+    assert mock_urlopen.call_count == 7
+
+
+@patch("mcpymol.conservation.urllib.request.urlopen")
+def test_a_blip_between_answers_resets_the_count(mock_urlopen, no_wait):
+    import urllib.error
+
+    blip = urllib.error.URLError("reset")
+    polls = [blip] * 5 + [_resp({"status": "RUNNING"})] + [blip] * 5 + [_resp({"status": "ERROR"})]
+    mock_urlopen.side_effect = [_resp({"id": "t"}), *polls]
+    with pytest.raises(RuntimeError, match="MMseqs2 search failed"):
+        _run_mmseqs2("ACDEF")
+
+
+@pytest.mark.parametrize("state", ["RATELIMIT", "MAINTENANCE"])
+@patch("mcpymol.conservation.urllib.request.urlopen")
+def test_a_job_the_server_did_not_take_says_why(mock_urlopen, no_wait, state):
+    mock_urlopen.side_effect = [_resp({"status": state})]
+    with pytest.raises(
+        RuntimeError, match=rf"did not take the job \({state}\).*MCPYMOL_MMSEQS_URL"
+    ):
+        _run_mmseqs2("ACDEF")
+
+
+@patch("mcpymol.conservation.urllib.request.urlopen")
+def test_the_user_agent_carries_the_real_version(mock_urlopen, no_wait):
+    from importlib.metadata import version
+
+    mock_urlopen.side_effect = [_resp({"status": "MAINTENANCE"})]
+    with pytest.raises(RuntimeError):
+        _run_mmseqs2("ACDEF")
+    request = mock_urlopen.call_args_list[0].args[0]
+    assert (
+        request.get_header("User-agent")
+        == f"mcpymol/{version('mcpymol')} (github.com/chemrich/MCPymol)"
+    )
