@@ -230,7 +230,19 @@ def test_the_plugin_flags_work_when_mcp_cannot_be_imported(run):
         timeout=60,
     )
     assert done.returncode == 0, done.stderr
-    assert done.stdout.strip() == str(plugin_path())
+    # Asked of the same interpreter, not this process: pytest imports the
+    # checkout (pythonpath = src), while a subprocess imports whatever that
+    # interpreter has installed, a non-editable copy in the minimum-versions
+    # job, so plugin_path() differs between the two.
+    expected = subprocess.run(
+        [sys.executable, "-c", "from mcpymol.cli import plugin_path; print(plugin_path())"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=True,
+    ).stdout.strip()
+    assert done.stdout.strip() == expected
+    assert expected.endswith("plugin.py")
 
 
 def test_the_console_script_is_the_cli():
