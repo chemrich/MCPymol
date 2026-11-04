@@ -36,7 +36,7 @@ jobs:
         # print-extra dependencies have dropped older Pythons.
         python-version: ["3.11", "3.14"]
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
       - name: Build the wheel
         run: uv build --wheel
@@ -67,3 +67,12 @@ jobs:
           pkgs = ("mcp", "pydantic", "trimesh", "pymeshlab", "manifold3d", "scipy", "scikit-image", "numpy")
           print("resolved:", ", ".join(f"{p} {md.version(p)}" for p in pkgs))
           EOF
+      # The installed console script, not just the modules: its target is what
+      # a user runs. `env -i` is how an MCP client or the OS may launch it.
+      - name: Run the installed mcpymol script
+        run: |
+          /tmp/fresh/bin/mcpymol --plugin-path
+          env -i /tmp/fresh/bin/mcpymol --plugin-path
+          /tmp/fresh/bin/mcpymol --install-plugin --pymolrc /tmp/fresh/pymolrc.py
+          grep -q "mcpymol" /tmp/fresh/pymolrc.py
+          /tmp/fresh/bin/mcpymol --uninstall-plugin --pymolrc /tmp/fresh/pymolrc.py
