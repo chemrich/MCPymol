@@ -8,7 +8,14 @@ import pytest
 
 from mcpymol.wiggles.bfactors import has_stash
 from mcpymol.wiggles.port import ITERATE_TO_LIST, FakePort, PortError
-from mcpymol.wiggles.qscore import NO_DATA_COLOUR, QSCORE_LEGEND, parse_validation_xml, qscore_view
+from mcpymol.wiggles.qscore import (
+    NO_DATA_COLOUR,
+    QSCORE_LEGEND,
+    parse_validation_cif,
+    parse_validation_report,
+    parse_validation_xml,
+    qscore_view,
+)
 
 VALIDATION = """<?xml version="1.0" encoding="UTF-8"?>
 <wwPDB-validation-information>
@@ -18,6 +25,41 @@ VALIDATION = """<?xml version="1.0" encoding="UTF-8"?>
   <ModelledSubgroup chain="B" resnum="1" resname="GLY" Q_score="0.77"/>
   <ModelledSubgroup chain="A" resnum="3" resname="HOH"/>
 </wwPDB-validation-information>
+"""
+
+# The same three scored residues as VALIDATION, in the shape real mmCIF
+# reports take (checked against 10EC, 10LJ, 10ND): scores keyed by instance
+# id, residues resolved through pdbx_vrpt_model_instance. Instance 4 is the
+# unscored water; 5 is a second model, as NMR-style ensembles have.
+VALIDATION_CIF = """data_7abc
+#
+_pdbx_vrpt_summary.entry_id 7abc
+_pdbx_vrpt_summary.note 'a quoted value, with spaces'
+#
+loop_
+_pdbx_vrpt_model_instance.id
+_pdbx_vrpt_model_instance.PDB_model_num
+_pdbx_vrpt_model_instance.label_asym_id
+_pdbx_vrpt_model_instance.label_seq_id
+_pdbx_vrpt_model_instance.label_comp_id
+_pdbx_vrpt_model_instance.auth_asym_id
+_pdbx_vrpt_model_instance.auth_seq_id
+_pdbx_vrpt_model_instance.PDB_ins_code
+1 1 A 1 MET A 1 ?
+2 1 A 2 SER A 2 ?
+3 1 C 1 GLY B 1 ?
+4 1 D . HOH A 3 ?
+#
+loop_
+_pdbx_vrpt_model_instance_map_fitting.ordinal
+_pdbx_vrpt_model_instance_map_fitting.instance_id
+_pdbx_vrpt_model_instance_map_fitting.residue_inclusion
+_pdbx_vrpt_model_instance_map_fitting.Q_score
+1 1 1.0 0.92
+2 2 0.5 0.41
+3 3 1.0 0.77
+4 4 0.0 ?
+#
 """
 
 ROWS = [
@@ -165,3 +207,97 @@ def test_blank_chain_does_not_escape_the_object(tmp_path):
     assert any('chain "" and resi "\\-3"' in s for s in selections), selections
     for sel in selections:
         assert 'resi "-3"' not in sel, f"quoted but not escaped, still a range: {sel}"
+
+
+# -- mmCIF reports ---------------------------------------------------------
+
+
+@pytest.fixture
+def validation_cif(tmp_path):
+    p = tmp_path / "7abc_validation.cif"
+    p.write_text(VALIDATION_CIF)
+    return p
+
+
+def test_mmcif_reads_the_same_scores_as_xml(validation, validation_cif):
+    """Keyed by author chain and number, like the XML, so one entry reads the
+    same in either format (10EC, 10LJ, 10ND: all 1262 residues identical)."""
+    assert parse_validation_cif(validation_cif) == parse_validation_xml(validation)
+
+
+def test_mmcif_residue_with_a_null_score_is_omitted_not_defaulted(validation_cif):
+    scores = parse_validation_cif(validation_cif)
+    assert ("A", "3") not in scores
+    assert len(scores) == 3
+
+
+def test_mmcif_gzipped(tmp_path):
+    p = tmp_path / "v.cif.gz"
+    p.write_bytes(gzip.compress(VALIDATION_CIF.encode()))
+    assert len(parse_validation_cif(p)) == 3
+
+
+def test_mmcif_quoted_and_text_field_values_do_not_shift_columns(tmp_path):
+    """A quoted value with a space inside a row the parser reads, a quoted
+    '?', and a ;-delimited text field are each one value. Split on
+    whitespace, the first would push every later column along by one."""
+    text = VALIDATION_CIF.replace("1 1 A 1 MET A 1 ?", "1 1 A 1 'MET X' A 1 '?'").replace(
+        "#\nloop_\n_pdbx_vrpt_model_instance_map_fitting",
+        "_pdbx_vrpt_entity.details\n;\nmulti-line\ntext\n;\n#\nloop_\n_pdbx_vrpt_model_instance_map_fitting",
+    )
+    p = tmp_path / "v.cif"
+    p.write_text(text)
+    assert parse_validation_cif(p) == {("A", "1"): 0.92, ("A", "2"): 0.41, ("B", "1"): 0.77}
+
+
+def test_mmcif_without_q_score_gives_the_same_useful_error(tmp_path):
+    p = tmp_path / "v.cif"
+    p.write_text(VALIDATION_CIF.split("loop_\n_pdbx_vrpt_model_instance_map_fitting")[0])
+    with pytest.raises(ValueError, match="3DEM"):
+        parse_validation_cif(p)
+
+
+def test_mmcif_with_a_ragged_loop_is_refused(tmp_path):
+    p = tmp_path / "v.cif"
+    p.write_text(VALIDATION_CIF.replace("4 4 0.0 ?\n", "4 4 0.0\n"))
+    with pytest.raises(ValueError, match="not valid mmCIF"):
+        parse_validation_cif(p)
+
+
+def test_report_format_is_read_from_the_content_not_the_name(tmp_path):
+    """Downloaded reports get renamed; the extension is not evidence."""
+    as_xml = tmp_path / "report.cif"
+    as_xml.write_text(VALIDATION)
+    as_cif = tmp_path / "report.xml"
+    as_cif.write_text(VALIDATION_CIF)
+    assert parse_validation_report(as_xml) == parse_validation_report(as_cif)
+
+
+def test_report_that_is_neither_format_is_refused(tmp_path):
+    p = tmp_path / "v.txt"
+    p.write_text("HEADER    HYDROLASE\n")
+    with pytest.raises(ValueError, match="neither a validation XML nor an mmCIF"):
+        parse_validation_report(p)
+
+
+def test_qscore_view_takes_an_mmcif_report(validation, validation_cif):
+    via_xml = qscore_view(FakePort({"iterate_to_list": ROWS}), "obj", validation)
+    via_cif = qscore_view(FakePort({"iterate_to_list": ROWS}), "obj", validation_cif)
+    assert via_cif == via_xml
+
+
+@pytest.mark.network
+def test_live_report_reads_identically_in_both_formats(tmp_path):
+    """Against wwPDB's own files: mmCIF and XML must agree residue for residue."""
+    import urllib.request
+
+    base = "https://files.rcsb.org/pub/pdb/validation_reports/0e/10ec/10ec_validation"
+    paths = {}
+    for ext in ("xml", "cif"):
+        paths[ext] = tmp_path / f"10ec.{ext}.gz"
+        with urllib.request.urlopen(f"{base}.{ext}.gz", timeout=60) as r:
+            paths[ext].write_bytes(r.read())
+
+    xml, cif = parse_validation_xml(paths["xml"]), parse_validation_cif(paths["cif"])
+    assert len(xml) > 400
+    assert cif == xml

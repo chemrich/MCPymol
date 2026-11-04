@@ -59,6 +59,19 @@ def _open_maybe_gzip(path: Path) -> gzip.GzipFile | BinaryIO:
     return gzip.open(path, "rb") if magic == b"\x1f\x8b" else open(path, "rb")
 
 
+def _no_qscore_message(path: Path, records: int) -> str:
+    return (
+        f"{path}: no Q-score found in {records} residue record(s).\n"
+        f"Two reasons this happens, both normal:\n"
+        f"  - the entry is not 3DEM. X-ray and NMR reports never carry it.\n"
+        f"  - the entry is 3DEM but was validated before the September 2023\n"
+        f"    rollout, and older reports were not regenerated. Confirmed:\n"
+        f"    7A4M (EM, 2020) has none; 9C0K (EM, 2024) has 1123.\n"
+        f"There is no way to compute Q-score from this file — it needs the\n"
+        f"map and the model together (MapQ, or Phenix)."
+    )
+
+
 def parse_validation_xml(path: str | Path) -> dict[tuple[str, str], float]:
     """Read per-residue Q-scores from a wwPDB validation XML file.
 
@@ -97,17 +110,172 @@ def parse_validation_xml(path: str | Path) -> dict[tuple[str, str], float]:
             continue
 
     if not scores:
-        raise ValueError(
-            f"{path}: no Q-score found in {subgroups} residue record(s).\n"
-            f"Two reasons this happens, both normal:\n"
-            f"  - the entry is not 3DEM. X-ray and NMR reports never carry it.\n"
-            f"  - the entry is 3DEM but was validated before the September 2023\n"
-            f"    rollout, and older reports were not regenerated. Confirmed:\n"
-            f"    7A4M (EM, 2020) has none; 9C0K (EM, 2024) has 1123.\n"
-            f"There is no way to compute Q-score from this file — it needs the\n"
-            f"map and the model together (MapQ, or Phenix)."
-        )
+        raise ValueError(_no_qscore_message(path, subgroups))
     return scores
+
+
+_CIF_KEYWORDS = ("loop_", "data_", "save_", "global_", "stop_")
+
+
+def _cif_tokens(text: str) -> list[tuple[str, bool]]:
+    """Split mmCIF text into ``(token, quoted)`` pairs.
+
+    The subset of the STAR grammar validation reports use: bare tokens,
+    '...' and "..." strings (a quote closes only before whitespace), ``;``
+    text fields at the start of a line, and ``#`` comments. ``quoted`` keeps
+    a quoted '?' or '_x' from being read as a null or a tag.
+    """
+    tokens: list[tuple[str, bool]] = []
+    lines = text.splitlines()
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if line.startswith(";"):
+            block = [line[1:]]
+            i += 1
+            while i < len(lines) and not lines[i].startswith(";"):
+                block.append(lines[i])
+                i += 1
+            tokens.append(("\n".join(block).strip(), True))
+            i += 1
+            continue
+        j, n = 0, len(line)
+        while j < n:
+            c = line[j]
+            if c.isspace():
+                j += 1
+            elif c == "#":
+                break
+            elif c in "'\"":
+                k = j + 1
+                while k < n and not (line[k] == c and (k + 1 == n or line[k + 1].isspace())):
+                    k += 1
+                tokens.append((line[j + 1 : k], True))
+                j = k + 1
+            else:
+                k = j
+                while k < n and not line[k].isspace():
+                    k += 1
+                tokens.append((line[j:k], False))
+                j = k
+        i += 1
+    return tokens
+
+
+def _cif_categories(text: str, wanted: set[str]) -> dict[str, list[dict[str, str | None]]]:
+    """Rows of each category in ``wanted``, as ``{item: value}``; '?' and '.' are None."""
+    tokens = _cif_tokens(text)
+    rows: dict[str, list[dict[str, str | None]]] = {}
+
+    def value(token: str, quoted: bool) -> str | None:
+        return None if not quoted and token in ("?", ".") else token
+
+    def is_tag(token: str, quoted: bool) -> bool:
+        return not quoted and token.startswith("_")
+
+    def is_keyword(token: str, quoted: bool) -> bool:
+        return not quoted and token.lower().startswith(_CIF_KEYWORDS)
+
+    i = 0
+    while i < len(tokens):
+        token, quoted = tokens[i]
+        if not quoted and token.lower() == "loop_":
+            i += 1
+            tags = []
+            while i < len(tokens) and is_tag(*tokens[i]):
+                tags.append(tokens[i][0])
+                i += 1
+            values = []
+            while i < len(tokens) and not is_tag(*tokens[i]) and not is_keyword(*tokens[i]):
+                values.append(value(*tokens[i]))
+                i += 1
+            category = tags[0][1:].split(".", 1)[0] if tags else ""
+            if category in wanted and tags:
+                if len(values) % len(tags):
+                    raise ValueError(
+                        f"loop for {category} has {len(values)} values for {len(tags)} items"
+                    )
+                items = [t.split(".", 1)[1] for t in tags]
+                for start in range(0, len(values), len(tags)):
+                    rows.setdefault(category, []).append(
+                        dict(zip(items, values[start : start + len(tags)], strict=True))
+                    )
+        elif is_tag(token, quoted) and i + 1 < len(tokens):
+            # A category with one row is written as tag-value pairs, not a loop.
+            category, _, item = token[1:].partition(".")
+            if category in wanted:
+                if not rows.get(category):
+                    rows[category] = [{}]
+                rows[category][0][item] = value(*tokens[i + 1])
+            i += 2
+        else:
+            i += 1
+    return rows
+
+
+def parse_validation_cif(path: str | Path) -> dict[tuple[str, str], float]:
+    """Read per-residue Q-scores from a wwPDB validation mmCIF file.
+
+    Handles ``*_validation.cif`` and ``*.cif.gz``. The scores sit in
+    ``pdbx_vrpt_model_instance_map_fitting``, keyed by an instance id that
+    ``pdbx_vrpt_model_instance`` resolves to a residue. Keys match
+    :func:`parse_validation_xml`: author chain and author residue number, so
+    the same entry reads the same in either format.
+
+    Returns:
+        ``{(chain, resnum): q_score}``.
+
+    Raises:
+        ValueError: not parseable as mmCIF, or contains no Q-score at all.
+    """
+    path = Path(path)
+    try:
+        with _open_maybe_gzip(path) as fh:
+            text = fh.read().decode("utf-8")
+        cats = _cif_categories(
+            text, {"pdbx_vrpt_model_instance", "pdbx_vrpt_model_instance_map_fitting"}
+        )
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise ValueError(f"{path}: not valid mmCIF: {exc}") from exc
+
+    instances = {row.get("id"): row for row in cats.get("pdbx_vrpt_model_instance", [])}
+    fits = cats.get("pdbx_vrpt_model_instance_map_fitting", [])
+    scores: dict[tuple[str, str], float] = {}
+    for fit in fits:
+        raw = next((fit[a] for a in _Q_ATTRS if fit.get(a) is not None), None)
+        residue = instances.get(fit.get("instance_id"))
+        if raw is None or residue is None:
+            continue
+        chain = residue.get("auth_asym_id") or residue.get("label_asym_id") or ""
+        resnum = residue.get("auth_seq_id") or residue.get("label_seq_id")
+        if resnum is None:
+            continue
+        try:
+            scores[(str(chain), str(resnum))] = float(raw)
+        except ValueError:
+            continue
+
+    if not scores:
+        raise ValueError(_no_qscore_message(path, len(fits) or len(instances)))
+    return scores
+
+
+def parse_validation_report(path: str | Path) -> dict[tuple[str, str], float]:
+    """Per-residue Q-scores from a wwPDB validation report, XML or mmCIF.
+
+    Decides by content, not by extension, since a downloaded report is often
+    renamed: ``<`` starts XML, ``data_`` (or a ``#`` comment) starts mmCIF.
+    """
+    path = Path(path)
+    with _open_maybe_gzip(path) as fh:
+        head = fh.read(512).decode("utf-8", errors="replace").lstrip("\ufeff \t\r\n")
+    if head.startswith("<"):
+        return parse_validation_xml(path)
+    if head.startswith(("data_", "#")):
+        return parse_validation_cif(path)
+    raise ValueError(
+        f"{path}: neither a validation XML nor an mmCIF file (it starts {head[:20]!r})."
+    )
 
 
 def qscore_view(
@@ -127,14 +295,15 @@ def qscore_view(
     Args:
         port: A live or fake PyMOL port.
         obj: Object or selection name.
-        validation_path: A wwPDB ``*_validation.xml`` (optionally gzipped).
+        validation_path: A wwPDB validation report, ``*_validation.xml`` or
+            ``*_validation.cif`` (either optionally gzipped).
         preserve_bfactors: Save B-factors before overwriting, so
             ``restore_bfactors`` can put them back.
 
     Returns:
         A report, always ending with the Q-score legend.
     """
-    scores = parse_validation_xml(validation_path)
+    scores = parse_validation_report(validation_path)
     atoms = fetch_atoms(port, obj)
     residues = group_by_residue(atoms)
 
