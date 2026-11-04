@@ -279,6 +279,7 @@ before launching PyMOL and the bridge.
 | Variable | Default | What it does |
 | --- | --- | --- |
 | `MCPYMOL_PORT` | `9876` | Bridge ↔ plugin TCP port. Must match on **both** sides. |
+| `MCPYMOL_AUTOSTART` | `1` | Plugin side: set to `0` before launching PyMOL to load the plugin **without** opening the port. Type `start_mcp` in PyMOL to start listening, `stop_mcp` to stop. Useful with a second MCP plugin loaded, or when PyMOL sits idle. |
 | `MCPYMOL_RECV_TIMEOUT` | `30` s | How long the plugin waits for one complete request before answering with an error. Bounds how long a stalled client can hold the single-threaded accept loop. |
 | `MCPYMOL_MAX_REQUEST_BYTES` | `8388608` | Largest single request the plugin will accept. |
 | `MCPYMOL_MAX_OUTPUT_CHARS` | `8000` | Plugin side: how much of what PyMOL printed one `execute_pymol_command` sends back. The head and tail are kept and the middle counted, so an `iterate all, print(name)` cannot flood the conversation. |

@@ -17,6 +17,8 @@ from mcpymol.bridge import (
     _call,
     _warnings_note,
     format_measurement,
+    format_per_state_rmsd,
+    format_superposition,
     send_request,
 )
 from mcpymol.cli import plugin_path
@@ -689,7 +691,9 @@ def align(
     """
     Aligns one selection to another
     """
-    return _call("align", mobile=mobile, target=target, options=options)
+    return _call(
+        "align", _format=format_superposition, mobile=mobile, target=target, options=options
+    )
 
 
 @mcp.tool(name="super")
@@ -703,7 +707,9 @@ def super_tool(
     """
     Superimposes one selection onto another
     """
-    return _call("super", mobile=mobile, target=target, options=options)
+    return _call(
+        "super", _format=format_superposition, mobile=mobile, target=target, options=options
+    )
 
 
 @mcp.tool()
@@ -715,7 +721,11 @@ def intra_fit(
     """
     Fits all states within an object
     """
-    return _call("intra_fit", selection=selection)
+    return _call(
+        "intra_fit",
+        _format=lambda result: format_per_state_rmsd(result, moved=True),
+        selection=selection,
+    )
 
 
 @mcp.tool()
@@ -726,7 +736,9 @@ def intra_rms(
     Calculates RMSD between states within an object
     """
     # An unresolvable selection here crashes PyMOL itself; see _call.
-    return _call("intra_rms", selection=selection)  # guarded in the plugin
+    return _call(
+        "intra_rms", _format=format_per_state_rmsd, selection=selection
+    )  # guarded in the plugin
 
 
 @mcp.tool()

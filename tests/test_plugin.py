@@ -1568,3 +1568,32 @@ def test_a_captured_stream_still_answers_fileno_and_encoding():
     assert tap.fileno() == 1
     assert tap.encoding == "latin-1"
     assert tap.isatty() is False
+
+
+# ── MCPYMOL_AUTOSTART: load without opening the port (issue #15) ────────────
+
+
+@pytest.mark.parametrize(
+    "value, wanted",
+    [(None, True), ("1", True), ("yes", True), ("0", False), ("false", False), (" OFF ", False)],
+)
+def test_autostart_is_on_unless_turned_off(monkeypatch, value, wanted):
+    if value is None:
+        monkeypatch.delenv("MCPYMOL_AUTOSTART", raising=False)
+    else:
+        monkeypatch.setenv("MCPYMOL_AUTOSTART", value)
+    assert plugin_module._autostart_wanted() is wanted
+
+
+def test_loading_quietly_registers_start_mcp_without_binding(mocker, capsys):
+    extend = mocker.patch.object(mock_pymol.cmd, "extend")
+    start = mocker.patch.object(plugin_module, "start_plugin")
+    mocker.patch.object(plugin_module, "PyMOLSocketServer", side_effect=AssertionError("bound"))
+
+    plugin_module.load_quietly()
+
+    registered = {c.args[0]: c.args[1] for c in extend.call_args_list}
+    assert registered["start_mcp"] is start
+    assert "stop_mcp" in registered
+    assert "Type start_mcp" in capsys.readouterr().out
+    registered["stop_mcp"]()  # with no server: says so, does not raise

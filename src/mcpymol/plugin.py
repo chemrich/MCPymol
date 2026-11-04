@@ -1526,5 +1526,47 @@ def start_plugin() -> PyMOLSocketServer | None:
 if "mcp_bridge_plugin" not in globals():
     mcp_bridge_plugin = None
 
+
+def _autostart_wanted() -> bool:
+    """False when MCPYMOL_AUTOSTART is set to 0/false/no/off.
+
+    The default stays on: every install's ~/.pymolrc.py `run`s this file and
+    expects PyMOL to start listening, and silently not doing so after an
+    upgrade would look like a broken plugin. Turning it off loads the plugin
+    without opening the port (issue #15) — useful with a second MCP plugin
+    loaded, or a PyMOL left idle — and `start_mcp` opens it on demand.
+    """
+    return os.environ.get("MCPYMOL_AUTOSTART", "1").strip().lower() not in (
+        "0",
+        "false",
+        "no",
+        "off",
+    )
+
+
+def load_quietly() -> None:
+    """Register `start_mcp` and `stop_mcp` without binding the port."""
+    if cmd is None:
+        return
+
+    def stop_quietly() -> None:
+        server = globals().get("mcp_bridge_plugin")
+        if server is None:
+            print("MCPymol: the server is not running; nothing to stop.")
+            return
+        server.stop()
+
+    # start_plugin re-registers both against the server it creates.
+    cmd.extend("start_mcp", start_plugin)
+    cmd.extend("stop_mcp", stop_quietly)
+    print(
+        f"MCPymol plugin loaded without starting its server (MCPYMOL_AUTOSTART=0). "
+        f"Type start_mcp to listen on 127.0.0.1:{MCP_PORT}."
+    )
+
+
 if __name__ != "mcpymol.plugin":
-    start_plugin()
+    if _autostart_wanted():
+        start_plugin()
+    else:
+        load_quietly()
