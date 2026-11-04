@@ -337,6 +337,7 @@ from mcpymol.style import black_background, set_background
 from mcpymol.views import (
     _PB_SUBPROCESS_TIMEOUT,
     _PLDDT_BANDS,
+    _nothing_matches,
     _read_ca_bfactors,
     bfactor_view,
     cinematic_view,
@@ -502,6 +503,7 @@ __all__ = [
     "_merge_continuing_rods",
     "_model_frame_view",
     "_neighbour_pairs",
+    "_nothing_matches",
     "_numeric_result",
     "_parse_a3m",
     "_parse_ca_coords",

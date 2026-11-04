@@ -20,6 +20,28 @@ from mcpymol.style import black_background, set_background
 _PB_SUBPROCESS_TIMEOUT = float(os.environ.get("MCPYMOL_PB_TIMEOUT", 600.0))
 
 
+def _nothing_matches(selection: str, what: str) -> str | None:
+    """An error naming ``what`` if PyMOL says ``selection`` matches no atoms.
+
+    A preset given a typo styled an empty selection and reported success, for
+    example "Showing ligand view ... H-bonds stored" over a ligand that was not
+    there. Only a definite answer refuses: zero atoms, or PyMOL rejecting the
+    selection. A count it cannot read (a bridge error, an older plugin) lets
+    the preset run, as before.
+    """
+    res = send_request("count_atoms", args=[selection])
+    if res.get("status") == "error":
+        error = str(res.get("error", ""))
+        if error.startswith("PyMOL execution error"):
+            return f"Error: {what} is not a valid selection: {error}"
+        return None
+    try:
+        atoms = int(res.get("result"))  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    return None if atoms > 0 else f"Error: {what} matches no atoms."
+
+
 @mcp.tool()
 def ligand_view(
     obj_name: Annotated[str, Field(description='PyMOL object name (e.g. "1abc")')],
@@ -35,6 +57,14 @@ def ligand_view(
     Ligand shown as thick sticks with yellow carbons. H-bonds drawn as yellow
     dashes. Pocket residues labeled. View zooms to the ligand.
     """
+    missing = _nothing_matches(f"({obj_name})", f"object '{obj_name}'")
+    if missing:
+        return missing
+    missing = _nothing_matches(
+        f"({obj_name}) and resn {ligand_resn}", f"ligand '{ligand_resn}' in {obj_name}"
+    )
+    if missing:
+        return missing
     lig_sel = f"({obj_name}) and resn {ligand_resn}"
     pocket_sel = f"byres (({obj_name}) and polymer.protein and ({lig_sel} around 5))"
 
@@ -93,6 +123,9 @@ def bfactor_view(
     (high B). Useful for identifying dynamic loops, disordered termini, and
     rigid structural cores. Shown as cartoon on black background.
     """
+    missing = _nothing_matches(f"({obj_name})", f"object '{obj_name}'")
+    if missing:
+        return missing
     send_request("hide", args=["everything", obj_name])
     send_request("show", args=["cartoon", obj_name])
     send_request("do", args=[f"spectrum b, blue_white_red, {obj_name}"])
@@ -142,6 +175,9 @@ def plddt_view(
     and ``putty_view`` get these models backwards: they assume low = rigid,
     whereas low pLDDT = low confidence. Use this instead for predicted models.
     """
+    missing = _nothing_matches(f"({obj_name})", f"object '{obj_name}'")
+    if missing:
+        return missing
     scores = _read_ca_bfactors(obj_name)
     if scores is None:
         return f"Error: could not read B-factors from '{obj_name}'."
@@ -201,6 +237,21 @@ def interface_view(
     4Å of the partner chain) shown as a solid surface patch with sticks.
     H-bonds across the interface drawn as yellow dashes.
     """
+    missing = _nothing_matches(f"({obj_name})", f"object '{obj_name}'")
+    if missing:
+        return missing
+    missing = _nothing_matches(
+        f"({obj_name}) and chain {chain_a} and polymer.protein",
+        f"chain {chain_a} protein in {obj_name}",
+    )
+    if missing:
+        return missing
+    missing = _nothing_matches(
+        f"({obj_name}) and chain {chain_b} and polymer.protein",
+        f"chain {chain_b} protein in {obj_name}",
+    )
+    if missing:
+        return missing
     sel_a = f"({obj_name}) and chain {chain_a} and polymer.protein"
     sel_b = f"({obj_name}) and chain {chain_b} and polymer.protein"
     iface_a = f"byres ({sel_a} and ({sel_b} around 4))"
@@ -266,6 +317,9 @@ def putty_view(
     A 70%-transparent surface is shown, also colored by B-factor.
     Organic ligands are shown as sticks with yellow carbons. Black background.
     """
+    missing = _nothing_matches(f"({obj_name})", f"object '{obj_name}'")
+    if missing:
+        return missing
     send_request("hide", args=["everything", obj_name])
     send_request("show", args=["cartoon", f"({obj_name}) and polymer.protein"])
     send_request("do", args=[f"cartoon putty, {obj_name}"])
@@ -303,6 +357,9 @@ def hydrophobic_surface_view(
     A white cartoon is shown beneath a semi-transparent surface.
     Organic ligands shown as sticks with yellow carbons.
     """
+    missing = _nothing_matches(f"({obj_name})", f"object '{obj_name}'")
+    if missing:
+        return missing
     send_request("hide", args=["everything", obj_name])
     send_request("show", args=["cartoon", f"({obj_name}) and polymer.protein"])
     send_request("show", args=["surface", f"({obj_name}) and polymer.protein"])
@@ -350,6 +407,9 @@ def electrostatic_view(
     For a more accurate Poisson-Boltzmann electrostatic surface, use
     poisson_boltzmann_view (requires APBS and PDB2PQR to be installed).
     """
+    missing = _nothing_matches(f"({obj_name})", f"object '{obj_name}'")
+    if missing:
+        return missing
     send_request("hide", args=["everything", obj_name])
     send_request("show", args=["cartoon", f"({obj_name}) and polymer.protein"])
     send_request("show", args=["surface", f"({obj_name}) and polymer.protein"])
@@ -411,6 +471,9 @@ def poisson_boltzmann_view(
         brew install brewsci/bio/apbs
         pip install pdb2pqr
     """
+    missing = _nothing_matches(f"({obj_name})", f"object '{obj_name}'")
+    if missing:
+        return missing
     import os
     import subprocess
     import tempfile
@@ -520,6 +583,9 @@ def crosslink_view(
     dashes. Metal ions shown as orange spheres. Metal coordination bonds drawn
     as dashed lines to nearby protein atoms. Black background.
     """
+    missing = _nothing_matches(f"({obj_name})", f"object '{obj_name}'")
+    if missing:
+        return missing
     send_request("hide", args=["everything", obj_name])
     send_request("show", args=["cartoon", f"({obj_name}) and polymer.protein"])
     send_request("do", args=[f"cartoon automatic, {obj_name}"])
@@ -589,6 +655,14 @@ def pocket_view(
     the ligand and pocket are drawn as cyan dashes. The protein backbone is
     shown as a thin grey cartoon for context.
     """
+    missing = _nothing_matches(f"({obj_name})", f"object '{obj_name}'")
+    if missing:
+        return missing
+    missing = _nothing_matches(
+        f"({obj_name}) and resn {resn}", f"residue name '{resn}' in {obj_name}"
+    )
+    if missing:
+        return missing
     lig = f"({obj_name}) and resn {resn}"
     pocket_sel = f"({obj_name}) and polymer.protein and byres ({lig} around 5)"
 
@@ -669,6 +743,14 @@ def pharmacophore_view(
     surface for cavity context. The protein backbone is shown as a thin grey
     cartoon.
     """
+    missing = _nothing_matches(f"({obj_name})", f"object '{obj_name}'")
+    if missing:
+        return missing
+    missing = _nothing_matches(
+        f"({obj_name}) and resn {resn}", f"residue name '{resn}' in {obj_name}"
+    )
+    if missing:
+        return missing
     lig = f"({obj_name}) and resn {resn}"
     pocket_sel = f"({obj_name}) and polymer.protein and byres ({lig} around 5)"
 
@@ -701,9 +783,12 @@ def pharmacophore_view(
     send_request("set", args=["stick_radius", "0.2", lig])
 
     # Color by pharmacophore feature type
-    # inring catches all ring carbons (PyMOL's 'aromatic' misses some due to bond-order perception)
-    send_request("color", args=["violet", f"{lig} and elem C and inring"])  # ring/aromatic
-    send_request("color", args=["yellow", f"{lig} and elem C and not inring"])  # aliphatic
+    # Ring carbons, aromatic or not. PyMOL has no "inring" keyword: that line
+    # was rejected as an invalid selection, so no carbon was ever coloured.
+    # byring (PyMOL 3.1.0) takes every atom in a ring of the selection; on
+    # Phe-Trp-Tyr it finds exactly the 6 + 8 + 6 ring carbons.
+    send_request("color", args=["violet", f"{lig} and elem C and byring ({lig})"])
+    send_request("color", args=["yellow", f"{lig} and elem C and not byring ({lig})"])
     send_request("color", args=["skyblue", f"{lig} and elem N"])  # H-bond donor/acceptor
     send_request("color", args=["salmon", f"{lig} and elem O"])  # H-bond acceptor
     send_request("color", args=["gold", f"{lig} and elem S"])  # sulfur
@@ -766,6 +851,12 @@ def mutation_view(
     if not resi_list:
         return f"No valid mutations parsed from: {mutations}. Expected format: A123G,V45L"
 
+    # After parsing, so input that cannot be a mutation is refused without
+    # asking PyMOL anything.
+    missing = _nothing_matches(f"({obj_name})", f"object '{obj_name}'")
+    if missing:
+        return missing
+
     resi_sel = "+".join(resi_list)
     mut_residues = f"({obj_name}) and polymer.protein and resi {resi_sel}"
 
@@ -815,6 +906,9 @@ def textbook_view(
     the interior complexities, showing a solid white cartoon and surface with heavy
     black edge contours. Ligands are styled similarly as opaque white sticks with outlines.
     """
+    missing = _nothing_matches(f"({obj_name})", f"object '{obj_name}'")
+    if missing:
+        return missing
     send_request("hide", args=["everything", obj_name])
 
     # White background for print/textbook style
@@ -859,6 +953,9 @@ def cinematic_view(
     complexes (like ribosomes or viral capsids) look dramatic and imposing.
     Protein uses standard coloring but with altered material properties.
     """
+    missing = _nothing_matches(f"({obj_name})", f"object '{obj_name}'")
+    if missing:
+        return missing
     # Restore basic representation if not present
     send_request("show", args=["cartoon", f"({obj_name}) and polymer.protein"])
     send_request("show", args=["surface", f"({obj_name}) and polymer.protein"])
@@ -870,7 +967,7 @@ def cinematic_view(
     send_request("set", args=["depth_cue", "1"])
     send_request("set", args=["fog", "1"])
     send_request("set", args=["fog_start", "0.45"])  # Fog starts mid-structure
-    send_request("set", args=["fog_color", "black"])
+    # Fog takes the background colour, black here; PyMOL has no fog_color.
 
     # Cinematic lighting and shadows
     send_request("set", args=["light_count", "2"])
@@ -897,6 +994,9 @@ def pointillist_view(
     The protein backbone is hidden to emphasize the scattered volume. Ligands
     are shown as bright yellow spheres (stars) embedded in the cloud.
     """
+    missing = _nothing_matches(f"({obj_name})", f"object '{obj_name}'")
+    if missing:
+        return missing
     send_request("hide", args=["everything", obj_name])
     black_background()
 
@@ -911,7 +1011,9 @@ def pointillist_view(
     # Optional: Light outline of the backbone trace
     send_request("show", args=["ribbon", f"({obj_name}) and polymer.protein"])
     send_request("set", args=["ribbon_width", "0.5"])
-    send_request("color", args=["grey30", f"({obj_name}) and polymer.protein and ribbon"])
+    # The ribbon's own colour setting: "and ribbon" was a malformed selection,
+    # and coloring the atoms would recolour the pointillist dots with it.
+    send_request("set", args=["ribbon_color", "grey30", obj_name])
 
     # Ligands as bright stars
     org_sel = f"({obj_name}) and organic"
