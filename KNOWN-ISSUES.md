@@ -33,10 +33,11 @@ All three of the proposed guards were right and are now in place, in
   `reinitialize settings`, which resets a previous preset's fog or
   `ray_trace_mode` without touching objects.
 
-Still open, deliberately: the plugin's `fetch` handler reports success without
-verifying anything arrived. The bridge-side check makes that harmless, but the
-handler is worth hardening — left alone here only to avoid colliding with the
-`_jsonable` work on `feat/wiggles-query`.
+Since closed as well: the plugin's `fetch` handler now answers an error when
+`cmd.fetch` returns -1, which it does instead of raising when a download
+fails. And `_clear_other_objects` lists names with `get_names("objects")`:
+`get_object_list` returns molecules only, so a replaced structure's maps,
+ramps, measurements and groups used to survive (`tests/test_live_replace.py`).
 
 ---
 

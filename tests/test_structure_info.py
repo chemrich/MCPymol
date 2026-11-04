@@ -496,15 +496,19 @@ def test_empty_load_reports_an_error(mock_sr):
 @patch("mcpymol.structures.send_request")
 def test_successful_fetch_clears_only_other_objects(mock_sr, mock_meta):
     """replace=True still gives a clean session — but by name, after the fetch
-    is known to have worked, rather than by wiping everything beforehand."""
+    is known to have worked, rather than by wiping everything beforehand. Every
+    object type goes: get_object_list listed only molecules, so a previous
+    structure's maps and measurements survived a replace."""
 
     deleted = []
 
     def fake(action, args=None, kwargs=None, **_ignored):
         if action == "count_atoms":
             return {"status": "success", "result": 1200}
-        if action == "get_object_list":
-            return {"status": "success", "result": ["1ubq", "4hhb", "1abc"]}
+        if action == "get_names" and args == ["objects"]:
+            # A molecule, and a map and a measurement belonging to it: every
+            # object type, as get_names("objects") lists them.
+            return {"status": "success", "result": ["1ubq", "1ubq_map", "d1", "1abc"]}
         if action == "get_chains":
             return {"status": "success", "result": ["A"]}
         if action == "delete":
@@ -517,7 +521,7 @@ def test_successful_fetch_clears_only_other_objects(mock_sr, mock_meta):
     result = fetch_structure(pdb_code="1abc")
 
     assert "Successfully fetched 1abc" in result
-    assert "1ubq" in deleted and "4hhb" in deleted
+    assert {"1ubq", "1ubq_map", "d1"} <= set(deleted), deleted
     assert deleted.count("1abc") == 1, "the fetched object must survive the cleanup"
 
 

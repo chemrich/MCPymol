@@ -1597,3 +1597,22 @@ def test_loading_quietly_registers_start_mcp_without_binding(mocker, capsys):
     assert "stop_mcp" in registered
     assert "Type start_mcp" in capsys.readouterr().out
     registered["stop_mcp"]()  # with no server: says so, does not raise
+
+
+def test_a_fetch_that_downloads_nothing_is_an_error(plugin_server, mocker):
+    """cmd.fetch returns -1 rather than raising when a download fails, and
+    prints "Error-fetch: unable to load" (PyMOL 3.1.0). It was answered success."""
+    mocker.patch.object(mock_pymol.cmd, "fetch", return_value=-1)
+
+    res = plugin_server.handle_request(json.dumps({"action": "fetch", "args": ["zz9z", "x"]}))
+
+    assert res["status"] == "error"
+    assert res["error"].startswith("PyMOL could not fetch zz9z.")
+
+
+def test_a_fetch_that_works_is_a_success(plugin_server, mocker):
+    mocker.patch.object(mock_pymol.cmd, "fetch", return_value="x")
+
+    res = plugin_server.handle_request(json.dumps({"action": "fetch", "args": ["1ubq", "x"]}))
+
+    assert res == {"status": "success", "result": "Fetched 1ubq"}
