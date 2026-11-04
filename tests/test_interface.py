@@ -290,3 +290,51 @@ def test_interface_report_is_registered():
     from mcpymol.server import mcp
 
     assert "interface_report" in {t.name for t in asyncio.run(mcp.list_tools())}
+
+
+def _settings_calls(mock_sr):
+    return [
+        (c.args[0], c.kwargs["args"])
+        for c in mock_sr.call_args_list
+        if c.args[0] in ("get", "set") and c.kwargs["args"][0].startswith("dot_")
+    ]
+
+
+@patch("mcpymol.analysis.send_request")
+def test_interface_report_puts_both_dot_settings_back(mock_sr):
+    free = {"A": {1: ("LEU", 200.0)}, "B": {1: ("ARG", 200.0)}}
+    bound = {"A": {1: ("LEU", 50.0)}, "B": {1: ("ARG", 50.0)}}
+    fake = _sr_interface(free, bound)
+    before = {"dot_solvent": "off", "dot_density": "2"}
+
+    def with_settings(action, args=None, kwargs=None, **kw):
+        if action == "get":
+            return {"status": "success", "result": before[args[0]]}
+        return fake(action, args=args, kwargs=kwargs, **kw)
+
+    mock_sr.side_effect = with_settings
+    interface_report(obj_name="1brs", chain_a="A", chain_b="B")
+
+    sets = [args for action, args in _settings_calls(mock_sr) if action == "set"]
+    assert sets[-2:] == [["dot_solvent", "off"], ["dot_density", "2"]]
+
+
+@patch("mcpymol.analysis.send_request")
+def test_a_setting_that_cannot_be_read_is_not_changed(mock_sr):
+    """Changed but unsaved, it could never be put back."""
+    free = {"A": {1: ("LEU", 200.0)}, "B": {1: ("ARG", 200.0)}}
+    bound = {"A": {1: ("LEU", 50.0)}, "B": {1: ("ARG", 50.0)}}
+    fake = _sr_interface(free, bound)
+
+    def busy_for_density(action, args=None, kwargs=None, **kw):
+        if action == "get":
+            if args[0] == "dot_density":
+                return {"status": "error", "error": "PyMOL is still busy"}
+            return {"status": "success", "result": "off"}
+        return fake(action, args=args, kwargs=kwargs, **kw)
+
+    mock_sr.side_effect = busy_for_density
+    interface_report(obj_name="1brs", chain_a="A", chain_b="B")
+
+    touched = {args[0] for action, args in _settings_calls(mock_sr) if action == "set"}
+    assert touched == {"dot_solvent"}

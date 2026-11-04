@@ -28,7 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   them, which also changed how every dot representation in the session was
   drawn; it now puts them back. `fetch_structure` wrote each downloaded file
   into PyMOL's working directory (wherever PyMOL was launched); it now uses a
-  cache directory, unless you have set PyMOL's `fetch_path` yourself.
+  private per-user cache directory, unless you have set PyMOL's
+  `fetch_path` yourself.
 - **`list_ligands` lists five-character ligand names whole.** It read residue
   names from PDB text columns, which hold three characters, so `A1AAA` was
   listed as `A1A`; the CCD has issued five-character codes since the

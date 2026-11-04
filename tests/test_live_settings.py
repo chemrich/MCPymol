@@ -73,6 +73,12 @@ def test_fetch_leaves_pymols_working_directory_alone():
     from mcpymol.structures import FETCH_CACHE, fetch_structure
 
     cwd = str(send_request("do", args=["pwd"]).get("output", "")).strip().splitlines()[-1]
+    # A cached copy in either place would make PyMOL skip the download, and
+    # the test pass with the fix reverted.
+    assert not [n for n in os.listdir(cwd) if n.lower().startswith("1ubq")]
+    for name in os.listdir(FETCH_CACHE) if os.path.isdir(FETCH_CACHE) else []:
+        if name.lower().startswith("1ubq"):
+            os.remove(os.path.join(FETCH_CACHE, name))
     before = set(os.listdir(cwd))
 
     out = fetch_structure(pdb_code="1ubq")
