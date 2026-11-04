@@ -1273,11 +1273,15 @@ class PyMOLSocketServer:
         try:
             # ── Special, custom handlers ─────────────────────────────────
             if action == "fetch":
-                cmd.fetch(*args, **kwargs)
-                return {
-                    "status": "success",
-                    "result": f"Fetched {args[0] if args else 'structure'}",
-                }
+                fetched = cmd.fetch(*args, **kwargs)
+                code = args[0] if args else kwargs.get("code", "structure")
+                if fetched == -1:
+                    # cmd.fetch does not raise when a download fails: it prints
+                    # "Error-fetch: unable to load" and returns -1. Answering
+                    # success hid that from every caller that did not count
+                    # atoms afterwards.
+                    return {"status": "error", "error": f"PyMOL could not fetch {code}."}
+                return {"status": "success", "result": f"Fetched {code}"}
 
             if action == "load":
                 cmd.load(*args, **kwargs)

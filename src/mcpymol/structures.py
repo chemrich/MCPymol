@@ -75,11 +75,15 @@ def _clear_other_objects(keep: str) -> None:
     previous preset's fog or ray_trace_mode would otherwise leak into the new
     scene — without touching objects.
     """
-    listed = send_request("get_object_list", args=["all"])
-    if listed.get("status") == "success":
-        for existing in listed.get("result") or []:
-            if existing != keep:
-                send_request("delete", args=[existing])
+    # get_names("objects"), not get_object_list: that one is selector-backed and
+    # lists only molecules, so the maps, isomeshes, ramps, measurements and
+    # CGOs of the previous structure survived a "replace" orphaned, which the
+    # reinitialize this replaced used to remove. Checked on PyMOL 3.1.0.
+    listed = send_request("get_names", args=["objects"])
+    names = listed.get("result") if listed.get("status") == "success" else None
+    for existing in names if isinstance(names, list) else []:
+        if existing != keep:
+            send_request("delete", args=[existing])
     send_request("do", args=["reinitialize settings"])
 
 
