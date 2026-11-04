@@ -1302,3 +1302,43 @@ def test_do_waits_as_long_as_a_slow_command_by_default(mock_socket):
 
     send_request("do", args=["zoom"], timeout=3.0)
     assert mock_socket.settimeout.call_args_list[-1].args == (3.0,)
+
+
+# ── presets refuse a selection that matches nothing ──────────────────────────
+
+
+@pytest.mark.parametrize(
+    "response, expected",
+    [
+        ({"status": "success", "result": 0}, "Error: object 'x' matches no atoms."),
+        (
+            {
+                "status": "error",
+                "error": 'PyMOL execution error:  Error: Invalid selection name "x".',
+            },
+            "Error: object 'x' is not a valid selection: PyMOL execution error:  "
+            'Error: Invalid selection name "x".',
+        ),
+        ({"status": "success", "result": 1200}, None),
+        # Not a definite answer: let the preset run, as it did before the guard.
+        ({"status": "error", "error": "Socket connection failed: nothing is listening"}, None),
+        ({"status": "success", "result": "OK"}, None),
+    ],
+)
+@patch("mcpymol.views.send_request")
+def test_nothing_matches_refuses_only_on_a_definite_answer(mock_sr, response, expected):
+    from mcpymol.views import _nothing_matches
+
+    mock_sr.return_value = response
+
+    assert _nothing_matches("(x)", "object 'x'") == expected
+
+
+@patch("mcpymol.views.send_request")
+def test_a_preset_given_a_missing_object_styles_nothing(mock_sr):
+    from mcpymol.views import cinematic_view
+
+    mock_sr.return_value = {"status": "success", "result": 0}
+
+    assert cinematic_view(obj_name="typo") == "Error: object 'typo' matches no atoms."
+    assert [c.args[0] for c in mock_sr.call_args_list] == ["count_atoms"]

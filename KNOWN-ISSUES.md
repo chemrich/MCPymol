@@ -91,7 +91,7 @@ per-atom B-factor are reachable end to end.
 
 ---
 
-## 4. Four presets send commands PyMOL rejects — open
+## 4. Four presets send commands PyMOL rejects — **fixed**
 
 Found while making `execute_pymol_command` report PyMOL's errors: a request log
 run through the real tools showed four calls PyMOL refuses or ignores. Each sits
@@ -107,6 +107,14 @@ reports success. Verified on PyMOL 3.1.0.
 
 The plugin now returns these as errors or warnings in the response; the fix is
 at each call site (and a test that reads the response).
+
+**Fixed** at each call site, each form checked live first: `byring (<lig>)` for
+ring carbons (on Phe-Trp-Tyr it finds exactly the 6 + 8 + 6), no `fog_color`
+(fog takes the background colour), `set ribbon_color` on the object (colouring
+atoms would also recolour the pointillist dots), and the nucleic-acid colours
+set on the object. `tests/test_live_presets.py` runs every preset with a
+recorder on every response and fails on anything PyMOL rejects or warns about.
+It caught a reinstated `fog_color` when mutation-checked.
 
 ---
 

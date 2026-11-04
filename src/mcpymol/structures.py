@@ -134,9 +134,11 @@ def _apply_ghost_heart(name: str) -> None:
     send_request("set", args=["sphere_scale", "0.3", f"({name}) and inorganic"])
 
     # Nucleic acids (DNA/RNA): brightorange backbone, deepteal ladders
-    na_sel = f"({name}) and polymer.nucleic"
-    send_request("set", args=["cartoon_nucleic_acid_color", "brightorange", na_sel])
-    send_request("set", args=["cartoon_ladder_color", "deepteal", na_sel])
+    # Object-level settings: given an atom selection, PyMOL stores
+    # cartoon_nucleic_acid_color per atom and never draws it (it warns that the
+    # setting is object-state-level). Only nucleic acids use them anyway.
+    send_request("set", args=["cartoon_nucleic_acid_color", "brightorange", name])
+    send_request("set", args=["cartoon_ladder_color", "deepteal", name])
 
     # Center view and set rotation pivot to structure center
     send_request("center", args=[name])
