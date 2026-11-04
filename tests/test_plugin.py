@@ -219,7 +219,10 @@ def test_serve_connection_happy_path(plugin_server):
     res = _served(plugin_server, sock)
 
     assert res == {"status": "success", "result": ["A"]}
-    sock.settimeout.assert_called_once_with(plugin_module.RECV_TIMEOUT)
+    # Set at accept, then narrowed to what is left of the request's budget.
+    waits = [c.args[0] for c in sock.settimeout.call_args_list]
+    assert waits[0] == plugin_module.RECV_TIMEOUT
+    assert all(0 < w <= plugin_module.RECV_TIMEOUT for w in waits)
 
 
 def test_serve_connection_answers_on_timeout(plugin_server):
@@ -1728,3 +1731,27 @@ def test_only_cmd_and_util_names_resolve(action, monkeypatch):
     assert plugin_module._resolve_dotted(action) is None
     assert plugin_module._resolve_dotted("get_names") is fake_cmd.get_names
     assert plugin_module._resolve_dotted("util.cbc") is fake_util.cbc
+
+
+def test_whitespace_first_does_not_let_a_non_request_through():
+    sock = MagicMock()
+    sock.recv.side_effect = [b"\r\n", b"GET / HTTP/1.1\r\n\r\n", b"never read"]
+    from mcpymol.plugin import NotARequest
+
+    with pytest.raises(NotARequest):
+        _recv_all(sock)
+    assert sock.recv.call_count == 2
+
+
+def test_each_read_waits_only_for_what_is_left_of_the_budget(monkeypatch):
+    """Per-read timeouts let one read near the deadline wait a whole extra
+    RECV_TIMEOUT: up to twice the stated bound."""
+    clock = iter([0.0, 0.0, 10.0, 25.0, 29.0, 31.0])
+    monkeypatch.setattr(plugin_module.time, "monotonic", lambda: next(clock))
+    sock = MagicMock()
+    sock.recv.side_effect = [b"{", b" ", b" ", b" "]
+
+    with pytest.raises(TimeoutError):
+        _recv_all(sock)
+    waits = [c.args[0] for c in sock.settimeout.call_args_list]
+    assert waits == [plugin_module.RECV_TIMEOUT - t for t in (0.0, 10.0, 25.0, 29.0)]

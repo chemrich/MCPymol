@@ -124,17 +124,27 @@ def _recv_all(sock: socket.socket, max_bytes: int | None = None) -> bytes:
     # byte every few seconds could hold the single accept loop for ever. So
     # the whole request gets RECV_TIMEOUT too.
     deadline = time.monotonic() + RECV_TIMEOUT
+    started = False  # seen the first non-whitespace byte
     while True:
-        if time.monotonic() > deadline:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
             raise TimeoutError(f"request not complete within {RECV_TIMEOUT}s")
+        # Each recv waits only for what is left of the request's budget, so the
+        # bound is RECV_TIMEOUT for the whole request, not per read.
+        try:
+            sock.settimeout(remaining)
+        except (OSError, TypeError):
+            pass  # a test double without settimeout
         chunk = sock.recv(RECV_CHUNK)
         if not chunk:
             break
-        if not chunks and chunk.lstrip()[:1] not in (b"{", b""):
-            # Every request is a JSON object. Anything else is not a client of
-            # this plugin: an HTTP request from a browser, a port scanner.
-            # Refuse at once rather than holding the accept loop for it.
-            raise NotARequest("not a JSON request")
+        if not started and chunk.strip():
+            if chunk.lstrip()[:1] != b"{":
+                # Every request is a JSON object. Anything else is not a client
+                # of this plugin: an HTTP request from a browser, a TLS hello, a
+                # port scanner. Refuse at once rather than hold the accept loop.
+                raise NotARequest("not a JSON request")
+            started = True
         chunks.append(chunk)
         total += len(chunk)
         if total > limit:
