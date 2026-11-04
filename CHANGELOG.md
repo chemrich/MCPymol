@@ -41,6 +41,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`local_resolution_view` let two maps with different cell angles through its grid check.** It compared extent, sampling, voxel size, start, origin and axis order, but never `cellb`, so a map pair whose grid axes are not parallel passed the check the module exists to enforce. Cell angles are now compared too.
+- **`map_info` called a transposed map cropped.** `nx/ny/nz` count columns, rows and sections in file order, while `mx/my/mz` run along X, Y and Z. They were compared as written, so any map with a non-default axis order whose extents are not all equal looked boxed or cropped. The extents are now mapped through `mapc/mapr/maps` first.
+- **An unstubbed `get` in a wiggles test silently chose an answer.** `FakePort` answers a data action it has no response for by raising, but `get` was missing from that list, so it answered "OK" and `density_view` took its "normalisation on" branch without the test saying so. `get` is now a data action, and the density tests state PyMOL's default explicitly.
+- **Every wiggles tool is checked to forward every argument it accepts.** `tests/wiggles/test_tools.py` gives each parameter a distinctive value and asserts it reaches the view. A parameter the schema advertises but the wrapper drops is otherwise invisible: the view runs on its default and reports success.
 - **An internal `do` could time out and run behind the next request.** `do` now replies once the command has finished rather than when it was queued, and about twenty internal callers still had the 10 s default, so a view loading a large APBS map or applying a long batched `alter` timed out, moved on, and built on data not there yet. `do` now defaults to the slow-operation timeout.
 - **`frame()` with no argument never said which frame.** The query answered "Executed get_frame successfully." It now returns the frame number.
 - **`print_export` dropped what it had already written when a later group failed.** It returned only that group's error, while the earlier STLs sat in `out_dir` unreported. It now names them, and says the set is incomplete.

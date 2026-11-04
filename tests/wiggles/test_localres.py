@@ -87,6 +87,7 @@ def test_voxel_size_is_compared_with_a_tolerance(tmp_path):
         ({"origin": (0.0, 0.0, 12.0)}, "origin along Z differs"),
         ({"nzstart": 5}, "start position differs"),
         ({"mapc": 3, "mapr": 1, "maps": 2}, "axis order differs"),
+        ({"cellb": (90.0, 90.0, 120.0)}, "cell angle gamma differs"),
     ],
 )
 def test_each_way_the_grids_can_differ_is_named(tmp_path, kw, expected):

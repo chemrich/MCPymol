@@ -42,6 +42,7 @@ def make_header(
     dmax: float = 1.0,
     dmean: float = 0.0,
     rms: float = 0.5,
+    cellb: tuple[float, float, float] = (90.0, 90.0, 90.0),
 ) -> bytes:
     """Build a 1024-byte MRC2014 header.
 
@@ -69,7 +70,7 @@ def make_header(
     put("3i", 16, nxstart, nystart, nzstart)
     put("3i", 28, mx, my, mz)
     put("3f", 40, *cella)
-    put("3f", 52, 90.0, 90.0, 90.0)  # cellb
+    put("3f", 52, *cellb)
     put("3i", 64, mapc, mapr, maps)
     put("3f", 76, dmin, dmax, dmean)
     put("i", 88, 1)  # ispg
@@ -272,3 +273,52 @@ def test_emd_11638_like_apoferritin(tmp_path):
     assert h.voxel_size == pytest.approx((0.5332, 0.5332, 0.5332), rel=1e-6)
     assert h.is_isotropic is True
     assert h.warnings() == []
+
+
+def test_a_transposed_map_that_is_not_cropped_is_not_called_cropped(tmp_path):
+    """nx/ny/nz count columns/rows/sections; mx/my/mz run along X/Y/Z. With
+    columns along Z, rows along X and sections along Y, a whole map has
+    (mx,my,mz) = (ny,nz,nx), which compared as written looked cropped."""
+    h = read_map_header(
+        write_map(
+            tmp_path,
+            nx=100,
+            ny=80,
+            nz=60,
+            mapc=3,
+            mapr=1,
+            maps=2,
+            mx=80,
+            my=60,
+            mz=100,
+            cella=(80.0, 60.0, 100.0),
+        )
+    )
+    assert h.extent_xyz == (80, 60, 100)
+    assert not any("cropped" in w for w in h.warnings()), h.warnings()
+
+
+def test_a_transposed_map_that_is_cropped_is_still_called_cropped(tmp_path):
+    h = read_map_header(
+        write_map(
+            tmp_path,
+            nx=100,
+            ny=80,
+            nz=60,
+            mapc=3,
+            mapr=1,
+            maps=2,
+            mx=160,
+            my=60,
+            mz=100,
+            cella=(160.0, 60.0, 100.0),
+        )
+    )
+    cropped = [w for w in h.warnings() if "cropped" in w]
+    assert cropped and "extent along X,Y,Z (80,60,100)" in cropped[0], h.warnings()
+
+
+def test_a_malformed_axis_mapping_has_no_xyz_extent(tmp_path):
+    h = read_map_header(write_map(tmp_path, mapc=1, mapr=1, maps=3))
+    assert h.extent_xyz is None
+    assert any("not a permutation" in w for w in h.warnings())

@@ -119,6 +119,23 @@ class MapHeader:
         )
 
     @property
+    def extent_xyz(self) -> tuple[int, int, int] | None:
+        """The stored extent along crystallographic X, Y, Z.
+
+        ``nx/ny/nz`` count columns, rows and sections, in file order, while
+        ``mx/my/mz`` and ``cella`` are along X, Y, Z. Compare them only through
+        ``mapc/mapr/maps``. None when the axis mapping is not a permutation.
+        """
+        if sorted((self.mapc, self.mapr, self.maps)) != [1, 2, 3]:
+            return None
+        xyz = [0, 0, 0]
+        for n, axis in zip(
+            (self.nx, self.ny, self.nz), (self.mapc, self.mapr, self.maps), strict=True
+        ):
+            xyz[axis - 1] = n
+        return (xyz[0], xyz[1], xyz[2])
+
+    @property
     def is_isotropic(self) -> bool | None:
         """True/False, or None if any axis spacing is unknown."""
         known = [s for s in self.voxel_size if s is not None]
@@ -152,12 +169,16 @@ class MapHeader:
                 f"scaled differently along each axis."
             )
 
-        if (self.mx, self.my, self.mz) != (self.nx, self.ny, self.nz):
+        # Compared along X, Y, Z: nx/ny/nz are in column/row/section order, so a
+        # map with a non-default axis order is not cropped just because the
+        # two triples differ as written.
+        extent = self.extent_xyz
+        if extent is not None and (self.mx, self.my, self.mz) != extent:
             out.append(
                 f"grid sampling (mx,my,mz)=({self.mx},{self.my},{self.mz}) differs "
-                f"from extent (nx,ny,nz)=({self.nx},{self.ny},{self.nz}) — map is "
-                f"boxed or cropped. Voxel size uses m, which is correct; dividing "
-                f"by n here would give a different and wrong answer"
+                f"from the extent along X,Y,Z ({extent[0]},{extent[1]},{extent[2]}) — "
+                f"map is boxed or cropped. Voxel size uses m, which is correct; "
+                f"dividing by n here would give a different and wrong answer"
             )
 
         if sorted((self.mapc, self.mapr, self.maps)) != [1, 2, 3]:
