@@ -7,6 +7,7 @@ install. These commands exist to find and register it.
 """
 
 import pathlib
+import sys
 
 import pytest
 
@@ -198,7 +199,6 @@ def test_install_reports_a_missing_plugin(tmp_path, monkeypatch):
 # ── The plugin flags must not need the MCP stack ─────────────────────────────
 
 import subprocess
-import sys
 import tomllib
 
 _WITHOUT_MCP = """
@@ -249,3 +249,31 @@ def test_the_console_script_is_the_cli():
     pyproject = pathlib.Path(__file__).parent.parent / "pyproject.toml"
     scripts = tomllib.loads(pyproject.read_text())["project"]["scripts"]
     assert scripts == {"mcpymol": "mcpymol.cli:main"}
+
+
+# ── The block itself guards the Python version ───────────────────────────────
+
+
+def _run_block(tmp_path, monkeypatch):
+    """Execute the block install_plugin writes, with a recording pymol.cmd."""
+    import types
+
+    rc = tmp_path / ".pymolrc.py"
+    install_plugin(rc)
+    ran = []
+    fake_pymol = types.ModuleType("pymol")
+    fake_pymol.cmd = types.SimpleNamespace(do=ran.append)
+    monkeypatch.setitem(sys.modules, "pymol", fake_pymol)
+    exec(compile(rc.read_text(), str(rc), "exec"), {})
+    return ran
+
+
+def test_the_block_runs_the_plugin_on_a_new_enough_python(tmp_path, monkeypatch):
+    assert _run_block(tmp_path, monkeypatch) == [f"run {plugin_path()}"]
+
+
+def test_the_block_explains_itself_on_an_older_python(tmp_path, monkeypatch, capsys):
+    """Old Incentive builds embed Python 3.7, where plugin.py may not parse."""
+    monkeypatch.setattr(sys, "version_info", (3, 7, 12))
+    assert _run_block(tmp_path, monkeypatch) == []
+    assert "needs a PyMOL running Python 3.10 or newer" in capsys.readouterr().out

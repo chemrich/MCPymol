@@ -32,8 +32,14 @@ def _block(path: pathlib.Path) -> str:
         f"# Added by `mcpymol --install-plugin`.\n"
         f"# The path points into one installation of mcpymol, so re-run that\n"
         f"# command after upgrading — this block is rewritten, not duplicated.\n"
+        f"import sys\n"
         f"from pymol import cmd\n"
-        f'cmd.do("run {path}")\n'
+        f"# Checked here, not only in the plugin: on a much older Python the\n"
+        f"# plugin file might not even parse, and this says why instead.\n"
+        f"if sys.version_info >= (3, 10):\n"
+        f'    cmd.do("run {path}")\n'
+        f"else:\n"
+        f'    print("MCPymol plugin not loaded: it needs a PyMOL running Python 3.10 or newer.")\n'
         f"{BLOCK_END}\n"
     )
 

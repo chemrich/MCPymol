@@ -82,7 +82,7 @@ yourself.
 
 ## Requirements
 
-- **PyMOL** — the open-source build is what this is developed against (`brew install pymol` on macOS, `apt-get install pymol` on Debian/Ubuntu). The Schrödinger incentive build works too. MCPymol drives a PyMOL you already have; it does not install or bundle one.
+- **PyMOL** — the open-source build is what this is developed against (`brew install pymol` on macOS, `apt-get install pymol` on Debian/Ubuntu). The Schrödinger incentive build works too, if its embedded Python is 3.10 or newer (type `print(sys.version)` in PyMOL to check): older Incentive 2.x builds aren't supported, and the plugin says so at startup rather than failing quietly. MCPymol drives a PyMOL you already have; it does not install or bundle one.
 - **Python 3.11+** for the bridge. This is *separate* from the Python inside PyMOL, which MCPymol never imports into.
 - **An MCP client** — Claude Code, Claude Desktop, or Gemini CLI.
 

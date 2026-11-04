@@ -1616,3 +1616,23 @@ def test_a_fetch_that_works_is_a_success(plugin_server, mocker):
     res = plugin_server.handle_request(json.dumps({"action": "fetch", "args": ["1ubq", "x"]}))
 
     assert res == {"status": "success", "result": "Fetched 1ubq"}
+
+
+# ── The PyMOL's own Python must be new enough ────────────────────────────────
+
+
+def test_an_old_python_is_refused_with_a_reason(monkeypatch, mocker, capsys):
+    """On 3.9, socket.timeout is not TimeoutError, so the listener ended at its
+    first idle poll and the plugin looked loaded but never answered."""
+    server = mocker.patch.object(plugin_module, "PyMOLSocketServer")
+    monkeypatch.setattr(sys, "version_info", (3, 9, 6))
+
+    assert plugin_module.start_plugin() is None
+
+    server.assert_not_called()
+    out = capsys.readouterr().out
+    assert "this PyMOL runs Python 3.9.6" in out and "needs Python 3.10 or newer" in out
+
+
+def test_a_current_python_is_not_refused():
+    assert plugin_module._python_too_old() is None
