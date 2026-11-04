@@ -441,7 +441,10 @@ def interface_report(
         return f"Error: chain_a and chain_b are both '{chain_a}'; pick two different chains."
 
     # SASA is meaningless without the solvent-accessible dot mode, and the
-    # default density is too coarse for per-residue numbers.
+    # default density is too coarse for per-residue numbers. Both are global
+    # settings, and they also change how dots are drawn, so they are put back
+    # afterwards: a report must not restyle the user's session.
+    saved = {name: send_request("get", args=[name]) for name in ("dot_solvent", "dot_density")}
     send_request("set", args=["dot_solvent", "1"])
     send_request("set", args=["dot_density", "3"])
 
@@ -468,6 +471,9 @@ def interface_report(
     finally:
         for tmp in (free_a, free_b, bound):
             send_request("delete", args=[tmp])
+        for name, before in saved.items():
+            if before.get("status") == "success":
+                send_request("set", args=[name, str(before.get("result"))])
 
     for chain, values in list(unbound.items()) + list(complexed.items()):
         if values is None:

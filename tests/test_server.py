@@ -188,7 +188,7 @@ def test_fetch_structure_multimer(mock_sr):
     acts = _actions(mock_sr)
     # The name is vetted (read-only), then a scoped delete of the object being
     # replaced: nothing session-wide runs before the fetch produced atoms.
-    assert acts[:3] == ["get_legal_name", "delete", "fetch"]
+    assert acts[:4] == ["get_legal_name", "delete", "get", "fetch"]
     assert "fetch" in acts
     assert "get_chains" in acts
     assert "remove" in acts  # multimer cleanup
@@ -599,23 +599,24 @@ def test_list_chains_empty(mock_sr):
 
 
 @patch("mcpymol.structures.send_request")
-def test_list_ligands_parses_pdb(mock_sr):
-    """list_ligands parses HETATM resn columns out of the PDB dump."""
-    pdb = (
-        "HETATM    1  C1  ATP A 200      11.111  22.222  33.333  1.00 20.00           C\n"
-        "HETATM    2  N1  ATP A 200      11.111  22.222  33.333  1.00 20.00           N\n"
-        "HETATM    3  MG  MG  A 201      14.000  25.000  36.000  1.00 20.00          MG\n"
-        "END\n"
-    )
-    mock_sr.return_value = {"status": "success", "result": pdb}
-    result = list_ligands("1atp")
-    assert "ATP" in result and "MG" in result
-    assert "1atp" in result
+def test_list_ligands_names_each_ligand_once(mock_sr):
+    mock_sr.return_value = {"status": "success", "result": [["ATP"], ["ATP"], ["NAG"]]}
+    assert list_ligands("1atp") == "Ligands in '1atp': ATP, NAG"
+    assert mock_sr.call_args.args[0] == "iterate_to_list"
+    assert mock_sr.call_args.kwargs["args"] == ["(1atp) and organic", "resn"]
+
+
+@patch("mcpymol.structures.send_request")
+def test_a_five_character_ligand_name_is_not_cut_short(mock_sr):
+    """Read from PDB columns 18-20, ABCDE was listed as ABC (PyMOL 3.1.0). The
+    CCD issues five-character codes now that three-character ones ran out."""
+    mock_sr.return_value = {"status": "success", "result": [["A1AAA"], ["ATP"]]}
+    assert list_ligands("x") == "Ligands in 'x': A1AAA, ATP"
 
 
 @patch("mcpymol.structures.send_request")
 def test_list_ligands_no_organic(mock_sr):
-    mock_sr.return_value = {"status": "success", "result": ""}
+    mock_sr.return_value = {"status": "success", "result": []}
     assert "No organic ligands" in list_ligands("1ubq")
 
 
