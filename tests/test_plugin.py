@@ -176,9 +176,10 @@ def test_recv_all_returns_empty_on_immediate_eof():
 
 def test_recv_all_rejects_oversized_request():
     """A peer streaming junk must be cut off, not allowed to exhaust memory."""
-    # Never parses as JSON, so only the size cap can stop it.
+    # Starts like a request but never parses as JSON, so only the size cap
+    # can stop it.
     sock = MagicMock()
-    sock.recv.side_effect = [b"x" * 4096] * 10_000
+    sock.recv.side_effect = [b'{"a": "'] + [b"x" * 4096] * 10_000
 
     with pytest.raises(RequestTooLarge):
         _recv_all(sock, max_bytes=64 * 1024)
@@ -186,7 +187,7 @@ def test_recv_all_rejects_oversized_request():
 
 def test_recv_all_default_cap_is_the_module_constant():
     sock = MagicMock()
-    sock.recv.side_effect = [b"x" * (MAX_REQUEST_BYTES + 1)]
+    sock.recv.side_effect = [b"{" + b"x" * MAX_REQUEST_BYTES]
 
     with pytest.raises(RequestTooLarge):
         _recv_all(sock)
@@ -1649,3 +1650,81 @@ def test_an_old_python_does_not_invite_a_start_mcp_that_can_only_refuse(
     extend.assert_not_called()
     out = capsys.readouterr().out
     assert "needs Python 3.10" in out and "Type start_mcp" not in out
+
+
+# ── The framing refuses what can't be a request, and bounds the whole read ──
+
+
+@pytest.mark.parametrize(
+    "first",
+    [
+        b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n",
+        b'POST / HTTP/1.1\r\nContent-Type: text/plain\r\n\r\n{"action": "system"}',
+        b"\x16\x03\x01",  # a TLS ClientHello
+    ],
+)
+def test_what_cannot_begin_a_json_request_is_refused_at_once(first):
+    """A browser's fetch() to 127.0.0.1 sends an HTTP request line first. It
+    never ran an action (the whole buffer had to parse as JSON), but only by
+    accident, and it held the single accept loop for the receive timeout."""
+    from mcpymol.plugin import NotARequest
+
+    sock = MagicMock()
+    sock.recv.side_effect = [first, b"never read"]
+
+    with pytest.raises(NotARequest):
+        _recv_all(sock)
+    assert sock.recv.call_count == 1
+
+
+def test_leading_whitespace_before_the_object_is_fine():
+    sock = MagicMock()
+    sock.recv.side_effect = [b'  \n{"action": "get_names"}']
+    assert _recv_all(sock).strip() == b'{"action": "get_names"}'
+
+
+def test_a_peer_that_trickles_bytes_is_cut_off(monkeypatch):
+    """settimeout bounds each recv, not the request, so one byte every few
+    seconds held the accept loop for ever."""
+    clock = iter(range(0, 1000, 5))
+    monkeypatch.setattr(plugin_module.time, "monotonic", lambda: next(clock))
+    sock = MagicMock()
+    sock.recv.side_effect = [b"{"] + [b" "] * 1000
+
+    with pytest.raises(TimeoutError, match="not complete within"):
+        _recv_all(sock)
+    assert sock.recv.call_count < 20
+
+
+def test_a_request_split_across_chunks_is_parsed_once_complete():
+    sock = MagicMock()
+    sock.recv.side_effect = [b'{"action": ', b'"get_names", ', b'"args": []}', b"unread"]
+    assert json.loads(_recv_all(sock)) == {"action": "get_names", "args": []}
+    assert sock.recv.call_count == 3
+
+
+@pytest.mark.parametrize(
+    "action",
+    [
+        "os.system",
+        "os.path.exists",
+        "_mcpymol_run_job",
+        "util._private",
+        "util.os.system",
+        "cmd.os",
+    ],
+)
+def test_only_cmd_and_util_names_resolve(action, monkeypatch):
+    """The last-ditch attribute walk let `os.system` resolve, since PyMOL's cmd
+    module imports os."""
+    import os as os_module
+    import types
+
+    fake_cmd = types.SimpleNamespace(os=os_module, get_names=lambda: [], _mcpymol_run_job=print)
+    fake_util = types.SimpleNamespace(cbc=lambda: None, _private=print, os=os_module)
+    monkeypatch.setattr(plugin_module, "cmd", fake_cmd)
+    monkeypatch.setattr(plugin_module, "pymol_util", fake_util)
+
+    assert plugin_module._resolve_dotted(action) is None
+    assert plugin_module._resolve_dotted("get_names") is fake_cmd.get_names
+    assert plugin_module._resolve_dotted("util.cbc") is fake_util.cbc

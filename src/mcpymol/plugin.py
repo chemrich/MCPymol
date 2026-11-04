@@ -76,6 +76,10 @@ class RequestTooLarge(Exception):
     """Raised when a peer sends more than ``MAX_REQUEST_BYTES`` in one request."""
 
 
+class NotARequest(Exception):
+    """Raised when a peer's first bytes cannot begin a JSON request."""
+
+
 class MainThreadTimeout(Exception):
     """PyMOL's main thread did not start a queued job in time; nothing was run."""
 
@@ -116,17 +120,31 @@ def _recv_all(sock: socket.socket, max_bytes: int | None = None) -> bytes:
     limit = MAX_REQUEST_BYTES if max_bytes is None else max_bytes
     chunks: list[bytes] = []
     total = 0
+    # socket.settimeout bounds each recv, not the request: a peer sending a
+    # byte every few seconds could hold the single accept loop for ever. So
+    # the whole request gets RECV_TIMEOUT too.
+    deadline = time.monotonic() + RECV_TIMEOUT
     while True:
+        if time.monotonic() > deadline:
+            raise TimeoutError(f"request not complete within {RECV_TIMEOUT}s")
         chunk = sock.recv(RECV_CHUNK)
         if not chunk:
             break
+        if not chunks and chunk.lstrip()[:1] not in (b"{", b""):
+            # Every request is a JSON object. Anything else is not a client of
+            # this plugin: an HTTP request from a browser, a port scanner.
+            # Refuse at once rather than holding the accept loop for it.
+            raise NotARequest("not a JSON request")
         chunks.append(chunk)
         total += len(chunk)
         if total > limit:
             raise RequestTooLarge(f"request exceeded {limit} bytes")
-        # JSON is self-delimiting once we have the whole document.  Checking
-        # after every chunk means a well-formed request is served immediately
-        # even if the peer never half-closes (and keeps mock sockets simple).
+        # JSON is self-delimiting once we have the whole document, so a
+        # well-formed request is served even if the peer never half-closes.
+        # Only a chunk that ends in `}` can complete an object, so the buffer
+        # is parsed then, not after every chunk (quadratic for a big request).
+        if not chunk.rstrip().endswith(b"}"):
+            continue
         try:
             json.loads(b"".join(chunks).decode("utf-8"))
         except (json.JSONDecodeError, UnicodeDecodeError):
@@ -211,29 +229,29 @@ def _dumps_response(response: dict) -> bytes:
 
 
 def _resolve_dotted(name: str) -> Callable[..., Any] | None:
-    """Resolve a dotted action name like ``util.cbc`` to a callable.
+    """Resolve an action name to a callable: ``cmd.<name>`` or ``util.<name>``.
 
-    Falls back through ``pymol.util`` for ``util.*`` and through ``cmd`` for
-    everything else.  Returns ``None`` if the symbol can't be found.
+    Returns ``None`` for anything else. There used to be a last-ditch walk
+    down any attribute chain from ``cmd``, and since PyMOL's cmd module
+    imports ``os``, the action ``os.system`` resolved. Nothing sends a dotted
+    action other than ``util.*``, so the walk is gone, and so are names with
+    a leading underscore, which are PyMOL's (and this plugin's) internals.
     """
-    if cmd is None:
+    if cmd is None or not name:
         return None
-    if "." not in name:
-        attr = getattr(cmd, name, None)
-        return attr if callable(attr) else None
-
-    head, _, tail = name.partition(".")
-    if head == "util" and pymol_util is not None:
-        attr = getattr(pymol_util, tail, None)
-        return attr if callable(attr) else None
-
-    # Last-ditch: walk attributes (e.g. cmd.foo.bar)
-    obj = cmd
-    for part in name.split("."):
-        obj = getattr(obj, part, None)
-        if obj is None:
+    head, dot, tail = name.partition(".")
+    if dot:
+        if head != "util" or pymol_util is None or not _public(tail):
             return None
-    return obj if callable(obj) else None
+        attr = getattr(pymol_util, tail, None)
+    else:
+        attr = getattr(cmd, name, None) if _public(name) else None
+    return attr if callable(attr) else None
+
+
+def _public(name: str) -> bool:
+    """A plain identifier that doesn't start with an underscore."""
+    return name.isidentifier() and not name.startswith("_")
 
 
 def _error_text(exc: BaseException) -> str:
@@ -1351,6 +1369,12 @@ class PyMOLSocketServer:
             data = _recv_all(client)
         except RequestTooLarge as e:
             _sendall(client, _error_bytes(f"Request rejected: {e}."))
+            return
+        except NotARequest:
+            # Probably a browser (an HTTP request line) or a scanner. Say
+            # nothing useful and close at once: holding the connection would
+            # hold the single accept loop.
+            _sendall(client, _error_bytes("Request rejected: not a JSON request."))
             return
         except TimeoutError:
             # Must precede OSError: TimeoutError is a subclass of it.

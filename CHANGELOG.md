@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- **The plugin's socket accepts only what this package sends.** An action
+  name could walk any attribute chain from PyMOL's `cmd` module, so
+  `os.system` resolved (cmd imports `os`); only `cmd.<name>` and
+  `util.<name>` resolve now, never a name starting with `_`. A connection
+  whose first bytes can't begin a JSON request (a browser's HTTP request, a
+  TLS handshake) is refused at once instead of holding the plugin's single
+  accept loop for 30 s, and a peer that trickles bytes is cut off after 30 s
+  in total; before, the timeout applied to each read, so it could hold the
+  loop indefinitely. A browser could never run an action (the request had to
+  be pure JSON), but nothing tested that; now it is.
+
 ### Fixed
 - **Tool descriptions no longer understate what they run.**
   `execute_pymol_command` said "Not Python", but PyMOL's command language runs
