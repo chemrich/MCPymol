@@ -5,9 +5,19 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    # Leave pyproject's bounds alone while a new release already fits them;
+    # widen only when it doesn't. The default ("increase") raised every floor
+    # to the newest release each week, so the floors stopped meaning "the
+    # oldest version that works" -- trimesh>=5.0.0 when 4.0 is fine.
+    versioning-strategy: increase-if-necessary
     groups:
+      # Minor and patch updates travel together and merge themselves
+      # (dependabot-auto-merge.yml). Majors are deliberately NOT grouped:
+      # each arrives as its own PR, so one breaking bump -- mcp 2 in #69/#71
+      # -- can't hold every routine update hostage for months.
       python-deps:
         patterns: ["*"]
+        update-types: ["minor", "patch"]
     open-pull-requests-limit: 5
 
   # Keep the SHA-pinned GitHub Actions current.
@@ -18,3 +28,4 @@ updates:
     groups:
       actions:
         patterns: ["*"]
+        update-types: ["minor", "patch"]
