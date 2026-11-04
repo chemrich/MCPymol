@@ -444,9 +444,17 @@ def interface_report(
     # default density is too coarse for per-residue numbers. Both are global
     # settings, and they also change how dots are drawn, so they are put back
     # afterwards: a report must not restyle the user's session.
-    saved = {name: send_request("get", args=[name]) for name in ("dot_solvent", "dot_density")}
-    send_request("set", args=["dot_solvent", "1"])
-    send_request("set", args=["dot_density", "3"])
+    saved: dict[str, str] = {}
+    for name in ("dot_solvent", "dot_density"):
+        before = send_request("get", args=[name])
+        if before.get("status") == "success":
+            saved[name] = str(before.get("result"))
+    # Only what can be put back is changed. If PyMOL is too busy to say what a
+    # setting is, it keeps it, and the areas come out coarser rather than the
+    # session staying restyled.
+    for name, value in (("dot_solvent", "1"), ("dot_density", "3")):
+        if name in saved:
+            send_request("set", args=[name, value])
 
     free_a, free_b, bound = "_iface_free_a", "_iface_free_b", "_iface_bound"
     try:
@@ -471,9 +479,8 @@ def interface_report(
     finally:
         for tmp in (free_a, free_b, bound):
             send_request("delete", args=[tmp])
-        for name, before in saved.items():
-            if before.get("status") == "success":
-                send_request("set", args=[name, str(before.get("result"))])
+        for name, value in saved.items():
+            send_request("set", args=[name, value])
 
     for chain, values in list(unbound.items()) + list(complexed.items()):
         if values is None:

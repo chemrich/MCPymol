@@ -791,3 +791,35 @@ def test_fetch_goes_to_the_cache_only_when_fetch_path_is_the_default(answer, exp
     with patch("mcpymol.structures.send_request", return_value=answer):
         kwargs = _fetch_kwargs()
     assert kwargs == ({"path": FETCH_CACHE} if expected == "cache" else {})
+
+
+def test_the_cache_is_used_only_if_it_is_private(tmp_path, monkeypatch):
+    """PyMOL loads a {code}.cif it finds there without downloading, so a
+    directory others can write to (a shared /tmp) could hand it any file."""
+    import os
+
+    from mcpymol import structures
+
+    private = tmp_path / "mine"
+    monkeypatch.setattr(structures, "FETCH_CACHE", str(private))
+    assert structures._private_cache() == str(private)
+    assert private.stat().st_mode & 0o777 == 0o700
+
+    shared = tmp_path / "shared"
+    shared.mkdir(mode=0o777)
+    os.chmod(shared, 0o777)
+    monkeypatch.setattr(structures, "FETCH_CACHE", str(shared))
+    assert structures._private_cache() is None
+
+
+def test_a_cache_that_cannot_be_made_falls_back_without_raising(tmp_path, monkeypatch):
+    """This runs after the old object is deleted, so it must not raise."""
+    from mcpymol import structures
+
+    in_the_way = tmp_path / "a_file"
+    in_the_way.write_text("x")
+    monkeypatch.setattr(structures, "FETCH_CACHE", str(in_the_way))
+    with patch(
+        "mcpymol.structures.send_request", return_value={"status": "success", "result": "."}
+    ):
+        assert structures._fetch_kwargs() == {}

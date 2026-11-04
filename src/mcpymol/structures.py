@@ -127,8 +127,23 @@ def _unusable_name(name: str) -> str | None:
 
 # Where fetched files go when PyMOL's fetch_path is its default, "." (PyMOL's
 # working directory, usually wherever it was launched: a home directory or a
-# checkout). Eleven .cif files built up in this repo's root that way.
-FETCH_CACHE = os.path.join(tempfile.gettempdir(), "mcpymol-fetch")
+# checkout). Eleven .cif files built up in this repo's root that way. Per
+# user: PyMOL loads a {code}.cif it finds there without downloading, so on a
+# shared /tmp anyone could plant a structure.
+_OWNER = str(os.getuid()) if hasattr(os, "getuid") else os.environ.get("USERNAME", "user")
+FETCH_CACHE = os.path.join(tempfile.gettempdir(), f"mcpymol-fetch-{_OWNER}")
+
+
+def _private_cache() -> str | None:
+    """FETCH_CACHE, created 0700 and checked to be ours, or None if it isn't."""
+    try:
+        os.makedirs(FETCH_CACHE, mode=0o700, exist_ok=True)
+        info = os.stat(FETCH_CACHE)
+    except OSError:
+        return None
+    if hasattr(os, "getuid") and (info.st_uid != os.getuid() or info.st_mode & 0o077):
+        return None  # someone else's, or open to others: don't load from it
+    return FETCH_CACHE
 
 
 def _fetch_kwargs() -> dict[str, str]:
@@ -138,13 +153,14 @@ def _fetch_kwargs() -> dict[str, str]:
     behind the user's back is its own defect, and `reinitialize settings` on
     every replace would reset it anyway. PyMOL and this server share a
     machine (the bridge only talks to 127.0.0.1), so the path means the same
-    to both.
+    to both. If the cache can't be made safely, PyMOL fetches as it always
+    did, and nothing raises: this runs after the old object is deleted.
     """
     current = send_request("get", args=["fetch_path"])
-    if current.get("status") != "success" or str(current.get("result")).strip() != ".":
+    if current.get("status") != "success" or str(current.get("result")).strip() not in (".", ""):
         return {}
-    os.makedirs(FETCH_CACHE, exist_ok=True)
-    return {"path": FETCH_CACHE}
+    cache = _private_cache()
+    return {"path": cache} if cache else {}
 
 
 def _verify_loaded(name: str, source: str) -> str | None:
