@@ -14,6 +14,7 @@ from pydantic import Field
 from mcpymol.app import mcp
 from mcpymol.bridge import send_request
 from mcpymol.pdbtext import distance3d, parse_atoms, residue_order
+from mcpymol.selection import chain_clause
 from mcpymol.style import black_background
 
 # Deviations above this are almost always a domain-scale motion rather than
@@ -180,7 +181,9 @@ def superposition_view(
 
     script = [f"alter ({mobile}), b=0"]
     for chain, mapping in per_chain.items():
-        sel = f"({mobile}) and chain {chain}" if chain else f"({mobile})"
+        # Quoted, blank included: the old fallback to the whole object for a blank
+        # chain wrote that chain's mapping onto every chain with the same resi.
+        sel = f"({mobile}) and {chain_clause(chain)}"
         script.append(f"stored.dev = {json.dumps(mapping)}")
         script.append(f"alter {sel}, b=stored.dev.get(resi, 0.0)")
     script.append(f"rebuild {mobile}")

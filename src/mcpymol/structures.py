@@ -20,6 +20,7 @@ from pydantic import Field
 from mcpymol.app import mcp
 from mcpymol.bridge import send_request
 from mcpymol.pdbtext import parse_atoms, residue_order
+from mcpymol.selection import chain_clause
 from mcpymol.style import black_background
 
 # AlphaFold DB serves predicted models by UniProt accession.  PyMOL's own
@@ -119,7 +120,9 @@ def _apply_ghost_heart(name: str) -> None:
         chains = chains_res.get("result", [])
         for i, chain in enumerate(chains):
             green = _GHOST_HEART_GREENS[i % len(_GHOST_HEART_GREENS)]
-            send_request("color", args=[green, f"{name} and chain {chain} and polymer.protein"])
+            send_request(
+                "color", args=[green, f"({name}) and {chain_clause(chain)} and polymer.protein"]
+            )
     send_request("set", args=["transparency", "0.6", name])
     black_background()
 
@@ -157,13 +160,11 @@ def _apply_multimer_heuristic(name: str, cutoff: float = DEFAULT_MULTIMER_CUTOFF
 
     # 2. Expand until stable
     while True:
-        chain_sel = "+".join(list(kept_chains))
+        kept = chain_clause(sorted(kept_chains))
         # Find chains nearby the current set
         nearby_res = send_request(
             "get_chains",
-            args=[
-                f"({name} and not chain {chain_sel}) and bychain (({name} and chain {chain_sel}) around {cutoff})"
-            ],
+            args=[f"(({name}) and not {kept}) and bychain ((({name}) and {kept}) around {cutoff})"],
         )
 
         if nearby_res.get("status") == "success":
@@ -174,8 +175,9 @@ def _apply_multimer_heuristic(name: str, cutoff: float = DEFAULT_MULTIMER_CUTOFF
         break
 
     # 3. Apply the removal
-    final_sel = "+".join(list(kept_chains))
-    send_request("remove", args=[f"({name}) and not chain {final_sel}"])
+    # Quoted: with a blank chain kept, the raw form was a parse error here, and
+    # in the query above it escaped the object.
+    send_request("remove", args=[f"({name}) and not {chain_clause(sorted(kept_chains))}"])
     send_request("hide", args=["everything", f"({name}) and solvent"])
 
 
@@ -643,7 +645,7 @@ def get_sequence(
     """
     selection = f"({obj_name}) and polymer.protein"
     if chain:
-        selection += f" and chain {chain}"
+        selection += f" and {chain_clause(chain)}"
 
     fasta_res = send_request("get_fastastr", args=[selection], timeout=60.0)
     if fasta_res.get("status") == "error":
