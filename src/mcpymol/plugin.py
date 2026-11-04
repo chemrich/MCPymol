@@ -1491,6 +1491,25 @@ class PyMOLSocketServer:
         print("MCPymol Bridge stopped.")
 
 
+#: The oldest Python the plugin runs on. PyMOL embeds its own, so this is the
+#: PyMOL's Python, not mcpymol's. On 3.9 the listener ended at its first idle
+#: poll: there ``socket.timeout`` is not yet a ``TimeoutError``.
+MIN_PYTHON = (3, 10)
+
+
+def _python_too_old() -> str | None:
+    """Why the plugin won't start in this PyMOL, or None if it can."""
+    if sys.version_info >= MIN_PYTHON:
+        return None
+    running = ".".join(str(part) for part in sys.version_info[:3])
+    return (
+        f"MCPymol plugin not started: this PyMOL runs Python {running}, and the plugin "
+        f"needs Python {MIN_PYTHON[0]}.{MIN_PYTHON[1]} or newer. Open-source PyMOL from "
+        f"Homebrew, conda-forge or apt is built on one; older Incentive (2.x) builds "
+        f"are not supported."
+    )
+
+
 def start_plugin() -> PyMOLSocketServer | None:
     """Start the bridge singleton and register the PyMOL commands.
 
@@ -1499,6 +1518,10 @@ def start_plugin() -> PyMOLSocketServer | None:
     listener has finished whatever request it is on.
     """
     global mcp_bridge_plugin
+    too_old = _python_too_old()
+    if too_old:
+        print(too_old)
+        return None
     try:
         existing = globals().get("mcp_bridge_plugin")
         replaces = None

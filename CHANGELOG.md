@@ -11,6 +11,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `print_export` no longer fails a valid group because a warning PyMOL printed
   while redrawing landed in its selection check; only a `Selector-Error`
   counts as a rejected selection.
+- **A PyMOL whose Python is too old now says so.** The plugin runs in PyMOL's
+  own Python and needs 3.10 or newer. On 3.9 (older Incentive builds) it
+  loaded, then its listener ended at the first idle poll, so PyMOL looked
+  ready and never answered. It now refuses at startup and says why, and the
+  `.pymolrc.py` block `--install-plugin` writes checks first, for Pythons
+  where the plugin file wouldn't even parse. Re-run `mcpymol --install-plugin`
+  to get the new block. The README says older Incentive 2.x builds aren't
+  supported.
 - **A name can no longer delete what it doesn't name.** The loaders delete the
   object they replace by name, and PyMOL's `delete` takes patterns and lists:
   `load_structure`, `fetch_structure` or `fetch_alphafold` given `*`, `all` or
