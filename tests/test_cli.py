@@ -213,7 +213,10 @@ sys.argv = ["mcpymol", "--plugin-path"]
     "run",
     [
         "runpy.run_module('mcpymol', run_name='__main__')",  # python -m mcpymol
-        "from mcpymol.cli import main; main()",  # the console script's target
+        # The installed console script's own target, read from the package
+        # metadata: whatever pyproject names, it must not need mcp.
+        "from importlib.metadata import entry_points; "
+        "entry_points(group='console_scripts')['mcpymol'].load()()",
     ],
 )
 def test_the_plugin_flags_work_when_mcp_cannot_be_imported(run):

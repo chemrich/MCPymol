@@ -368,7 +368,7 @@ Treat a green default run as necessary, not sufficient.
 | `mcpymol/cli.py` | `--install-plugin`, `--plugin-path`, `--uninstall-plugin` |
 | `mcpymol/plugin.py` | the half that runs *inside* PyMOL |
 
-`mcpymol/server.py` is the entry point and re-exports everything, so `from mcpymol.server import ligand_view` still works.
+`mcpymol/cli.py` is the entry point (the `mcpymol` command). `mcpymol/server.py` imports every tool module and re-exports everything, so `from mcpymol.server import ligand_view` still works.
 
 ## The view library
 
