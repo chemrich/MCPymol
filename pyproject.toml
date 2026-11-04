@@ -40,7 +40,7 @@ classifiers = [
 #             The 1.30.0 floor carries every mcp security fix released for 1.x.
 #   pydantic  Field metadata on every tool signature.
 dependencies = [
-    "mcp>=1.30.0,<2",
+    "mcp>=1.30.0,<3",
     "pydantic>=2,<3",
 ]
 
