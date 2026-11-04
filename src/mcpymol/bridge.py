@@ -68,7 +68,7 @@ def send_request(
     action: str,
     args: list | None = None,
     kwargs: dict | None = None,
-    timeout: float = _DEFAULT_TIMEOUT,
+    timeout: float | None = None,
 ) -> dict:
     """Send a JSON request to the PyMOL plugin socket server.
 
@@ -81,7 +81,12 @@ def send_request(
         action: The PyMOL command or custom action to execute.
         args: Positional arguments for the action.
         kwargs: Keyword arguments for the action.
-        timeout: Socket timeout in seconds. Defaults to 10.0.
+        timeout: Socket timeout in seconds. Defaults to 10.0, except for ``do``,
+            which defaults to the slow-operation timeout: the plugin answers a
+            ``do`` only once the command has finished, so loading a large map
+            or a long batched ``alter`` can legitimately take minutes. With
+            10 s, the caller saw a timeout, moved on, and its next requests
+            queued behind the unfinished command.
 
     Returns:
         A dict with at least a ``status`` key (``success`` or ``error``).
@@ -90,6 +95,8 @@ def send_request(
         response from PyMOL also carries ``asleep_s``, and an error the bridge
         raised itself says so: PyMOL only works while the machine is awake.
     """
+    if timeout is None:
+        timeout = _SLOW_OP_TIMEOUT if action == "do" else _DEFAULT_TIMEOUT
     payload = {
         "action": action,
         "args": args or [],
@@ -240,47 +247,12 @@ def format_measurement(
     return f"{label}: {number:.2f} {unit}{stored}."
 
 
-def _refuse_unusable_selection(action: str, label: str, selection: str | None) -> str | None:
-    """The error to return instead of running ``action``, or None if
-    ``selection`` names at least one atom.
-
-    PyMOL 3.1 takes its whole process down — the user's session with it — when
-    rms_cur, rms or fit get a selection name it cannot resolve (SIGABRT: a
-    free of an unallocated pointer in ExecutiveRMS) and when intra_rms does
-    (SIGSEGV in CmdIntraFit).  Reproduced with the plugin from before the
-    feedback work too: PyMOL's bug, but a typo in a tool argument must not be
-    able to set it off.  count_atoms reports the same selection as a plain
-    error.
-    """
-    if selection is None:
-        return None
-    res = send_request("count_atoms", args=[selection])
-    which = "selection" if label == "selection" else f"{label} selection"
-    if res.get("status") == "error":
-        error = str(res.get("error", "Unknown error"))
-        if not error.startswith("PyMOL execution error"):
-            # The bridge's own error: PyMOL is down or busy. Calling the
-            # selection invalid would send a model off to "fix" a correct one.
-            return (
-                f"Error: {action} was not run — the {which} '{selection}' could not be "
-                f"checked first (PyMOL crashes on an invalid selection here): {error}"
-            )
-        return (
-            f"Error: {action} was not run — the {which} '{selection}' is not valid: "
-            f"{error} (Checked first, because PyMOL crashes on an invalid selection here.)"
-        )
-    if res.get("result") == 0:
-        return f"Error: {action} was not run — the {which} '{selection}' matches no atoms."
-    return None
-
-
 def _call(
     _action: str,
     /,
     *,
     _timeout: float = _DEFAULT_TIMEOUT,
     _measures: tuple[str, str] | tuple[str, str, bool] | None = None,
-    _require_atoms: tuple[str, ...] = (),
     **values: str | None,
 ) -> str:
     """Forward a primitive PyMOL command and report the outcome.
@@ -302,10 +274,6 @@ def _call(
     commands that return a quantity; with it, the result is reported as a
     number instead of "Executed ... successfully".
 
-    ``_require_atoms`` names the values that are selections PyMOL must be
-    able to resolve to atoms before the command may run (see
-    ``_refuse_unusable_selection``).
-
     Warnings PyMOL printed while the command ran are appended either way.
     """
     names = list(values)
@@ -324,11 +292,6 @@ def _call(
             f"positionally, so earlier ones cannot be skipped — pass them all, "
             f"or drop the later one."
         )
-
-    for name in _require_atoms:
-        refused = _refuse_unusable_selection(_action, name, values.get(name))
-        if refused:
-            return refused
 
     res = send_request(_action, args=args, timeout=_timeout)
     if res.get("status") == "error":

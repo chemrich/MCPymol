@@ -9,11 +9,13 @@ manifold3d are installed; CI's test job has neither, and those tests skip.
 import inspect
 import math
 import os
+import re
 import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from mcpymol.printing import _REP_BITS
 from mcpymol.server import (
     _atoms_only,
     _coverage_warnings,
@@ -161,6 +163,15 @@ class _PyMOL:
         return 0 if " rep " in args[0] else 100
 
     def _iterate_to_list(self, args, kwargs):
+        if args[1:2] == ["reps"]:
+            # The census reads each atom's reps mask. Answer with one atom per
+            # count given as "rep <name>", so `counts` drives both forms.
+            masks = []
+            for key, n in self.counts.items():
+                m = re.search(r"\brep (\w+)", key)
+                if m and m.group(1) in _REP_BITS:
+                    masks += [(_REP_BITS[m.group(1)],)] * n
+            return masks
         for key, value in self.rows.items():
             if key in args[0]:
                 return value
@@ -1617,6 +1628,11 @@ def test_print_ribbon_view_stops_at_the_first_failed_call(mock_sr):
     result = print_ribbon_view(obj_name="1UBQ")
 
     assert result.startswith("Error: `create 1UBQ_spine, 1UBQ` failed: create went wrong")
+    # Not rolled back, so it says so, and that a re-run puts it right.
+    assert result.endswith(
+        "1UBQ may be left partly restyled. print_ribbon_view starts from scratch each "
+        "time, so re-running it once the cause is fixed puts it right."
+    )
     acts = [c.args[0] for c in mock_sr.call_args_list]
     assert acts[-1] == "create"
     assert "util.chainbow" not in acts
@@ -1700,3 +1716,57 @@ def test_print_ribbon_view_suggests_a_pitch_print_export_accepts(mock_sr, radius
 
     assert f"voxel_pitch={pitch})" in result
     assert 'groups="1UBQ=(1UBQ or 1UBQ_spine)", representation="cartoon", method="voxel"' in result
+
+
+def test_print_export_names_the_files_it_wrote_before_a_later_group_failed(tmp_path):
+    """It returned only the later group's error, while the earlier STLs sat in
+    out_dir unreported, ready to be dragged into a slicer as a complete set."""
+    pymol = _PyMOL(objects={"pa": "molecule", "pb": "molecule"})
+    repairs = iter([_repaired(), RuntimeError("mesh exploded")])
+
+    def repair(*args, **kwargs):
+        outcome = next(repairs)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    with (
+        patch("mcpymol.printing.send_request", side_effect=pymol),
+        patch.dict(sys.modules, {"trimesh": MagicMock(), "manifold3d": MagicMock()}),
+        patch("mcpymol.printing._read_obj_triangles", return_value=([0] * 12, 0)),
+        patch("mcpymol.printing._repair_to_stl", side_effect=repair),
+    ):
+        result = print_export(
+            obj_name="ub",
+            groups="a=pa; b=pb",
+            out_dir=str(tmp_path),
+            representation="cartoon",
+            method="voxel",
+        )
+
+    first, *rest = result.splitlines()
+    assert first == "Error rebuilding group 'b': RuntimeError: mesh exploded"
+    assert rest == [
+        f"The export stopped there. Already written to {tmp_path} before it did: ub_a.stl. "
+        "Each is complete for its own group, but the set is not; re-run once the cause "
+        "is fixed rather than printing these alone."
+    ]
+
+
+def test_print_export_says_nothing_extra_when_the_first_group_fails(tmp_path):
+    pymol = _PyMOL(objects={"pa": "molecule", "pb": "molecule"})
+    with (
+        patch("mcpymol.printing.send_request", side_effect=pymol),
+        patch.dict(sys.modules, {"trimesh": MagicMock(), "manifold3d": MagicMock()}),
+        patch("mcpymol.printing._read_obj_triangles", return_value=([0] * 12, 0)),
+        patch("mcpymol.printing._repair_to_stl", side_effect=RuntimeError("mesh exploded")),
+    ):
+        result = print_export(
+            obj_name="ub",
+            groups="a=pa",
+            out_dir=str(tmp_path),
+            representation="cartoon",
+            method="voxel",
+        )
+
+    assert result == "Error rebuilding group 'a': RuntimeError: mesh exploded"

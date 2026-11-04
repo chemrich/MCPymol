@@ -203,8 +203,8 @@ def rms_cur(
     return _call(
         "rms_cur",
         _measures=("RMSD (as positioned)", "A"),
-        # An unresolvable selection here crashes PyMOL itself; see _call.
-        _require_atoms=("mobile", "target"),
+        # An unresolvable selection here crashes PyMOL itself; the plugin
+        # checks it first (_refuse_crashing_selection).
         mobile=mobile,
         target=target,
     )
@@ -267,9 +267,7 @@ def execute_pymol_command(
         output = "\n".join(ln for ln in output.splitlines() if ln not in quoted).strip("\n")
     if output:
         text += f"\nPyMOL output:\n{output}"
-    warnings = [str(w) for w in res.get("warnings") or []]
-    if warnings:
-        text += "\nPyMOL warned:\n" + "\n".join(f"  {w}" for w in warnings)
+    text += _warnings_note(res)
     if not failed and "output" not in res:
         text += f"\n{_OLD_PLUGIN_NOTE}"
     return text
@@ -728,7 +726,7 @@ def intra_rms(
     Calculates RMSD between states within an object
     """
     # An unresolvable selection here crashes PyMOL itself; see _call.
-    return _call("intra_rms", _require_atoms=("selection",), selection=selection)
+    return _call("intra_rms", selection=selection)  # guarded in the plugin
 
 
 @mcp.tool()
@@ -1189,8 +1187,13 @@ def frame(
     # you may do — reached PyMOL as `frame()` and came back "missing 1
     # required positional argument". The documented behaviour simply did not
     # exist, and only a call made the way the schema describes would show it.
+    # And _call reports "Executed get_frame successfully." for a query, so it
+    # never said which frame: the query has to read the result itself.
     if frame_number is None:
-        return _call("get_frame")
+        res = send_request("get_frame")
+        if res.get("status") == "error":
+            return res.get("error", "Unknown error")
+        return f"Current frame: {res.get('result')}" + _warnings_note(res)
     return _call("frame", frame_number=frame_number)
 
 

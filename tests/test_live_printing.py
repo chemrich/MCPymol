@@ -17,7 +17,7 @@ import pytest
 
 import mcpymol.bridge as bridge
 from mcpymol.bridge import send_request
-from mcpymol.printing import print_export, print_ribbon_view
+from mcpymol.printing import _CENSUS_REPS, _census, print_export, print_ribbon_view
 
 pytestmark = pytest.mark.live
 
@@ -110,6 +110,35 @@ def _pe_mesh_libs():
     pytest.importorskip("trimesh")
     pytest.importorskip("skimage")
     pytest.importorskip("manifold3d")
+
+
+def test_census_reads_reps_masks_the_way_pymol_counts_them():
+    """_census decodes each atom's `reps` mask with a bit table written out in
+    printing.py. Each figure must match PyMOL's own `rep <name>` selection, or
+    the table has drifted from cmd.repmasks."""
+    for name in ("pep", "lig"):
+        assert send_request("fab", args=["ACDEFGHIK", name]).get("status") == "success"
+    shows = [
+        ("cartoon", "pep and resi 1-5"),
+        ("sticks", "pep and resi 4-9"),
+        ("spheres", "pep and name CA"),
+        ("lines", "lig"),
+        ("dots", "lig and resi 2"),
+        ("mesh", "pep and resi 9"),
+        ("labels", "lig and name CA"),
+        ("nb_spheres", "lig"),
+        ("ribbon", "lig and resi 1-3"),
+    ]
+    send_request("hide", args=["everything"])
+    for rep, sel in shows:
+        assert send_request("show", args=[rep, sel]).get("status") == "success"
+
+    census = _census(["pep", "lig"])
+
+    for obj in ("pep", "lig"):
+        for rep in _CENSUS_REPS:
+            assert census[obj][rep] == _count(f"({obj}) and rep {rep}"), (obj, rep)
+    assert census["pep"]["sticks"] > 0 and census["lig"]["lines"] > 0  # not vacuous
 
 
 def test_journey_export_frame_ignores_the_camera(_pe_mesh_libs, tmp_path):

@@ -537,14 +537,39 @@ def _resolve_group(sel: str) -> "tuple[list[str], list[tuple[str, str]]]":
     return molecules, others
 
 
+# Bit of each census representation in an atom's `reps` mask: PyMOL's own
+# cmd.repmasks (as of 3.1.0). The bridge cannot import pymol, so
+# the table is written out; tests/test_live_printing.py checks it against a
+# real PyMOL.
+_REP_BITS = {
+    "sticks": 1,
+    "spheres": 2,
+    "surface": 4,
+    "labels": 8,
+    "nb_spheres": 16,
+    "cartoon": 32,
+    "ribbon": 64,
+    "lines": 128,
+    "mesh": 256,
+    "dots": 512,
+    "nonbonded": 2048,
+    "ellipsoids": 524288,
+}
+
+
 def _census(objs: "list[str]") -> "dict[str, dict[str, int]]":
-    """How many atoms of each object show each representation."""
+    """How many atoms of each object show each representation.
+
+    One request per object, reading each atom's ``reps`` mask and decoding it
+    here. It was one count_atoms per object per representation: 13 sequential
+    round trips for every object, before the export began.
+    """
     census = {}
     for obj in objs:
-        census[obj] = {
-            rep: int(_numeric_result(send_request("count_atoms", args=[f"({obj}) and rep {rep}"])))
-            for rep in _CENSUS_REPS
-        }
+        res = send_request("iterate_to_list", args=[f"({obj})", "reps"])
+        rows = res.get("result") if res.get("status") == "success" else None
+        masks = [int(row[0]) for row in rows] if isinstance(rows, list) else []
+        census[obj] = {rep: sum(1 for m in masks if m & _REP_BITS[rep]) for rep in _CENSUS_REPS}
     return census
 
 
@@ -1678,7 +1703,13 @@ def print_ribbon_view(
         call("util.chainbow", spine)
         call("orient", obj_name)
     except RuntimeError as e:
-        return f"Error: {e}"
+        # Not rolled back, but every run starts from scratch (hide everything,
+        # recreate the spine, set every setting), so a re-run repairs it.
+        return (
+            f"Error: {e}\n{obj_name} may be left partly restyled. print_ribbon_view "
+            f"starts from scratch each time, so re-running it once the cause is fixed "
+            f"puts it right."
+        )
 
     wide, thick = _STRAND_DRAWN * strand_width, _STRAND_DRAWN * strand_thickness
     across = 2 * spine_radius
@@ -2065,7 +2096,19 @@ def print_export(
     # used to land beside the STLs, in another frame and unscaled, so a folder
     # dragged into a slicer brought them along.
     workdir = tempfile.mkdtemp(prefix="mcpymol-print-")
-    results = []
+    results: list[tuple[str, str, str, dict, list[str]]] = []
+
+    def _stopped(message: str) -> str:
+        """``message``, plus the groups already written when a later one fails."""
+        if not results:
+            return message
+        written = ", ".join(os.path.basename(r[2]) for r in results)
+        return (
+            f"{message}\nThe export stopped there. Already written to {out_dir} before it "
+            f"did: {written}. Each is complete for its own group, but the set is not; "
+            f"re-run once the cause is fixed rather than printing these alone."
+        )
+
     try:
         for i, (label, sel) in enumerate(pairs):
             stl_path = os.path.join(out_dir, f"{obj_name}_{label}.stl")
@@ -2085,7 +2128,7 @@ def print_export(
             try:
                 enabled = _enabled_names()
             except RuntimeError as e:
-                return f"Error: {e}"
+                return _stopped(f"Error: {e}")
             paused: dict[str, bool] = {}
             tmp = None
             try:
@@ -2102,9 +2145,9 @@ def print_export(
                         "create", args=[tmp, f"({obj_name}) and ({sel})"], kwargs={"zoom": 0}
                     )
                     if res.get("status") == "error":
-                        return f"Error isolating group '{label}': {res.get('error')}"
+                        return _stopped(f"Error isolating group '{label}': {res.get('error')}")
                     if not _numeric_result(send_request("count_atoms", args=[tmp])):
-                        return (
+                        return _stopped(
                             f"Error: group '{label}' selection '{sel}' matched no atoms "
                             f"in '{obj_name}'."
                         )
@@ -2121,7 +2164,7 @@ def print_export(
                     # enabling only its objects. One colour per object.
                     objs, others = _resolve_group(sel)
                     if not objs and not others:
-                        return (
+                        return _stopped(
                             f"Error: {representation}-mode group '{label}' selection "
                             f"'{sel}' matched no objects. Each group must name whole "
                             f"object(s), e.g. '1abc or 1abc_spine'."
@@ -2137,7 +2180,7 @@ def print_export(
                             # Refused before anything is written: 1ubq with dots
                             # shown was 38,567 spheres, ten minutes and a 1 GB
                             # STL of loose pellets.
-                            return (
+                            return _stopped(
                                 f"Error: group '{label}' shows dots or mesh on "
                                 f"{', '.join(pellets)}. PyMOL draws those as a tiny sphere "
                                 f"or rod per point, which would print as a cloud of loose "
@@ -2169,7 +2212,7 @@ def print_export(
                         primitives = _parse_pov(pov_path, pov_shift)
                 triangles, markers = _read_obj_triangles(obj_path)
             except (RuntimeError, OSError) as e:
-                return f"Error exporting group '{label}': {e}"
+                return _stopped(f"Error exporting group '{label}': {e}")
             finally:
                 if tmp is not None:
                     send_request("delete", args=[tmp])
@@ -2179,17 +2222,21 @@ def print_export(
             n_prims = len(primitives["cylinders"]) + len(primitives["spheres"]) if primitives else 0
             if not len(triangles) and not n_prims:
                 if representation == "surface":
-                    return f"Error: group '{label}' ({sel}) exported no surface triangles."
-                return _describe_empty_group(label, sel, objs, others, census, representation)
+                    return _stopped(
+                        f"Error: group '{label}' ({sel}) exported no surface triangles."
+                    )
+                return _stopped(
+                    _describe_empty_group(label, sel, objs, others, census, representation)
+                )
             if n_prims > _MAX_PRIMITIVES:
-                return (
+                return _stopped(
                     f"Error: group '{label}' draws {n_prims:,} spheres and rods, more than "
                     f"print_export merges ({_MAX_PRIMITIVES:,}); dots and the mesh "
                     f"representation write one per point. Hide them, or use "
                     f"representation='cartoon' or 'surface'."
                 )
             if n_prims and method == "poisson":
-                return (
+                return _stopped(
                     f"Error: group '{label}' shows sticks or spheres, and Poisson "
                     f"reconstruction cannot merge them (it lost 78% of a ligand's "
                     f"sticks). Use method='auto' or 'voxel'."
@@ -2248,9 +2295,9 @@ def print_export(
                     primitives=primitives if n_prims else None,
                 )
             except ImportError:
-                return _PRINT_DEPS_HINT
+                return _stopped(_PRINT_DEPS_HINT)
             except Exception as e:
-                return f"Error rebuilding group '{label}': {type(e).__name__}: {e}"
+                return _stopped(f"Error rebuilding group '{label}': {type(e).__name__}: {e}")
 
             if "voxel" in info["method"]:
                 warning = _thin_cartoon_warning(thin, voxel_pitch)

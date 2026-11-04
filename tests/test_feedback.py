@@ -207,91 +207,19 @@ def test_unit_tests_cannot_reach_a_real_pymol():
         socket.socket.connect(object(), ("127.0.0.1", 9876))
 
 
-# ── selections PyMOL crashes on are vetted first ─────────────────────────────
-
-
-def _pymol_with(counts):
-    """send_request stand-in: count_atoms answers from ``counts`` (an error
-    for a name it lacks, as PyMOL does for an invalid selection)."""
-
-    def fake(action, args=None, kwargs=None, **_ignored):
-        if action == "count_atoms":
-            if args[0] not in counts:
-                return {
-                    "status": "error",
-                    "error": f'PyMOL execution error:  Error: Invalid selection name "{args[0]}".',
-                }
-            return {"status": "success", "result": counts[args[0]]}
-        return {"status": "success", "result": 0.25}
-
-    return fake
+# ── selections PyMOL crashes on: the plugin vets them, for every caller ────
 
 
 @patch("mcpymol.bridge.send_request")
-def test_rms_cur_never_sends_a_selection_pymol_would_crash_on(mock_sr):
-    """`rms_cur ub, nosuch` aborted PyMOL itself — the user's whole session —
-    with a double free in ExecutiveRMS; the tool answered 'Empty response'."""
-    mock_sr.side_effect = _pymol_with({"ub": 660})
-
-    out = rms_cur(mobile="ub", target="nosuch")
-
-    assert out.startswith("Error: rms_cur was not run — the target selection 'nosuch' is not valid")
-    assert 'Invalid selection name "nosuch"' in out
-    assert "rms_cur" not in [c.args[0] for c in mock_sr.call_args_list]
-
-
-@patch("mcpymol.bridge.send_request")
-def test_rms_cur_refuses_an_empty_selection(mock_sr):
-    mock_sr.side_effect = _pymol_with({"ub": 660, "ub and resi 999": 0})
-
-    out = rms_cur(mobile="ub and resi 999", target="ub")
-
-    assert out == (
-        "Error: rms_cur was not run — the mobile selection 'ub and resi 999' matches no atoms."
-    )
-
-
-@patch("mcpymol.bridge.send_request")
-def test_rms_cur_runs_once_both_selections_resolve(mock_sr):
-    mock_sr.side_effect = _pymol_with({"a": 76, "b": 76})
+def test_rms_cur_and_intra_rms_send_just_their_own_call(mock_sr):
+    """The count_atoms check moved into the plugin's dispatcher, where it
+    covers every caller (tests/test_plugin.py), so the tools send one request."""
+    mock_sr.return_value = {"status": "success", "result": 0.25}
 
     assert rms_cur(mobile="a", target="b") == "RMSD (as positioned): 0.25 A."
-    assert [c.args[0] for c in mock_sr.call_args_list] == ["count_atoms", "count_atoms", "rms_cur"]
+    intra_rms(selection="ens")
 
-
-@pytest.mark.parametrize(
-    "error",
-    [
-        "PyMOL accepted 'count_atoms' but sent no reply within 10 s. It may still be running it.",
-        "Socket connection failed: nothing is listening on 127.0.0.1:9876 (refused). "
-        "Is the PyMOL plugin running?",
-    ],
-)
-@patch("mcpymol.bridge.send_request")
-def test_rms_cur_guard_does_not_call_a_busy_pymol_an_invalid_selection(mock_sr, error):
-    """With PyMOL busy or down, the guard's own check fails; calling the
-    selection invalid would send a model off to "fix" a correct one."""
-    mock_sr.return_value = {"status": "error", "error": error}
-
-    out = rms_cur(mobile="1ubq and name CA", target="1ubq_b and name CA")
-
-    assert "is not valid" not in out
-    assert out == (
-        "Error: rms_cur was not run — the mobile selection '1ubq and name CA' could not be "
-        f"checked first (PyMOL crashes on an invalid selection here): {error}"
-    )
-    assert [c.args[0] for c in mock_sr.call_args_list] == ["count_atoms"]
-
-
-@patch("mcpymol.bridge.send_request")
-def test_intra_rms_never_sends_a_selection_pymol_would_crash_on(mock_sr):
-    """`intra_rms nosuch` segfaulted PyMOL in CmdIntraFit."""
-    mock_sr.side_effect = _pymol_with({})
-
-    out = intra_rms(selection="nosuch")
-
-    assert out.startswith("Error: intra_rms was not run — the selection 'nosuch' is not valid")
-    assert [c.args[0] for c in mock_sr.call_args_list] == ["count_atoms"]
+    assert [c.args[0] for c in mock_sr.call_args_list] == ["rms_cur", "intra_rms"]
 
 
 # ── execute_pymol_command: PyMOL's words, after the command has run ─────────
@@ -311,7 +239,7 @@ def test_execute_returns_what_pymol_printed_and_warned(mock_sr):
     assert out == (
         "Executed command: get_view\nzoom nosuch\n"
         "PyMOL output:\nset_view (\\\n  1.0, 0.0 )\n"
-        'PyMOL warned:\n  Selector-Error: Invalid selection name "nosuch". nosuch<--'
+        'PyMOL warned: Selector-Error: Invalid selection name "nosuch". nosuch<--'
     )
 
 
@@ -358,7 +286,7 @@ def test_execute_keeps_output_and_warnings_when_a_line_fails(mock_sr):
 
     assert out.startswith(error)
     assert "PyMOL output:\nPyMOL>iterate p1 and name CA, print(resn)\nMET\nGLN" in out
-    assert out.endswith(f"PyMOL warned:\n  {warning}")
+    assert out.endswith(f"PyMOL warned: {warning}")
     assert "predates error reporting" not in out
 
 
@@ -601,3 +529,17 @@ def test_execute_reports_a_rejected_line_over_the_real_wire(monkeypatch):
         ' Error: Invalid selection name "nosuch".\nnosuch<--\n'
         "The other 2 line(s) ran."
     )
+
+
+# ── frame: the query half says which frame ──────────────────────────────────
+
+
+@patch("mcpymol.primitives.send_request")
+def test_frame_without_an_argument_says_which_frame(mock_sr):
+    """It answered "Executed get_frame successfully." and never the number."""
+    from mcpymol.primitives import frame
+
+    mock_sr.return_value = {"status": "success", "result": 7}
+
+    assert frame() == "Current frame: 7"
+    assert mock_sr.call_args.args == ("get_frame",)
