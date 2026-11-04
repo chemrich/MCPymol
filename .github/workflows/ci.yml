@@ -90,6 +90,10 @@ jobs:
       # scipy) that the Tests jobs do not install, so test_printing.py's
       # real-mesh tests skip there. This is the job where they run. (Named for
       # what it first did; the name is a required check, so it stays.)
+      # pymeshlab loads its plugins against the system libOpenGL, even
+      # headless; the runner image does not ship it (README, print extra).
+      - name: System OpenGL for pymeshlab
+        run: sudo apt-get update -q && sudo apt-get install -y -q libopengl0
       - name: Install with print extra
         run: uv sync --locked --all-groups --extra print
       - name: Import print_export
@@ -110,6 +114,8 @@ jobs:
       # sat there for months when 4.0 works. This installs every direct
       # dependency at its declared minimum, on the oldest supported Python,
       # and runs the unit suite including the real-mesh print tests.
+      - name: System OpenGL for pymeshlab
+        run: sudo apt-get update -q && sudo apt-get install -y -q libopengl0
       - name: Install at the declared minimums
         run: |
           uv venv --python 3.11 .venv-min

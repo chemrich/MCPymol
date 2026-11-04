@@ -701,6 +701,11 @@ uv sync --extra print                              # from a checkout
 
 Re-running over an existing install is fine — it adds the extra in place.
 
+**On Linux**, pymeshlab also needs the system OpenGL library, even headless.
+Without it the Poisson method fails (`libOpenGL.so.0: cannot open shared
+object file`) and `auto` falls back to voxel, saying why. On Debian and
+Ubuntu: `sudo apt-get install libopengl0`. macOS needs nothing extra.
+
 ```
 Export T7 RNA polymerase (1MSW) for 3D printing with the protein and the
 nucleic acid as separate colours
