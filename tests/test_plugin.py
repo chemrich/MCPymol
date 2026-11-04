@@ -1463,3 +1463,108 @@ def test_objc_runtime_begins_and_ends_a_real_activity():
         assert token
     finally:
         runtime.end_activity(token)
+
+
+# ── selections PyMOL crashes on are vetted in the dispatcher ────────────────
+
+
+def _vetting(monkeypatch, atoms_by_selection):
+    """count_atoms answers from ``atoms_by_selection``; a name it lacks raises,
+    as PyMOL does for a selection it cannot resolve."""
+
+    def count_atoms(selection):
+        if selection not in atoms_by_selection:
+            raise Exception(f' Error: Invalid selection name "{selection}".')
+        return atoms_by_selection[selection]
+
+    monkeypatch.setattr(mock_pymol.cmd, "count_atoms", MagicMock(side_effect=count_atoms))
+    for action in ("rms", "rms_cur", "fit", "intra_rms", "intra_rms_cur", "intra_fit", "pair_fit"):
+        monkeypatch.setattr(mock_pymol.cmd, action, MagicMock(return_value=0.25))
+
+
+@pytest.mark.parametrize(
+    "action, args",
+    [
+        ("rms", ["a", "nosuch"]),
+        ("rms_cur", ["nosuch", "a"]),
+        ("fit", ["a", "nosuch"]),
+        ("intra_rms", ["nosuch"]),
+        ("intra_rms_cur", ["nosuch"]),
+    ],
+)
+def test_an_unresolvable_selection_never_reaches_a_call_that_crashes_pymol(
+    plugin_server, monkeypatch, action, args
+):
+    """PyMOL 3.1 aborts (rms, rms_cur, fit) or segfaults (intra_rms,
+    intra_rms_cur) on these, taking the user's session with it."""
+    _vetting(monkeypatch, {"a": 76})
+
+    res = plugin_server.handle_request(json.dumps({"action": action, "args": args}))
+
+    assert res["status"] == "error"
+    assert res["error"].startswith(f"Error: {action} was not run — the ")
+    assert "'nosuch' is not valid" in res["error"]
+    getattr(mock_pymol.cmd, action).assert_not_called()
+
+
+def test_a_selection_given_by_keyword_is_vetted_too(plugin_server, monkeypatch):
+    _vetting(monkeypatch, {"a": 76})
+
+    res = plugin_server.handle_request(
+        json.dumps({"action": "rms_cur", "kwargs": {"mobile": "a", "target": "nosuch"}})
+    )
+
+    assert "the target selection 'nosuch' is not valid" in res["error"]
+    mock_pymol.cmd.rms_cur.assert_not_called()
+
+
+def test_an_empty_selection_is_refused_rather_than_measured(plugin_server, monkeypatch):
+    """It does not crash, but rms_cur over nothing answers 1.4e-45."""
+    _vetting(monkeypatch, {"a": 76, "a and resn ZZZ": 0})
+
+    res = plugin_server.handle_request(
+        json.dumps({"action": "rms_cur", "args": ["a and resn ZZZ", "a"]})
+    )
+
+    assert res == {
+        "status": "error",
+        "error": "Error: rms_cur was not run — the mobile selection 'a and resn ZZZ' matches no atoms.",
+    }
+    mock_pymol.cmd.rms_cur.assert_not_called()
+
+
+def test_resolvable_selections_run_as_sent(plugin_server, monkeypatch):
+    _vetting(monkeypatch, {"a": 76, "b": 76})
+
+    res = plugin_server.handle_request(json.dumps({"action": "rms_cur", "args": ["a", "b"]}))
+
+    assert res["status"] == "success"
+    mock_pymol.cmd.rms_cur.assert_called_once_with("a", "b")
+
+
+@pytest.mark.parametrize("action, args", [("intra_fit", ["nosuch"]), ("pair_fit", ["a", "nosuch"])])
+def test_calls_that_report_a_bad_selection_themselves_are_not_vetted(
+    plugin_server, monkeypatch, action, args
+):
+    """intra_fit and pair_fit answer an invalid selection with a plain error
+    (PyMOL 3.1.0), so they pay no extra count_atoms."""
+    _vetting(monkeypatch, {"a": 76})
+
+    plugin_server.handle_request(json.dumps({"action": action, "args": args}))
+
+    mock_pymol.cmd.count_atoms.assert_not_called()
+    getattr(mock_pymol.cmd, action).assert_called_once_with(*args)
+
+
+def test_a_captured_stream_still_answers_fileno_and_encoding():
+    """_Tap was a bare StringIO: subprocess.run(stdout=sys.stdout), faulthandler
+    and some C extensions ask the stream for these and failed inside a capture."""
+    import io
+
+    real = io.TextIOWrapper(io.BytesIO(), encoding="latin-1")
+    real.fileno = lambda: 1  # type: ignore[method-assign]
+    tap = plugin_module._Tap([], "stdout", real)
+
+    assert tap.fileno() == 1
+    assert tap.encoding == "latin-1"
+    assert tap.isatty() is False

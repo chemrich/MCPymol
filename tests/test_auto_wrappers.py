@@ -229,16 +229,13 @@ def test_wrapper_targets_a_function_that_exists(mock_socket, func, args, action)
     assert json.loads(mock_socket.sendall.call_args[0][0])["action"] == action
 
 
-def test_intra_rms_checks_its_selection_before_running(mock_socket):
-    """An unresolvable selection makes PyMOL's intra_rms segfault, taking the
-    user's session down; count_atoms vets it first."""
+def test_intra_rms_sends_one_request(mock_socket):
+    """An unresolvable selection makes PyMOL's intra_rms segfault; the plugin
+    vets it (tests/test_plugin.py), so the wrapper sends just the call."""
     intra_rms("1abc")
 
     sent = [json.loads(c.args[0]) for c in mock_socket.sendall.call_args_list]
-    assert [(p["action"], p["args"]) for p in sent] == [
-        ("count_atoms", ["1abc"]),
-        ("intra_rms", ["1abc"]),
-    ]
+    assert [(p["action"], p["args"]) for p in sent] == [("intra_rms", ["1abc"])]
 
 
 def test_h_fill_sends_no_selection(mock_socket):

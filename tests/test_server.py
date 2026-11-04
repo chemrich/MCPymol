@@ -1286,3 +1286,19 @@ def test_send_request_parses_only_on_a_short_read():
         f"{attempts} parse attempts for {len(chunks)} chunks — only the final "
         f"short chunk should be tried"
     )
+
+
+def test_do_waits_as_long_as_a_slow_command_by_default(mock_socket):
+    """The plugin answers `do` only once the command has finished, so loading
+    a large map or a long batched alter can take minutes. With the 10 s
+    default the caller saw a timeout, moved on, and queued behind it."""
+    from mcpymol.bridge import _DEFAULT_TIMEOUT, _SLOW_OP_TIMEOUT
+
+    send_request("do", args=["load big.dx, esp"])
+    assert mock_socket.settimeout.call_args_list[-1].args == (_SLOW_OP_TIMEOUT,)
+
+    send_request("zoom")
+    assert mock_socket.settimeout.call_args_list[-1].args == (_DEFAULT_TIMEOUT,)
+
+    send_request("do", args=["zoom"], timeout=3.0)
+    assert mock_socket.settimeout.call_args_list[-1].args == (3.0,)

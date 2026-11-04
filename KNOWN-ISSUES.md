@@ -133,6 +133,10 @@ The live suites run against `pymol -ckqK`. These were seen only in the Qt GUI:
   after a command has returned (`Extrude-Warning` from `cartoon putty` on
   uniform B-factors, surface update errors). Those land in the next request's
   warnings, under a tool that did not cause them (reproduced headless, 5 of 5).
+  `print_ribbon_view` treats a `Selector-Error` in its own warnings as a failed
+  call, so one printed by something else at that moment would stop it; redraw
+  messages are never `Selector-Error`s, and PyMOL's API lock keeps a command
+  typed in the GUI from running inside a single call.
   Running every action on the main thread would fix it, at the cost of freezing
   the window during ray traces.
 - **Re-running the plugin drops a request sent at that moment.** `run
@@ -164,6 +168,17 @@ The live suites run against `pymol -ckqK`. These were seen only in the Qt GUI:
   untested, and two CA-less residues in a row are neither bridged nor reported.
 - **The thin-feature warning** has no entry for cylindrical helices or the
   nucleic-acid cartoon modes, so those never warn.
+
+---
+
+## 7. A raw command can still crash PyMOL — open
+
+PyMOL 3.1.0 aborts or segfaults when `rms`, `rms_cur`, `fit`, `intra_rms` or
+`intra_rms_cur` get a selection it cannot resolve. The plugin vets those five
+when they arrive as actions, which covers every tool and wiggles' port. A
+command string sent through `execute_pymol_command`, such as `rms_cur nosuch,
+1ubq`, goes to PyMOL's parser as typed and is not vetted, so it can still take
+PyMOL down. Vetting it would mean parsing PyMOL command syntax in the plugin.
 
 ---
 

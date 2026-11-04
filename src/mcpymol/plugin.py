@@ -352,14 +352,29 @@ class _Tap(io.StringIO):
     the stream each part belongs to.
     """
 
-    def __init__(self, record: list[tuple[str, str]], stream_name: str) -> None:
+    def __init__(self, record: list[tuple[str, str]], stream_name: str, original) -> None:
         super().__init__()
         self._record = record
         self._stream_name = stream_name
+        self._original = original
 
     def write(self, s: str) -> int:
         self._record.append((self._stream_name, s))
         return len(s)
+
+    # A StringIO has no file descriptor and no encoding, so code that asks the
+    # stream for them (subprocess.run(stdout=sys.stdout), faulthandler, some C
+    # extensions) failed inside a capture. Answer for the real stream: fd 1 is
+    # pointed at the spool meanwhile, so what is written there is still caught.
+    def fileno(self) -> int:
+        return self._original.fileno()
+
+    @property
+    def encoding(self) -> str:  # type: ignore[override]
+        return getattr(self._original, "encoding", None) or "utf-8"
+
+    def isatty(self) -> bool:
+        return False
 
 
 class _OutputCapture:
@@ -406,8 +421,8 @@ class _OutputCapture:
         self._spool_file: IO[bytes] | None = None
         self._owns_spool = False
         self._start_fd_capture()
-        sys.stdout = _Tap(self._record, "stdout")
-        sys.stderr = _Tap(self._record, "stderr")
+        sys.stdout = _Tap(self._record, "stdout", self._streams["stdout"])
+        sys.stderr = _Tap(self._record, "stderr", self._streams["stderr"])
         return self
 
     def _start_fd_capture(self) -> None:
@@ -1115,6 +1130,54 @@ class _AppNapGuard:
             print(f"MCPymol: App Nap guard off ({type(e).__name__}: {e}).")
 
 
+# PyMOL 3.1 takes its whole process down, and the user's session with it, when
+# these get a selection it cannot resolve: SIGABRT in ExecutiveRMS for rms,
+# rms_cur and fit; SIGSEGV in CmdIntraFit for intra_rms and intra_rms_cur.
+# Valid selections are fine (an empty one returns garbage, refused below too),
+# and intra_fit and pair_fit report the same bad selection as a plain error (all checked against PyMOL 3.1.0, one fresh
+# process per call). PyMOL's bug, but a typo must not be able to set it off.
+# Checked here, in the one place every action passes through, so the tools,
+# wiggles' port and any future caller are all covered.
+_CRASHES_ON_UNRESOLVED_SELECTION: dict[str, tuple[str, ...]] = {
+    "rms": ("mobile", "target"),
+    "rms_cur": ("mobile", "target"),
+    "fit": ("mobile", "target"),
+    "intra_rms": ("selection",),
+    "intra_rms_cur": ("selection",),
+}
+
+
+def _refuse_crashing_selection(action, args, kwargs) -> dict | None:
+    """The error to answer instead of running ``action``, or None to run it."""
+    params = _CRASHES_ON_UNRESOLVED_SELECTION.get(action)
+    if params is None:
+        return None
+    for position, name in enumerate(params):
+        selection = args[position] if position < len(args) else kwargs.get(name)
+        if selection is None:
+            continue  # PyMOL's own default, which resolves
+        which = "selection" if name == "selection" else f"{name} selection"
+        try:
+            atoms = cmd.count_atoms(str(selection))
+        except Exception as e:
+            return {
+                "status": "error",
+                "error": (
+                    f"Error: {action} was not run — the {which} '{selection}' is not valid: "
+                    f"{_error_text(e)} (Checked first, because PyMOL crashes on an invalid "
+                    "selection here.)"
+                ),
+            }
+        if atoms == 0:
+            # Does not crash, but answers with a meaningless number: an "RMSD"
+            # of 1.4e-45 between two empty selections.
+            return {
+                "status": "error",
+                "error": f"Error: {action} was not run — the {which} '{selection}' matches no atoms.",
+            }
+    return None
+
+
 class PyMOLSocketServer:
     """Tiny TCP/JSON server that dispatches requests to ``pymol.cmd``."""
 
@@ -1196,6 +1259,9 @@ class PyMOLSocketServer:
 
     def _dispatch(self, action, args, kwargs):
         """Run one action other than `do`.  Exceptions become error responses."""
+        refused = _refuse_crashing_selection(action, args, kwargs)
+        if refused is not None:
+            return refused
         try:
             # ── Special, custom handlers ─────────────────────────────────
             if action == "fetch":
