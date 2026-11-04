@@ -88,6 +88,43 @@ def _clear_other_objects(keep: str) -> None:
     send_request("do", args=["reinitialize settings"])
 
 
+# The characters PyMOL keeps in an object name (see mcpymol.selection), used
+# only when PyMOL cannot be asked.
+_NAME_CHARS = re.compile(r"[A-Za-z0-9_.+\-]+")
+
+
+def _unusable_name(name: str) -> str | None:
+    """An error if PyMOL would not create an object called exactly ``name``.
+
+    The loaders delete the object they replace by name before loading, and
+    ``delete`` takes patterns and lists: given ``*``, ``all`` or ``keep*`` it
+    deleted every other object, then reported success, even with
+    replace=False. ``a b`` was loaded as ``a_b`` while the reply said nothing
+    had loaded. PyMOL's own get_legal_name says what it would call the object;
+    anything it would change is refused before anything is deleted.
+    """
+    res = send_request("get_legal_name", args=[name])
+    if res.get("status") == "error":
+        # Busy, or gone: the delete that follows would be unvetted, and `all`
+        # is made of plain characters. Refuse rather than guess.
+        return (
+            f"Error: couldn't check the object name '{name}' with PyMOL "
+            f"({res.get('error', 'no reply')}). Nothing was loaded or deleted."
+        )
+    legal = res.get("result") if res.get("status") == "success" else None
+    if isinstance(legal, str):
+        if legal == name:
+            return None
+    elif _NAME_CHARS.fullmatch(name):  # an answer we can't read, e.g. an old plugin
+        return None
+    renamed = f"call it '{legal}'" if isinstance(legal, str) and legal else "not accept it"
+    return (
+        f"Error: '{name}' can't be used as an object name: PyMOL would {renamed}, and "
+        f"replacing an object by that name could delete others. Use letters, digits and "
+        f"underscores, for example 'my_structure'. Nothing was loaded or deleted."
+    )
+
+
 def _verify_loaded(name: str, source: str) -> str | None:
     """Return an error message if ``name`` came out empty, else None.
 
@@ -323,6 +360,9 @@ def fetch_structure(
         return fetch_alphafold(uniprot_id=accession, obj_name=obj_name, replace=replace)
 
     name = obj_name if obj_name else pdb_code
+    unusable = _unusable_name(name)
+    if unusable:
+        return unusable
 
     # Only ever delete the object being replaced. Clearing the session comes
     # after the fetch is known to have produced something, so a failed download
@@ -369,6 +409,9 @@ def load_structure(
     """
     Loads a structure from a local file path and applies the BFS multimer heuristic.
     """
+    unusable = _unusable_name(obj_name)
+    if unusable:
+        return unusable
     send_request("delete", args=[obj_name])
     res = send_request("load", args=[file_path, obj_name])
     if res.get("status") == "error":
@@ -435,7 +478,15 @@ def fetch_alphafold(
     which is backwards for confidence). Use ``plddt_view`` instead.
     """
     accession = _alphafold_accession(uniprot_id) or uniprot_id.strip().upper()
+    # The accession goes into a URL and a temp-file prefix; one with a '/' in
+    # it raised a bare FileNotFoundError. Letters, digits, '-' and '_' cover
+    # every accession, isoform suffixes included.
+    if not re.fullmatch(r"[A-Z0-9][A-Z0-9_-]*", accession):
+        return f"Error: '{uniprot_id}' is not a UniProt accession (for example P69905)."
     name = obj_name if obj_name else f"AF_{accession}"
+    unusable = _unusable_name(name)
+    if unusable:
+        return unusable
 
     path, error = _download_alphafold(accession, model_version, fragment)
     if path is None:

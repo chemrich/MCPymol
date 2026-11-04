@@ -28,6 +28,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from mcpymol.selection import derived_name
 from mcpymol.wiggles.atoms import (
     Atom,
     count_states,
@@ -261,7 +262,7 @@ def deformation_view(
         call(port, "cartoon", "putty", obj)
 
     drawn, skipped_short, dropped = 0, 0, 0
-    arrow_name = f"{obj}_arrows"
+    arrow_name = derived_name(obj, "arrows")
     if arrows:
         drawn, skipped_short, dropped = _draw_arrows(
             port,

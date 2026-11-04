@@ -299,9 +299,10 @@ from mcpymol.rendering import (
     render,
     turntable,
 )
-from mcpymol.selection import chain_clause, quote
+from mcpymol.selection import _NOT_IN_A_NAME, chain_clause, derived_name, plain_name, quote
 from mcpymol.structures import (
     _GHOST_HEART_GREENS,
+    _NAME_CHARS,
     _PDB_ID_RE,
     _SESSION_SUFFIXES,
     _UNIPROT_RE,
@@ -322,6 +323,7 @@ from mcpymol.structures import (
     _rcsb_metadata,
     _resolve_alphafold_url,
     _split_properties,
+    _unusable_name,
     _verify_loaded,
     atom_properties,
     fetch_alphafold,
@@ -428,6 +430,8 @@ __all__ = [
     "_METHODS",
     "_MIN_BODY_FACES",
     "_MIN_STRAND_OVERLAP",
+    "_NAME_CHARS",
+    "_NOT_IN_A_NAME",
     "_OLD_PLUGIN_NOTE",
     "_OPENGL_UNAVAILABLE_NOTE",
     "_OPEN_END_OVERLAP",
@@ -556,6 +560,7 @@ __all__ = [
     "_traced_already",
     "_union_primitives",
     "_unit_guess_warning",
+    "_unusable_name",
     "_verify_loaded",
     "_warnings_note",
     "_write_obj",
@@ -586,6 +591,7 @@ __all__ = [
     "deformation_view",
     "delete",
     "density_view",
+    "derived_name",
     "deselect",
     "dihedral",
     "distance",
@@ -643,6 +649,7 @@ __all__ = [
     "orient",
     "parse_atoms",
     "pharmacophore_view",
+    "plain_name",
     "plddt_view",
     "png",
     "pocket_view",

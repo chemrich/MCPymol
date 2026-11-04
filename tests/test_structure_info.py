@@ -10,6 +10,7 @@ from mcpymol.structures import (
     _rcsb_metadata,
     _split_properties,
     atom_properties,
+    fetch_alphafold,
     fetch_structure,
     get_sequence,
     load_structure,
@@ -165,6 +166,8 @@ def _sr_structure(chains=("A", "B"), counts=None, pdb="", states=1, symmetry=Non
     counts = counts or {}
 
     def fake(action, args=None, kwargs=None, **_ignored):
+        if action == "get_legal_name":  # PyMOL keeps a plain name as is
+            return {"status": "success", "result": args[0]}
         if action == "get_chains":
             return {"status": "success", "result": list(chains)}
         if action == "count_atoms":
@@ -296,6 +299,8 @@ def test_structure_info_reports_a_missing_object(mock_sr):
 
 def _sr_sequence(fasta, ca_lines):
     def fake(action, args=None, kwargs=None, **_ignored):
+        if action == "get_legal_name":  # PyMOL keeps a plain name as is
+            return {"status": "success", "result": args[0]}
         if action == "get_fastastr":
             return {"status": "success", "result": fasta}
         if action == "get_pdbstr":
@@ -441,6 +446,8 @@ def _sr_empty_fetch(existing=("1ubq", "4hhb")):
     deleted = []
 
     def fake(action, args=None, kwargs=None, **_ignored):
+        if action == "get_legal_name":  # PyMOL keeps a plain name as is
+            return {"status": "success", "result": args[0]}
         if action == "count_atoms":
             return {"status": "success", "result": 0}
         if action == "get_object_list":
@@ -503,6 +510,8 @@ def test_successful_fetch_clears_only_other_objects(mock_sr, mock_meta):
     deleted = []
 
     def fake(action, args=None, kwargs=None, **_ignored):
+        if action == "get_legal_name":  # PyMOL keeps a plain name as is
+            return {"status": "success", "result": args[0]}
         if action == "count_atoms":
             return {"status": "success", "result": 1200}
         if action == "get_names" and args == ["objects"]:
@@ -532,6 +541,8 @@ def test_settings_are_reset_without_deleting_objects(mock_sr, mock_meta):
     new scene, which is what the blanket reinitialize was buying."""
 
     def fake(action, args=None, kwargs=None, **_ignored):
+        if action == "get_legal_name":  # PyMOL keeps a plain name as is
+            return {"status": "success", "result": args[0]}
         if action == "count_atoms":
             return {"status": "success", "result": 1200}
         if action == "get_object_list":
@@ -559,6 +570,8 @@ def test_settings_are_reset_without_deleting_objects(mock_sr, mock_meta):
 
 def _sr_atoms(rows, status="success"):
     def fake(action, args=None, kwargs=None, **_ignored):
+        if action == "get_legal_name":  # PyMOL keeps a plain name as is
+            return {"status": "success", "result": args[0]}
         if action == "iterate_to_list":
             if status == "error":
                 return {"status": "error", "error": "invalid selection"}
@@ -681,3 +694,77 @@ class TestPropertySplitting:
 
     def test_blank_fields_are_dropped(self):
         assert _split_properties("  a ,, b  ") == ["a", "b"]
+
+
+# ── A name must never delete what it does not name ─────────────────────────────
+
+
+def _legal_as(renames):
+    """A send_request fake whose get_legal_name answers like PyMOL 3.1.0."""
+
+    def fake(action, args=None, kwargs=None, **_ignored):
+        if action == "get_legal_name":
+            return {"status": "success", "result": renames.get(args[0], args[0])}
+        if action == "count_atoms":
+            return {"status": "success", "result": 1200}
+        return {"status": "success", "result": "OK"}
+
+    return fake
+
+
+PYMOL_RENAMES = {"*": "", "all": "all_", "keep*": "keep", "pep two": "pep_two"}
+
+
+@pytest.mark.parametrize("name", sorted(PYMOL_RENAMES))
+@pytest.mark.parametrize("loader", ["fetch", "load", "alphafold"])
+def test_a_name_pymol_would_change_is_refused_before_any_delete(name, loader):
+    with (
+        patch("mcpymol.structures.send_request", side_effect=_legal_as(PYMOL_RENAMES)) as sr,
+        patch("mcpymol.structures._download_alphafold") as download,
+    ):
+        if loader == "fetch":
+            out = fetch_structure(pdb_code="1ubq", obj_name=name, replace=False)
+        elif loader == "load":
+            out = load_structure(file_path="/x.pdb", obj_name=name, replace=False)
+        else:
+            out = fetch_alphafold(uniprot_id="P69905", obj_name=name, replace=False)
+
+    assert out.startswith("Error:") and f"'{name}' can't be used" in out, out
+    assert [c.args[0] for c in sr.call_args_list] == ["get_legal_name"]
+    download.assert_not_called()
+
+
+def test_when_pymol_answers_an_error_every_name_is_refused():
+    """Busy or gone: the delete that would follow is unvetted, and `all` is
+    made of plain characters, so nothing is guessed at."""
+    from mcpymol.structures import _unusable_name
+
+    busy = {"status": "error", "error": "PyMOL is still busy"}
+    with patch("mcpymol.structures.send_request", return_value=busy):
+        for name in ("1ubq", "all"):
+            refusal = _unusable_name(name)
+            assert refusal is not None and "PyMOL is still busy" in refusal
+
+
+def test_an_answer_that_cannot_be_read_lets_only_plain_names_pass():
+    from mcpymol.structures import _unusable_name
+
+    unreadable = {"status": "success", "result": None}  # e.g. an older plugin
+    with patch("mcpymol.structures.send_request", return_value=unreadable):
+        assert _unusable_name("1ubq") is None
+        assert _unusable_name("AF_P04637-2") is None
+        assert _unusable_name("keep*") is not None
+        assert _unusable_name("a b") is not None
+
+
+@pytest.mark.parametrize("bad", ["P1/2", "../etc", "a b", ""])
+def test_an_alphafold_id_that_is_not_an_accession_is_refused(bad):
+    with (
+        patch("mcpymol.structures.send_request") as sr,
+        patch("mcpymol.structures._download_alphafold") as download,
+    ):
+        out = fetch_alphafold(uniprot_id=bad)
+
+    assert "is not a UniProt accession" in out, out
+    download.assert_not_called()
+    sr.assert_not_called()

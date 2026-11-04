@@ -39,6 +39,7 @@ because that spread *is* the density change.
 
 from __future__ import annotations
 
+from mcpymol.selection import derived_name, plain_name
 from mcpymol.wiggles.density import DEFAULT_SIGMA, to_absolute, to_sigma, usable_rms
 from mcpymol.wiggles.heterogeneity import Ensemble, Method, loaded_ensemble
 from mcpymol.wiggles.port import PortError, PymolPort, call
@@ -218,7 +219,9 @@ def latent_traverse_view(
     if not usable:
         raise no_usable_rms
 
-    prefix = name or f"{ensemble_name}_surf"
+    # One plain name: `disable {prefix}_*` and the colouring below must reach
+    # exactly these surfaces, never an object the caller's name spells out.
+    prefix = plain_name(name) if name else derived_name(ensemble_name, "surf")
     width = max(2, len(str(ensemble.n_frames)))
     surfaces: list[str] = []
     for index, (obj, sigma) in enumerate(usable, start=1):

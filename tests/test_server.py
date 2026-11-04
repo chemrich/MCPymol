@@ -58,6 +58,8 @@ def _sr_mock(**action_results):
     """
 
     def fake(action, args=None, kwargs=None, **_ignored):
+        if action == "get_legal_name":  # PyMOL keeps a plain name as is
+            return {"status": "success", "result": args[0]}
         if action in action_results:
             val = action_results[action]
             result = val(action, args, kwargs) if callable(val) else val
@@ -184,9 +186,9 @@ def test_fetch_structure_multimer(mock_sr):
 
     assert "Successfully fetched 1ubq" in result
     acts = _actions(mock_sr)
-    # A scoped delete of the object being replaced — nothing session-wide runs
-    # before the fetch is known to have produced atoms.
-    assert acts[0] == "delete"
+    # The name is vetted (read-only), then a scoped delete of the object being
+    # replaced: nothing session-wide runs before the fetch produced atoms.
+    assert acts[:3] == ["get_legal_name", "delete", "fetch"]
     assert "fetch" in acts
     assert "get_chains" in acts
     assert "remove" in acts  # multimer cleanup
@@ -224,6 +226,8 @@ def test_fetch_structure_error(mock_sr):
     """Fetch failure is propagated as a readable error string."""
 
     def fake(action, args=None, kwargs=None):
+        if action == "get_legal_name":  # PyMOL keeps a plain name as is
+            return {"status": "success", "result": args[0]}
         if action == "fetch":
             return {"status": "error", "error": "PDB ID not found"}
         return {"status": "success", "result": "OK"}
@@ -270,6 +274,8 @@ def test_load_structure_success(mock_sr):
 @patch("mcpymol.structures.send_request")
 def test_load_structure_error(mock_sr):
     def fake(action, args=None, kwargs=None):
+        if action == "get_legal_name":  # PyMOL keeps a plain name as is
+            return {"status": "success", "result": args[0]}
         if action == "load":
             return {"status": "error", "error": "File not found"}
         return {"status": "success", "result": "OK"}
@@ -851,6 +857,8 @@ def _pb_send_request(save_status="success"):
     """Fake send_request that actually writes the PDB the solver will read."""
 
     def fake(action, args=None, kwargs=None, **_ignored):
+        if action == "get_legal_name":  # PyMOL keeps a plain name as is
+            return {"status": "success", "result": args[0]}
         if action == "do" and args and args[0].startswith("save "):
             if save_status == "error":
                 return {"status": "error", "error": "session is busy"}

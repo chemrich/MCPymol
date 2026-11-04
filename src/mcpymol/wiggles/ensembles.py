@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import math
 
+from mcpymol.selection import derived_name
 from mcpymol.wiggles.atoms import (
     Atom,
     count_states,
@@ -241,7 +242,7 @@ def morph_states(
         lines.append("  validate_only=True — no morph created.")
         return "\n".join(lines)
 
-    morph_name = name or f"{obj}_morph"
+    morph_name = name or derived_name(obj, "morph")
     try:
         call(port, "morph", morph_name, obj, refinement=0, steps=steps)
     except PortError as exc:

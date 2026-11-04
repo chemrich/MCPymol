@@ -276,3 +276,30 @@ def test_an_absolute_level_needs_no_usable_anchor(ensemble):
 
     levels = [args[2] for args, _ in port.calls("isosurface")]
     assert levels == [pytest.approx(1.5)], levels
+
+
+# ── names: one plain name per surface ────────────────────────────────────────
+
+
+def _spaced_ensemble(tmp_path):
+    root = tmp_path / "job"
+    root.mkdir()
+    (root / "z.pkl").write_text("x")
+    for i in (1, 2):
+        write_map(root, f"vol_{i}.mrc", rms=0.5)
+    names = ["my_ens_f01", "my_ens_f02"]
+    load_ensemble(FakePort({"get_names": names}), root, "my ens")
+    return FakePort({"get_names": names})
+
+
+@pytest.mark.parametrize(("name", "prefix"), [(None, "my_ens_surf"), ("two words", "two_words")])
+def test_surfaces_and_the_movie_name_only_what_was_made(tmp_path, name, prefix):
+    """`disable my ens_surf_*` would disable an object called `my` and every
+    `ens_surf_*`; the surfaces themselves were created as `my_ens_surf_01`."""
+    port = _spaced_ensemble(tmp_path)
+    latent_traverse_view(port, "my ens", name=name)
+
+    made = [args[0] for args, _ in port.calls("isosurface")]
+    assert made == [f"{prefix}_01", f"{prefix}_02"], port.call_log
+    assert [args[1] for args, _ in port.calls("color")] == made
+    assert port.calls("mdo")[0][0][1] == f"disable {prefix}_*; enable {prefix}_01"

@@ -38,6 +38,7 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
+from mcpymol.selection import derived_name
 from mcpymol.wiggles.mapinfo import MapHeader, read_map_header
 from mcpymol.wiggles.port import PortError, PymolPort, call
 from mcpymol.wiggles.provenance import Provenance, declare
@@ -513,7 +514,7 @@ def load_ensemble(
     objects: list[str] = []
     for index, path in enumerate(volumes, start=1):
         headers.append(read_map_header(path))  # before PyMOL, as load_map does
-        obj = f"{prefix}_f{index:0{width}d}"
+        obj = derived_name(prefix, f"f{index:0{width}d}")
         call(port, "load", str(path), obj)
         objects.append(obj)
 

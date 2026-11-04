@@ -8,6 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **A name can no longer delete what it doesn't name.** The loaders delete the
+  object they replace by name, and PyMOL's `delete` takes patterns and lists:
+  `load_structure`, `fetch_structure` or `fetch_alphafold` given `*`, `all` or
+  `keep*` as the object name deleted every other object and reported success,
+  even with `replace=False`, and `pep two` loaded as `pep_two` while the reply
+  said nothing had loaded. A name PyMOL would change (its own
+  `get_legal_name`) is now refused before anything is deleted. The same class
+  was in the helper objects presets and wiggles name after the caller's object:
+  `crosslink_view(obj_name="1ubq and chain A")` ran `delete 1ubq and chain
+  A_disulfides`, which deleted `1ubq` itself. `crosslink_view`, `pocket_view`,
+  `pharmacophore_view`, `poisson_boltzmann_view`, `deformation_view`,
+  `morph_states`, `load_ensemble` and `latent_traverse_view` now always name
+  helpers as one plain name (`1ubq_and_chain_A_disulfides`); ordinary names
+  are unchanged. `load_map` given `all` loaded it as `all_` and then, finding
+  no `all`, cleaned up with `delete all`; it now refuses such a name too.
+- `fetch_alphafold` refuses an identifier that isn't an accession; one with a
+  `/` in it raised a bare `FileNotFoundError`.
 - **`list_objects` lists every object, not only molecules.** It used
   `get_object_list`, which PyMOL backs with the selector, so a session holding
   just a map read "No objects are loaded", and a structure's maps,

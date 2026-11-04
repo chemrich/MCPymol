@@ -13,7 +13,7 @@ from pydantic import Field
 from mcpymol.app import mcp
 from mcpymol.bridge import send_request
 from mcpymol.pdbtext import parse_atoms
-from mcpymol.selection import chain_clause
+from mcpymol.selection import chain_clause, derived_name
 from mcpymol.style import black_background, set_background
 
 # Wall-clock ceiling for the external APBS/PDB2PQR binaries.  Without one a
@@ -545,12 +545,12 @@ def poisson_boltzmann_view(
             return "APBS did not produce a .dx map. Check APBS output."
 
         # Load map and apply to surface
-        send_request("do", args=[f"load {dx_path}, {obj_name}_esp_map"])
+        esp_map = derived_name(obj_name, "esp_map")
+        esp_ramp = derived_name(obj_name, "esp_ramp")
+        send_request("do", args=[f"load {dx_path}, {esp_map}"])
         send_request(
             "do",
-            args=[
-                f"ramp_new {obj_name}_esp_ramp, {obj_name}_esp_map, [-20, 0, 20], [red, white, blue]"
-            ],
+            args=[f"ramp_new {esp_ramp}, {esp_map}, [-20, 0, 20], [red, white, blue]"],
         )
 
         send_request("hide", args=["everything", obj_name])
@@ -558,7 +558,7 @@ def poisson_boltzmann_view(
         send_request("show", args=["surface", f"({obj_name}) and polymer.protein"])
         send_request("do", args=[f"cartoon automatic, {obj_name}"])
         send_request("set", args=["cartoon_color", "white", obj_name])
-        send_request("set", args=["surface_color", f"{obj_name}_esp_ramp", obj_name])
+        send_request("set", args=["surface_color", esp_ramp, obj_name])
         send_request("set", args=["transparency", "0.15", obj_name])
 
         # Organic ligands as sticks with yellow carbons
@@ -604,18 +604,19 @@ def crosslink_view(
     send_request("set", args=["label_size", "14"])
 
     # Disulfide bonds: SG–SG distances ≤ 2.5 Å
-    send_request("do", args=[f"delete {obj_name}_disulfides"])
+    disulfides = derived_name(obj_name, "disulfides")
+    send_request("do", args=[f"delete {disulfides}"])
     send_request(
         "do",
         args=[
-            f"distance {obj_name}_disulfides, ({obj_name}) and resn CYS and name SG, "
+            f"distance {disulfides}, ({obj_name}) and resn CYS and name SG, "
             f"({obj_name}) and resn CYS and name SG, 2.5"
         ],
     )
-    send_request("color", args=["yellow", f"{obj_name}_disulfides"])
-    send_request("hide", args=["labels", f"{obj_name}_disulfides"])
-    send_request("set", args=["dash_width", "4", f"{obj_name}_disulfides"])
-    send_request("set", args=["dash_gap", "0.1", f"{obj_name}_disulfides"])
+    send_request("color", args=["yellow", disulfides])
+    send_request("hide", args=["labels", disulfides])
+    send_request("set", args=["dash_width", "4", disulfides])
+    send_request("set", args=["dash_gap", "0.1", disulfides])
 
     # Metal ions as orange spheres
     send_request("show", args=["spheres", f"({obj_name}) and metals"])
@@ -623,18 +624,19 @@ def crosslink_view(
     send_request("set", args=["sphere_scale", "0.5", f"({obj_name}) and metals"])
 
     # Metal coordination bonds
-    send_request("do", args=[f"delete {obj_name}_metalcoord"])
+    metalcoord = derived_name(obj_name, "metalcoord")
+    send_request("do", args=[f"delete {metalcoord}"])
     send_request(
         "do",
         args=[
-            f"distance {obj_name}_metalcoord, ({obj_name}) and metals, "
+            f"distance {metalcoord}, ({obj_name}) and metals, "
             f"({obj_name}) and polymer.protein and (name N+O+S), 2.8"
         ],
     )
-    send_request("color", args=["orange", f"{obj_name}_metalcoord"])
-    send_request("hide", args=["labels", f"{obj_name}_metalcoord"])
-    send_request("set", args=["dash_width", "3", f"{obj_name}_metalcoord"])
-    send_request("set", args=["dash_gap", "0.2", f"{obj_name}_metalcoord"])
+    send_request("color", args=["orange", metalcoord])
+    send_request("hide", args=["labels", metalcoord])
+    send_request("set", args=["dash_width", "3", metalcoord])
+    send_request("set", args=["dash_gap", "0.2", metalcoord])
 
     black_background()
     send_request("orient", args=[obj_name])
@@ -706,17 +708,18 @@ def pocket_view(
     send_request("color", args=["yellow", f"{lig} and elem C"])
 
     # H-bonds between ligand and pocket
-    send_request("do", args=[f"delete {obj_name}_pocket_hbonds"])
+    hbonds = derived_name(obj_name, "pocket_hbonds")
+    send_request("do", args=[f"delete {hbonds}"])
     send_request(
         "do",
         args=[
-            f"distance {obj_name}_pocket_hbonds, ({lig}) and (elem N or elem O), "
+            f"distance {hbonds}, ({lig}) and (elem N or elem O), "
             f"({pocket_sel}) and (elem N or elem O), 3.5"
         ],
     )
-    send_request("color", args=["cyan", f"{obj_name}_pocket_hbonds"])
-    send_request("hide", args=["labels", f"{obj_name}_pocket_hbonds"])
-    send_request("set", args=["dash_width", "2.5", f"{obj_name}_pocket_hbonds"])
+    send_request("color", args=["cyan", hbonds])
+    send_request("hide", args=["labels", hbonds])
+    send_request("set", args=["dash_width", "2.5", hbonds])
 
     black_background()
     send_request("zoom", args=[lig, "6"])
@@ -798,17 +801,18 @@ def pharmacophore_view(
     )  # halogen
 
     # H-bonds to protein
-    send_request("do", args=[f"delete {obj_name}_pharm_hbonds"])
+    hbonds = derived_name(obj_name, "pharm_hbonds")
+    send_request("do", args=[f"delete {hbonds}"])
     send_request(
         "do",
         args=[
-            f"distance {obj_name}_pharm_hbonds, ({lig}) and (elem N or elem O or elem F), "
+            f"distance {hbonds}, ({lig}) and (elem N or elem O or elem F), "
             f"({pocket_sel}) and (elem N or elem O), 3.5"
         ],
     )
-    send_request("color", args=["cyan", f"{obj_name}_pharm_hbonds"])
-    send_request("hide", args=["labels", f"{obj_name}_pharm_hbonds"])
-    send_request("set", args=["dash_width", "2.5", f"{obj_name}_pharm_hbonds"])
+    send_request("color", args=["cyan", hbonds])
+    send_request("hide", args=["labels", hbonds])
+    send_request("set", args=["dash_width", "2.5", hbonds])
 
     black_background()
     send_request("zoom", args=[lig, "6"])
