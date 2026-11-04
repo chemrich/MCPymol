@@ -83,7 +83,7 @@ yourself.
 ## Requirements
 
 - **PyMOL** — the open-source build is what this is developed against (`brew install pymol` on macOS, `apt-get install pymol` on Debian/Ubuntu). The Schrödinger incentive build works too. MCPymol drives a PyMOL you already have; it does not install or bundle one.
-- **Python 3.10+** for the bridge. This is *separate* from the Python inside PyMOL, which MCPymol never imports into.
+- **Python 3.11+** for the bridge. This is *separate* from the Python inside PyMOL, which MCPymol never imports into.
 - **An MCP client** — Claude Code, Claude Desktop, or Gemini CLI.
 
 Optional, per feature:
