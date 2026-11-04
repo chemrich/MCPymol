@@ -82,6 +82,24 @@ def _looks_blank(png: bytes) -> bool:
     return len(set(raw)) <= _BLANK_IMAGE_MAX_DISTINCT_BYTES
 
 
+def _sleep_note(awake_s: float, asleep_s: float) -> str:
+    """Why a render took so long, when the answer is that the computer slept.
+
+    Both renders reported as "stalled until the next command" had the Mac
+    asleep for most of their wait (awake 28 of 607 s, 366 of 1082 s): PyMOL,
+    the bridge and the client all stop while it sleeps.  The bridge measures
+    that (``asleep_s``); ``awake_s`` is what time.monotonic() saw, which on
+    macOS does not count sleep either.
+    """
+    if asleep_s <= 0:
+        return ""
+    return (
+        f"Note: this took {awake_s + asleep_s:.0f} s, but the computer was asleep for "
+        f"{asleep_s:.0f} s of it. PyMOL only works while the machine is awake; keep it awake "
+        f"for long renders (on macOS, e.g. caffeinate -i)."
+    )
+
+
 def _read_complete_png(path: str, timeout: float | None = None) -> bytes | None:
     """Return the PNG's bytes once it is fully written, or None on timeout.
 
@@ -105,8 +123,9 @@ def _read_complete_png(path: str, timeout: float | None = None) -> bytes | None:
     return None
 
 
-# structured_output=False: the return is either image content or an error
-# string, which is not a shape pydantic can build an output model for.
+# structured_output=False: the return is image content, an error string, or
+# both (an image plus a note), which is not a shape pydantic can build an
+# output model for.  FastMCP turns a list into one content block per item.
 @mcp.tool(structured_output=False)
 def render(
     width: Annotated[
@@ -127,7 +146,7 @@ def render(
             description="Optional path to also keep the PNG at. Without it the render goes to a temporary file that is cleaned up afterwards — except when the image is too large to inline, where the file is kept so you still have the render."
         ),
     ] = None,
-) -> Image | str:
+) -> Image | str | list[Image | str]:
     """
     Renders the current scene and returns the image, so you can see it.
 
@@ -157,21 +176,25 @@ def render(
     keep = filename is not None
 
     try:
+        started = time.monotonic()
         res = send_request(
             "png",
             args=[path],
             kwargs={"width": width, "height": height, "ray": 1 if ray_trace else 0},
             timeout=_SLOW_OP_TIMEOUT,
         )
+        slept = _sleep_note(time.monotonic() - started, float(res.get("asleep_s") or 0))
+        if slept:
+            note += f" {slept}"
         if res.get("status") == "error":
-            return f"Error rendering: {res.get('error')}"
+            return f"Error rendering: {res.get('error')}{note}"
 
         data = _read_complete_png(path)
         if data is None:
             return (
                 f"PyMOL reported success but no complete PNG appeared at {path} "
                 f"within {_PNG_APPEAR_TIMEOUT:.0f}s. If PyMOL is running on a "
-                f"different machine than this bridge, they cannot exchange files."
+                f"different machine than this bridge, they cannot exchange files.{note}"
             )
 
         if _looks_blank(data):
@@ -193,7 +216,10 @@ def render(
                 f"{path}. Re-run with a smaller width/height to see it here.{note}"
             )
 
-        return Image(data=data, format="png")
+        image = Image(data=data, format="png")
+        # The image alone in the common case, so callers and tests that expect
+        # one keep getting one; a note only rides along when there is one.
+        return [image, slept] if slept else image
     finally:
         if not keep:
             try:
@@ -253,6 +279,7 @@ def turntable(
 
     step = 360.0 / frames
     written = []
+    awake = asleep = 0.0
     for i in range(frames):
         if i:
             turn = send_request("turn", args=["y", str(step)])
@@ -260,19 +287,24 @@ def turntable(
                 return f"Error rotating at frame {i}: {turn.get('error')}"
 
         path = os.path.join(out_dir, f"{prefix}_{i:04d}.png")
+        started = time.monotonic()
         res = send_request(
             "png",
             args=[path],
             kwargs={"width": width, "height": height, "ray": 1 if ray_trace else 0},
             timeout=_SLOW_OP_TIMEOUT,
         )
+        awake += time.monotonic() - started
+        asleep += float(res.get("asleep_s") or 0)
         if res.get("status") == "error":
-            return f"Error writing frame {i}: {res.get('error')}"
+            slept = _sleep_note(awake, asleep)
+            return f"Error writing frame {i}: {res.get('error')}" + (f" {slept}" if slept else "")
         written.append(path)
 
+    slept = _sleep_note(awake, asleep)
     return (
         f"Wrote {len(written)} ray-traced frames ({step:.1f}° apart) to {out_dir} as "
         f"{prefix}_0000.png … {prefix}_{frames - 1:04d}.png. Assemble with:\n"
         f"  ffmpeg -framerate 24 -i {os.path.join(out_dir, prefix)}_%04d.png "
-        f"-pix_fmt yuv420p {prefix}.mp4{note}"
+        f"-pix_fmt yuv420p {prefix}.mp4{note}" + (f"\n{slept}" if slept else "")
     )

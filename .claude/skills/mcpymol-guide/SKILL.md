@@ -197,19 +197,36 @@ print_export(obj_name="1ema", groups="1ema=(1ema or 1ema_spine)",
 `print_ribbon_view` builds chunky β-arrows + a fat helix and a separate
 `<obj>_spine` (`cartoon tube`, ignores secondary structure) that threads
 unbroken through every strand→loop junction — fused on export into one
-watertight solid, with the spine acting as internal rebar for rigidity.
+watertight solid, with the spine acting as internal rebar for rigidity. It
+styles only that object and its spine, never the global settings, and carries
+the spine through residues with no CA (GFP's chromophore) on the spine copy —
+read the result for any "Spine breaks at" line. To see into a β-barrel:
+`strand_width=2.0, strand_thickness=1.0, spine_in_strands=False` (PyMOL draws
+strands √2 times those setting values).
 
 `print_export` key arguments:
 
 - **`representation`** — `"surface"` (default) exports the molecular
   surface; **`"cartoon"`** exports the *currently displayed* cartoon/tube
-  geometry (what `print_ribbon_view` sets up). Using the default with a
+  triangles (what `print_ribbon_view` sets up) and names any sticks or
+  spheres it left out; **`"displayed"`** adds sticks, spheres, lines, ribbon
+  and distance dashes (as solid rods), merged exactly. Using the default with a
   ribbon scene silently gives you a surface blob.
-- **`method`** — `"voxel"` (robust for thin tubular ribbon geometry;
-  `voxel_pitch` ~0.2 keeps ribbon detail), `"poisson"` (bulky chains),
-  `"auto"`.
-- **`groups`** — `label=selection` pairs, one STL per colour. In cartoon
-  mode each group should name whole object(s).
+- **`method`** — `"voxel"` (robust for thin tubular ribbon geometry, and the
+  one to use for cartoons), `"poisson"` (bulky chains; cannot merge sticks or
+  spheres), `"auto"` (falls to Poisson for any open cartoon, which can leave
+  small fragments).
+- **`voxel_pitch`** — in Å; about a third of the thinnest feature (the result
+  warns when it is coarser): ~0.2 for print-ribbon ribbons, 0.1 for thin rods.
+- **`groups`** — `label=selection` pairs, one STL per colour. In cartoon and
+  displayed modes each group names whole object(s); name distance and CGO
+  objects in the group too, e.g. `lig=(lig or hbonds)`.
+- **`bodies`** — `"all"` (default) keeps every separate piece; `"largest"`
+  keeps one and warns about what it dropped.
+- **`undo_voxel_growth`** (default true) moves voxel surfaces back in by the
+  ~0.62 voxel that voxelising adds.
+- **`mm_per_angstrom`** (default 1.0, last) — the print scale. Never scale or
+  move parts one by one in the slicer.
 
 ### Hard-won verification rules
 
@@ -217,14 +234,20 @@ watertight solid, with the spine acting as internal rebar for rigidity.
   PyMOL scene, which can look like ribbons while the exported mesh is a
   surface. PyMOL cannot load STL back, so inspect the file with the
   project's own `trimesh` (already a `print`-extra dependency):
-  check `is_watertight`, `len(mesh.split())` (want **1** component), and
-  to tell ribbon from surface compare bbox-fill fraction and
-  area/volume — a ribbon is thin (low fill, high area/volume), a surface
-  is a fat shell.
-- **A printable result is watertight AND a single component.** Fragmented,
-  non-watertight output won't slice.
-- The STL is in the same coordinate frame across groups — in a slicer,
-  load the first then add others as *parts* (don't re-centre).
+  check `is_watertight`, `len(mesh.split(only_watertight=False))` (plain
+  `split()` skips open pieces), and to tell ribbon from
+  surface compare bbox-fill fraction and area/volume — a ribbon is thin
+  (low fill, high area/volume), a surface is a fat shell.
+- **Read every group's lines in the result.** "one piece" versus "prints as
+  N separate pieces" says whether something came apart; any WARNING (a thin
+  feature, a dropped piece, a residue whose Cα is outside the mesh, a part a
+  slicer would read as inches) needs action before printing.
+- **STLs are in PyMOL model coordinates**, whatever the camera — no
+  `set_view` before exporting. Groups from one call, or from separate calls
+  at the same scale, line up: in a slicer, load the first then add others as
+  *parts* (don't re-centre).
+- **Measure clearances on the exported STLs**, never on the PyMOL geometry.
+  Gaps under ~2.5 × `voxel_pitch` fuse while voxelising and cannot reopen.
 
 ### After editing anything under `src/mcpymol/`
 
@@ -236,8 +259,22 @@ the old result).
 
 ## Troubleshooting
 
-- *"Socket connection failed"* on every tool → PyMOL plugin not running /
-  server disconnected. Ask the user to reconnect mcpymol via `/mcp`.
+- *"Socket connection failed: nothing is listening"* on every tool → PyMOL is
+  not running, or was started without the plugin. Ask the user to start PyMOL
+  with it loaded (inside PyMOL: `run <output of mcpymol --plugin-path>`, or
+  `mcpymol --install-plugin` once and restart PyMOL), then retry. Reconnecting
+  via `/mcp` is for a stale server (an unknown action, missing new tools).
+- *"PyMOL accepted '…' but sent no reply"* → it may still be running that
+  request; check before re-sending. *"the computer was asleep for N s"* in a
+  result → the machine slept mid-call, not a hang.
+- `execute_pymol_command` returns what PyMOL printed and names any line PyMOL
+  rejected. Put each command on its own line: `alter`, `iterate` and `label`
+  swallow the rest of a line, `;` included. A note that the plugin "predates
+  error reporting" → PyMOL needs restarting to load the current plugin.
+- `set` on a residue selection for an object-level setting
+  (`cartoon_tube_radius`, ...) is refused with an error: PyMOL stores it per
+  atom and never uses it. Set it on a whole object (copy the part out with
+  `create` first).
 - Long `get_fastastr`/`get_chains` JSON parse errors → pre-2026-05 build.
 - `poisson_boltzmann_view` fails → missing `apbs`/`pdb2pqr`.
 - 3D-print tools say the `print` extra is missing → `uv sync --extra print`.

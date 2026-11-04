@@ -13,6 +13,7 @@ from mcpymol.server import (
     _apply_multimer_heuristic,
     _call,
     _parse_groups,
+    _poisson_reconstruct,
     _repair_to_stl,
     cinematic_view,
     color,
@@ -332,7 +333,7 @@ def test_putty_view(mock_sr):
 
 @patch("mcpymol.printing.send_request")
 def test_print_ribbon_view(mock_sr):
-    mock_sr.return_value = {"status": "success", "result": "OK"}
+    mock_sr.side_effect = _sr_mock(get_type="object:molecule", iterate_to_list=[])
 
     result = print_ribbon_view(obj_name="1UBQ", spine_radius=1.1)
 
@@ -345,8 +346,10 @@ def test_print_ribbon_view(mock_sr):
     assert "hide" in acts
     assert "create" in acts
     assert "set" in acts
-    do_args = [c.kwargs["args"][0] for c in mock_sr.call_args_list if c.args[0] == "do"]
-    assert any("cartoon tube, 1UBQ_spine" in a for a in do_args)
+    # A direct call, not `do`: the plugin queued `do` lines and lost their errors.
+    assert "do" not in acts
+    cartoons = [c.kwargs["args"] for c in mock_sr.call_args_list if c.args[0] == "cartoon"]
+    assert ["tube", "1UBQ_spine"] in cartoons
 
 
 @patch("mcpymol.views.send_request")
@@ -548,6 +551,77 @@ def test_list_ligands_no_organic(mock_sr):
 
 # ── print_export ──────────────────────────────────────────────────────────────
 
+# A rotated, shifted user view. print_export must not care what it is.
+_VIEW = [
+    0.5,
+    -0.5,
+    0.7071,
+    0.7071,
+    0.7071,
+    0.0,
+    -0.5,
+    0.5,
+    0.7071,
+    5.0,
+    -3.0,
+    -110.0,
+    30.0,
+    28.0,
+    15.0,
+    84.0,
+    135.0,
+    -20.0,
+]
+
+
+def _info(volume=48000.0, lo=(0.0, 0.0, 0.0), hi=(40.0, 30.0, 40.0), method="voxel", faces=100):
+    """What _repair_to_stl reports for one group, sizes in mm."""
+    return {
+        "method": method,
+        "faces": faces,
+        "watertight": True,
+        "bounds": (lo, hi),
+        "volume": volume,
+        "bodies": [volume],
+        "dropped": [],
+        "cavities": [],
+        "debris": [],
+        "inset": 0.0,
+        "primitives": (0, 0),
+    }
+
+
+def _sized(mesh, volume=6.0, faces=2000):
+    """Give a fake trimesh what _repair_to_stl reads off it: one closed body."""
+    mesh.faces = list(range(faces))
+    mesh.bounds = [[0.0, 0.0, 0.0], [1.0, 2.0, 3.0]]
+    mesh.volume = volume
+    mesh.is_watertight = True
+    mesh.split.return_value = [mesh]
+    return mesh
+
+
+def _exported(triangles=12):
+    """Stand in for reading back the OBJ PyMOL saved (numpy-free, for CI)."""
+    return patch("mcpymol.printing._read_obj_triangles", return_value=([0] * triangles, 0))
+
+
+def _camera(view=_VIEW):
+    """get_view/set_view handlers for _sr_mock that remember the view, as PyMOL does.
+
+    print_export checks the camera did not move while it saved; a fake that
+    ignores set_view looks like a camera that never stops moving.
+    """
+    state = {"view": list(view)}
+
+    def get_view(action, args, kwargs):
+        return list(state["view"])
+
+    def set_view(action, args, kwargs):
+        state["view"] = list(args[0])
+
+    return {"get_view": get_view, "set_view": set_view}
+
 
 def test_parse_groups_valid():
     pairs = _parse_groups("protein=polymer.protein; nucleic=chain N+R+T")
@@ -576,10 +650,10 @@ def test_print_export_missing_deps(mock_sr):
 @patch("mcpymol.printing._repair_to_stl")
 @patch("mcpymol.printing.send_request")
 def test_print_export_happy_path(mock_sr, mock_repair, tmp_path):
-    mock_sr.return_value = {"status": "success", "result": "OK"}
-    mock_repair.return_value = {"method": "poisson", "faces": 144290, "watertight": True}
+    mock_sr.side_effect = _sr_mock(**_camera())
+    mock_repair.return_value = _info(method="poisson", faces=144290)
 
-    with patch.dict(sys.modules, {"trimesh": MagicMock()}):
+    with patch.dict(sys.modules, {"trimesh": MagicMock()}), _exported():
         result = print_export(
             obj_name="1MSW",
             groups="protein=polymer.protein; nucleic=polymer.nucleic",
@@ -588,7 +662,7 @@ def test_print_export_happy_path(mock_sr, mock_repair, tmp_path):
 
     assert "1MSW_protein.stl" in result
     assert "1MSW_nucleic.stl" in result
-    assert "OK" in result  # watertight flag
+    assert "watertight" in result
     acts = _actions(mock_sr)
     # Each group is isolated (create) and exported (save), then cleaned up.
     assert acts.count("create") == 2
@@ -601,10 +675,10 @@ def test_print_export_happy_path(mock_sr, mock_repair, tmp_path):
 @patch("mcpymol.printing.send_request")
 def test_print_export_surface_mode_shows_surface(mock_sr, mock_repair, tmp_path):
     """Regression: default surface mode must actually show a surface."""
-    mock_sr.return_value = {"status": "success", "result": "OK"}
-    mock_repair.return_value = {"method": "voxel", "faces": 1000, "watertight": True}
+    mock_sr.side_effect = _sr_mock(**_camera())
+    mock_repair.return_value = _info(faces=1000)
 
-    with patch.dict(sys.modules, {"trimesh": MagicMock()}):
+    with patch.dict(sys.modules, {"trimesh": MagicMock()}), _exported():
         print_export(obj_name="1MSW", groups="protein=polymer.protein", out_dir=str(tmp_path))
 
     show_args = [c.kwargs["args"] for c in mock_sr.call_args_list if c.args[0] == "show"]
@@ -619,16 +693,10 @@ def test_print_export_cartoon_mode(mock_sr, mock_repair, tmp_path):
     no temp object (create), no forced surface; isolate via get_object_list
     + enable, then save.
     """
+    mock_sr.side_effect = _sr_mock(**_camera(), get_object_list=["1ema", "1ema_spine"])
+    mock_repair.return_value = _info(faces=634188)
 
-    def _sr(action, args=None, **kw):
-        if action == "get_object_list":
-            return {"status": "success", "result": ["1ema", "1ema_spine"]}
-        return {"status": "success", "result": "OK"}
-
-    mock_sr.side_effect = _sr
-    mock_repair.return_value = {"method": "voxel", "faces": 634188, "watertight": True}
-
-    with patch.dict(sys.modules, {"trimesh": MagicMock()}):
+    with patch.dict(sys.modules, {"trimesh": MagicMock()}), _exported():
         result = print_export(
             obj_name="1ema",
             groups="1ema=(1ema or 1ema_spine)",
@@ -639,7 +707,7 @@ def test_print_export_cartoon_mode(mock_sr, mock_repair, tmp_path):
         )
 
     assert "1ema_1ema.stl" in result
-    assert "OK" in result
+    assert "watertight" in result
     acts = _actions(mock_sr)
     assert "get_object_list" in acts
     assert "save" in acts
@@ -657,7 +725,8 @@ def test_print_export_bad_representation(mock_sr):
     with patch.dict(sys.modules, {"trimesh": MagicMock()}):
         result = print_export(obj_name="1ema", groups="x=1ema", representation="ribbon")
     assert result.startswith("Error:")
-    assert "surface" in result and "cartoon" in result
+    assert "surface" in result and "cartoon" in result and "displayed" in result
+    assert mock_sr.call_count == 0
 
 
 @patch("mcpymol.printing.send_request")
@@ -671,11 +740,19 @@ def test_print_export_bad_group(mock_sr):
 @patch("mcpymol.printing._repair_to_stl")
 @patch("mcpymol.printing.send_request")
 def test_print_export_save_error_reported(mock_sr, mock_repair, tmp_path):
-    mock_sr.return_value = {"status": "error", "error": "disk full"}
+    ok = _sr_mock(**_camera())
+
+    def _sr(action, args=None, kwargs=None, **kw):
+        if action == "save":
+            return {"status": "error", "error": "disk full"}
+        return ok(action, args, kwargs)
+
+    mock_sr.side_effect = _sr
     with patch.dict(sys.modules, {"trimesh": MagicMock()}):
         result = print_export(
             obj_name="1MSW", groups="protein=polymer.protein", out_dir=str(tmp_path)
         )
+    assert result.startswith("Error exporting group 'protein'")
     assert "disk full" in result
     mock_repair.assert_not_called()
 
@@ -687,9 +764,7 @@ def test_repair_auto_light_path_when_already_watertight():
     compact barrel surface, so auto must skip it when not needed.
     """
     fake_tm = MagicMock()
-    shell = MagicMock()
-    shell.faces = list(range(2000))
-    shell.is_watertight = True
+    shell = _sized(MagicMock(), faces=2000)
     raw = MagicMock()
     raw.is_watertight = True
     raw.split.return_value = [shell]
@@ -702,14 +777,18 @@ def test_repair_auto_light_path_when_already_watertight():
     assert info["method"] == "light (already watertight)"
     assert info["watertight"] is True
     assert info["faces"] == 2000
+    assert info["bodies"] == [6.0]
     shell.export.assert_called_once_with("out.stl")
     fake_tm.repair.fix_normals.assert_called_once()
 
 
-def test_repair_voxel_consolidates_to_single_body():
-    """voxel: fragmented marching-cubes output is reduced to the largest
-    watertight body and hole-filled (regression for the cartoon export
-    coming out as 19 loose, non-watertight shells)."""
+def test_repair_voxel_keeps_every_body_and_drops_slivers():
+    """voxel: every separate body is kept and reported.
+
+    It used to keep only the body with the most faces and still say OK: for
+    4hhb's print_ribbon_view that was one of the two dimers, and which one
+    flipped with the pitch. Zero-volume marching-cubes slivers are debris.
+    """
     fake_tm = MagicMock()
     m = MagicMock()
     fake_tm.load.return_value = m
@@ -718,22 +797,31 @@ def test_repair_voxel_consolidates_to_single_body():
 
     out = MagicMock()
     vox.marching_cubes = out
-    small = MagicMock()
-    small.faces = list(range(10))
-    big = MagicMock()
-    big.faces = list(range(900))
-    big.is_watertight = True
-    out.split.return_value = [small, big]
+    sliver = MagicMock()
+    sliver.faces = [0, 1]
+    sliver.volume = 0.0
+    dimer_a = _sized(MagicMock(), volume=12627.5, faces=900)
+    dimer_b = _sized(MagicMock(), volume=12711.8, faces=850)
+    out.split.return_value = [sliver, dimer_a, dimer_b]
+    both = _sized(MagicMock(), volume=25339.3, faces=1750)
+    fake_tm.util.concatenate.return_value = both
 
-    with patch.dict(sys.modules, {"trimesh": fake_tm}):
+    with (
+        patch.dict(sys.modules, {"trimesh": fake_tm}),
+        patch("mcpymol.printing._room_to_inset", return_value=None),
+        patch("mcpymol.printing._inset", return_value=0) as inset,
+    ):
         info = _repair_to_stl("in.obj", "out.stl", "voxel", voxel_pitch=0.2, poisson_depth=10)
 
-    # Largest body kept, closed, and exported — not the raw soup.
-    assert info["method"] == "voxel"
-    assert info["watertight"] is True
-    assert info["faces"] == 900
-    big.export.assert_called_once_with("out.stl")
-    fake_tm.repair.fill_holes.assert_called_once_with(big)
+    # Both dimers, ranked by volume rather than face count.
+    assert info["bodies"] == [12711.8, 12627.5]
+    assert len(info["debris"]) == 1
+    fake_tm.util.concatenate.assert_called_once_with([dimer_b, dimer_a])
+    both.export.assert_called_once_with("out.stl")
+    assert info["method"].startswith("voxel, 0.2 Å pitch, surfaces moved in 0.12 Å")
+    # The growth is undone on each body: 0.62 voxel.
+    assert [c.args[0] for c in inset.call_args_list] == [dimer_b, dimer_a]
+    assert all(c.args[1] == pytest.approx(0.124) for c in inset.call_args_list)
 
 
 # ── poisson_boltzmann_view: external-tool failure handling ────────────────────
@@ -878,8 +966,7 @@ def test_slow_ops_use_the_long_timeout(mock_sr, func, args, action):
 def _poisson_stack(reconstructed_faces=5000, watertight=True):
     """Return (fake_trimesh, fake_pymeshlab, reconstructed_mesh)."""
     fake_tm = MagicMock()
-    mesh = MagicMock()
-    mesh.faces = list(range(reconstructed_faces))
+    mesh = _sized(MagicMock(), faces=reconstructed_faces)
     mesh.is_watertight = watertight
     fake_tm.load.return_value = mesh
 
@@ -887,10 +974,19 @@ def _poisson_stack(reconstructed_faces=5000, watertight=True):
     return fake_tm, fake_ml, mesh
 
 
-def test_repair_poisson_runs_the_reconstruction_pipeline():
-    fake_tm, fake_ml, _mesh = _poisson_stack()
+def _in_process_poisson():
+    """Run the pymeshlab pipeline in this process, where the fakes are.
 
-    with patch.dict(sys.modules, {"trimesh": fake_tm, "pymeshlab": fake_ml}):
+    print_export runs it in a child process (PoissonRecon can exit() the
+    process it runs in); tests/test_printing.py covers that wrapper.
+    """
+    return patch("mcpymol.printing._run_poisson", side_effect=_poisson_reconstruct)
+
+
+def test_repair_poisson_runs_the_reconstruction_pipeline():
+    fake_tm, fake_ml, mesh = _poisson_stack()
+
+    with patch.dict(sys.modules, {"trimesh": fake_tm, "pymeshlab": fake_ml}), _in_process_poisson():
         info = _repair_to_stl("in.obj", "out.stl", "poisson", voxel_pitch=0.7, poisson_depth=9)
 
     assert info["method"] == "poisson"
@@ -899,7 +995,10 @@ def test_repair_poisson_runs_the_reconstruction_pipeline():
 
     ms = fake_ml.MeshSet.return_value
     ms.load_new_mesh.assert_called_once_with("in.obj")
-    ms.save_current_mesh.assert_called_once_with("out.stl", binary=True)
+    # pymeshlab writes beside the source, not the STL: the body policy still
+    # has to fill the cavity voids Poisson keeps before the STL is written.
+    ms.save_current_mesh.assert_called_once_with("in.obj.poisson.stl", binary=True)
+    mesh.export.assert_called_once_with("out.stl")
 
     # The screened-Poisson filter must receive the requested octree depth.
     depths = [c.kwargs.get("depth") for c in ms.apply_filter.call_args_list]
@@ -927,7 +1026,7 @@ def test_repair_poisson_tries_legacy_filter_names():
 
     ms.apply_filter.side_effect = apply_filter
 
-    with patch.dict(sys.modules, {"trimesh": fake_tm, "pymeshlab": fake_ml}):
+    with patch.dict(sys.modules, {"trimesh": fake_tm, "pymeshlab": fake_ml}), _in_process_poisson():
         info = _repair_to_stl("in.obj", "out.stl", "poisson", voxel_pitch=0.7, poisson_depth=10)
 
     assert info["method"] == "poisson"
@@ -941,6 +1040,7 @@ def test_repair_poisson_raises_when_no_filter_name_works():
 
     with (
         patch.dict(sys.modules, {"trimesh": fake_tm, "pymeshlab": fake_ml}),
+        _in_process_poisson(),
         pytest.raises(RuntimeError, match="none of"),
     ):
         _repair_to_stl("in.obj", "out.stl", "poisson", voxel_pitch=0.7, poisson_depth=10)
@@ -954,7 +1054,7 @@ def test_repair_auto_uses_poisson_when_not_watertight():
     # First load() is the watertight probe; later loads return the rebuilt mesh.
     fake_tm.load.side_effect = [raw] + [mesh] * 5
 
-    with patch.dict(sys.modules, {"trimesh": fake_tm, "pymeshlab": fake_ml}):
+    with patch.dict(sys.modules, {"trimesh": fake_tm, "pymeshlab": fake_ml}), _in_process_poisson():
         info = _repair_to_stl("in.obj", "out.stl", "auto", voxel_pitch=0.7, poisson_depth=10)
 
     assert info["method"] == "poisson"
@@ -966,9 +1066,7 @@ def test_repair_auto_falls_back_to_voxel_when_poisson_fails():
     raw = MagicMock()
     raw.is_watertight = False
 
-    voxel_body = MagicMock()
-    voxel_body.faces = list(range(777))
-    voxel_body.is_watertight = True
+    voxel_body = _sized(MagicMock(), faces=777)
     voxel_src = MagicMock()
     voxel_src.voxelized.return_value.fill.return_value.marching_cubes.split.return_value = [
         voxel_body
@@ -978,10 +1076,19 @@ def test_repair_auto_falls_back_to_voxel_when_poisson_fails():
     fake_ml = MagicMock()
     fake_ml.MeshSet.side_effect = RuntimeError("poisson exploded")
 
-    with patch.dict(sys.modules, {"trimesh": fake_tm, "pymeshlab": fake_ml}):
+    with (
+        patch.dict(sys.modules, {"trimesh": fake_tm, "pymeshlab": fake_ml}),
+        _in_process_poisson(),
+        patch("mcpymol.printing._room_to_inset", return_value=None),
+        patch("mcpymol.printing._inset", return_value=0),
+    ):
         info = _repair_to_stl("in.obj", "out.stl", "auto", voxel_pitch=0.7, poisson_depth=10)
 
-    assert info["method"] == "voxel (poisson fallback)"
+    # The reason rides along: a voxel solid differs enough from a Poisson one
+    # that a silent swap was worth explaining.
+    assert info["method"].startswith("voxel (poisson fallback: ")
+    assert "poisson exploded" in info["method"]
+    assert ", 0.7 Å pitch" in info["method"]
     assert info["faces"] == 777
     voxel_body.export.assert_called_once_with("out.stl")
 

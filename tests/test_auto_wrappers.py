@@ -131,7 +131,6 @@ WRAPPER_TESTS = [
     (align, ("mobile", "target", "10"), "align", ["mobile", "target", "10"]),
     (super_tool, ("mobile", "target", "10"), "super", ["mobile", "target", "10"]),
     (intra_fit, ("1abc",), "intra_fit", ["1abc"]),
-    (intra_rms, ("1abc",), "intra_rms", ["1abc"]),
     (alter, ("1abc", "b=10"), "alter", ["1abc", "b=10"]),
     (alter_state, ("1", "1abc", "b=10"), "alter_state", ["1", "1abc", "b=10"]),
     (h_add, ("all",), "h_add", ["all"]),
@@ -228,6 +227,18 @@ def test_auto_wrappers(mock_socket, func, args, expected_action, expected_args):
 def test_wrapper_targets_a_function_that_exists(mock_socket, func, args, action):
     func(*args)
     assert json.loads(mock_socket.sendall.call_args[0][0])["action"] == action
+
+
+def test_intra_rms_checks_its_selection_before_running(mock_socket):
+    """An unresolvable selection makes PyMOL's intra_rms segfault, taking the
+    user's session down; count_atoms vets it first."""
+    intra_rms("1abc")
+
+    sent = [json.loads(c.args[0]) for c in mock_socket.sendall.call_args_list]
+    assert [(p["action"], p["args"]) for p in sent] == [
+        ("count_atoms", ["1abc"]),
+        ("intra_rms", ["1abc"]),
+    ]
 
 
 def test_h_fill_sends_no_selection(mock_socket):

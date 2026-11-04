@@ -14,7 +14,7 @@ PyMOL is great, but its syntax is famously obscure — and despite the name, it 
 
 - **A vocabulary the LLM understands.** Tools like `fetch_structure`, `ligand_view`, `interface_view`, `mutation_view`, `conservation_view` do high-level setup in one call: pick the biological assembly, hide solvent, color sensibly, label the right residues, draw the right H-bonds.
 - **Renders the model can see.** `render` ray-traces and hands the image straight back, so the assistant can look at what it made and fix it — rather than writing a PNG it has no way to inspect.
-- **87 PyMOL primitives** exposed as individual tools (`show`, `hide`, `color`, `select`, `distance`, `align`, `spectrum`, …) so the model can compose finer motions when the high-level tools don't quite fit. 121 tools in total, every parameter documented in the tool schema. When even that runs out, `execute_pymol_command` passes a raw PyMOL command straight through.
+- **87 PyMOL primitives** exposed as individual tools (`show`, `hide`, `color`, `select`, `distance`, `align`, `spectrum`, …) so the model can compose finer motions when the high-level tools don't quite fit. 121 tools in total, every parameter documented in the tool schema. When even that runs out, `execute_pymol_command` passes a raw PyMOL command straight through and waits for it, returning what PyMOL printed and, if PyMOL rejected a line, which one and why.
 - **Predicted structures.** A UniProt accession fetches from AlphaFold DB and colors by pLDDT confidence in the official palette — via `fetch_structure` or `fetch_alphafold` directly.
 - **Scene introspection.** `list_objects`, `list_chains`, `list_ligands` and `structure_info` let the model check what's actually loaded before guessing, `count_atoms` catches a selection that matches nothing — otherwise invisible until the render comes out blank — and `atom_properties` reaches occupancy and altlocs that no per-residue view can show.
 - **Your own files too.** `load_structure` opens a local PDB/mmCIF — a model you built, a docking pose, an MD frame — through the same prep and styling as a fetched entry.
@@ -281,7 +281,10 @@ before launching PyMOL and the bridge.
 | `MCPYMOL_PORT` | `9876` | Bridge ↔ plugin TCP port. Must match on **both** sides. |
 | `MCPYMOL_RECV_TIMEOUT` | `30` s | How long the plugin waits for one complete request before answering with an error. Bounds how long a stalled client can hold the single-threaded accept loop. |
 | `MCPYMOL_MAX_REQUEST_BYTES` | `8388608` | Largest single request the plugin will accept. |
-| `MCPYMOL_SLOW_OP_TIMEOUT` | `600` s | Socket budget for operations that legitimately take minutes — `ray`, `png`, `save`, `mpng`, `draw`. |
+| `MCPYMOL_MAX_OUTPUT_CHARS` | `8000` | Plugin side: how much of what PyMOL printed one `execute_pymol_command` sends back. The head and tail are kept and the middle counted, so an `iterate all, print(name)` cannot flood the conversation. |
+| `MCPYMOL_DO_START_TIMEOUT` | `120` s | Plugin side: how long an `execute_pymol_command` waits for PyMOL's main thread to *start* it. Once started it is waited on to the end. A main thread held by an open dialog or a hung command gets an honest "nothing was run" instead of a request that never returns. |
+| `MCPYMOL_APP_NAP_IDLE_S` | `900` s | Plugin side, macOS GUI only: how long after its last request the plugin lets macOS App Nap PyMOL again. `0` turns the guard off. See *Slow renders on a Mac* below. |
+| `MCPYMOL_SLOW_OP_TIMEOUT` | `600` s | Socket budget for operations that legitimately take minutes — `ray`, `png`, `save`, `mpng`, `draw`, `execute_pymol_command` — and for the Poisson reconstruction in `print_export`. |
 | `MCPYMOL_MAX_IMAGE_BYTES` | `5000000` | Above this, `render` returns the file path instead of inlining the image. |
 | `MCPYMOL_PB_TIMEOUT` | `600` s | Wall-clock ceiling on the external `apbs` / `pdb2pqr` processes. |
 | `MCPYMOL_MMSEQS_URL` | ColabFold public API | MMseqs2 server for `conservation_view`. Point at an internal one to avoid the public queue. |
@@ -300,7 +303,7 @@ MCPYMOL_PORT=9867 mcpymol             # bridge
 
 | Symptom | Likely cause | Fix |
 | --- | --- | --- |
-| Every tool returns *"Socket connection failed. Is the PyMOL plugin running?"* | Plugin not loaded in PyMOL | `run /path/to/plugin.py` inside PyMOL, or add it to `~/.pymolrc.py` |
+| Every tool returns *"Socket connection failed: nothing is listening on 127.0.0.1:9876 … Is the PyMOL plugin running?"* | Plugin not loaded in PyMOL | `run /path/to/plugin.py` inside PyMOL, or add it to `~/.pymolrc.py` |
 | *"Address already in use"* on plugin start | A previous PyMOL session left the port open, or another app uses 9876 | Quit lingering PyMOL processes, or set `MCPYMOL_PORT=9867` on both sides |
 | Long `get_fastastr` / `get_chains` calls fail with a JSON parse error | You're on a pre-2026-05 version of MCPymol that capped recv() at 8 KB | [Upgrade](#upgrading) — the bridge now drains the response in full |
 | `conservation_view` is slow | First call hits the ColabFold MMseqs2 API (30 s–few min); subsequent calls for the same sequence hit a local cache | If you have an internal MMseqs2 server, set `MCPYMOL_MMSEQS_URL` |
@@ -309,7 +312,11 @@ MCPYMOL_PORT=9867 mcpymol             # bridge
 | `render` returns a size message instead of an image | The PNG exceeded the inline limit; base64 inflates it by a third | Ask for a smaller `width`/`height`, or raise `MCPYMOL_MAX_IMAGE_BYTES` |
 | `fetch_structure`/`fetch_alphafold` says *"No AlphaFold model"* | The accession is valid but AlphaFold DB has no model at that version | Try another `model_version`, or check the accession |
 | A view comes out blank | The selection matched no atoms | `count_atoms` on the selection before building the scene |
-| A long operation returns *"Socket connection failed: timed out"* | Something slower than its budget | Raise `MCPYMOL_SLOW_OP_TIMEOUT` (renders, saves) or `MCPYMOL_PB_TIMEOUT` (APBS) |
+| A long operation returns *"PyMOL accepted '…' but sent no reply within N s"* | Something slower than its budget. The request was not cancelled, so PyMOL may still be working on it | Check what PyMOL has done before re-sending; raise `MCPYMOL_SLOW_OP_TIMEOUT` (renders, saves) or `MCPYMOL_PB_TIMEOUT` (APBS) |
+| A render took many minutes and says *"the computer was asleep for N s of it"*, or any tool's timeout ends *"asleep for N s of this wait"* | The Mac slept during the call. Nothing runs while it sleeps — PyMOL, the bridge or the client — and the wait resumes on wake, which makes it look like a stall | Keep the machine awake for long unattended runs, e.g. `caffeinate -i -w <pid of your MCP client>` |
+| <a id="slow-renders-on-a-mac"></a>*Slow renders on a Mac*: a ray trace that normally takes seconds takes minutes while PyMOL's window is in the background | macOS App Nap drops a background app to the lowest priority, and under load a 1 s ray trace was measured at 74–349 s | The plugin holds off App Nap while it is serving requests (`MCPYMOL_APP_NAP_IDLE_S`). Restart PyMOL after upgrading so it loads the current plugin |
+| `execute_pymol_command` ends with *"The PyMOL plugin that is running predates error reporting"* | PyMOL loaded an old plugin, which reports success for every command without running it first | Restart PyMOL so it loads the plugin from this install (`mcpymol --plugin-path` prints its path) |
+| `execute_pymol_command` says *"PyMOL was busy for N s"*, *"PyMOL was still rendering a movie"* or *"PyMOL's main thread did not pick up the command"* — each ending *"nothing was run"* | PyMOL's main thread was held (a long command, an open dialog, a movie being rendered, a hang) for `MCPYMOL_DO_START_TIMEOUT` | Look at the PyMOL window; nothing from that request was run |
 | A tool reports an unknown action, or a bug you just upgraded past is still there | PyMOL is still running the plugin it loaded at startup, from before the upgrade | Restart PyMOL, then reconnect the server in your client (`/mcp` in Claude Code) — see [Upgrading](#upgrading) |
 | New tools don't show up after an upgrade | The MCP client is still running the previous bridge process | Reconnect the server in your client, or start a new session |
 | A fetch reports success but nothing is loaded | Pre-v1.4.0 behaviour: `cmd.fetch` doesn't raise on a failed download | Upgrade — fetches now verify atoms arrived and say so plainly, and no longer clear the session on failure |
@@ -673,12 +680,12 @@ The `print_export` tool turns a structure into watertight STL files ready for
 multi-colour 3D printing. PyMOL's open-source build can't write STL and its OBJ
 exporter dumps the whole visible scene as non-manifold surface soup —
 `print_export` works around all of that: it isolates each colour group, exports
-it, and rebuilds a single watertight, manifold solid per group. Every group
-stays in the same coordinate frame, so a slicer can load them as aligned
+it, and rebuilds a watertight, manifold solid per group. Every STL is written in
+PyMOL's model coordinates, so a slicer can load the groups as aligned
 multi-material parts.
 
 This tool needs the optional `print` extra (trimesh, pymeshlab, scipy,
-scikit-image):
+scikit-image, manifold3d, numpy):
 
 Install it into **the same environment MCPymol is already in** — a bare
 `pip install` picks whatever `pip` is first on your PATH, which is usually a
@@ -702,13 +709,61 @@ nucleic acid as separate colours
 This produces one STL per group (e.g. `1MSW_protein.stl`,
 `1MSW_nucleic.stl`). `method="auto"` (default) picks the cheapest path that
 works: compact structures (e.g. a GFP barrel) often export already-watertight,
-so it does a light cleanup — keeping the largest body and dropping tiny
-internal cavity shells — rather than Poisson, which can *degrade* an
+so it does a light cleanup rather than Poisson, which can *degrade* an
 already-closed surface. Otherwise it falls back to Poisson, then voxel.
 `method="poisson"` forces detail-preserving reconstruction (best for bulky
-chains); `method="voxel"` is robust for thin nucleic acids and slightly
-thickens fragile features for printability. In your slicer, load the first STL,
-then add the others as *parts* (don't re-centre) and assign a filament per part.
+chains); it runs in a child process, because PoissonRecon ends the process it
+runs in when it gives up. `method="voxel"` is robust for thin cartoons and
+nucleic acids, and is the one to use for ribbons. In your slicer, load the first
+STL, then add the others as *parts* (don't re-centre) and assign a filament per
+part.
+
+**What gets exported** (`representation`):
+
+- `"surface"` (default) — each group's molecular surface.
+- `"cartoon"` — the triangles the group's objects display: cartoon, plus any
+  surface shown. Hidden loops and per-object cartoon types are kept. Sticks and
+  spheres are left out, and the result names what was left out.
+- `"displayed"` — everything PyMOL draws for the group's objects: the triangles,
+  plus sticks, spheres, lines, ribbon and distance dashes, merged with an exact
+  boolean union. Dashes become one solid rod for the export only. Lines, dashes,
+  ribbon, mesh and dots are sized in pixels unless their `*_radius` setting is
+  set, so set it (e.g. `dash_radius`) for a definite size in Å.
+
+In cartoon and displayed modes a group names whole objects; name distance and
+CGO objects in the group too, e.g. `lig=(lig or hbonds)`.
+
+**Coordinates and size.** STLs are in PyMOL model coordinates — the numbers
+`get_coords` reports — whatever the camera is doing, and your view is left as it
+was. Groups from one call, or from separate calls at the same scale, line up.
+`mm_per_angstrom` (default `1.0`) sets the print scale: it is applied to every
+group about the origin after repair, so parts stay registered, while
+`voxel_pitch` stays in Å. The result gives each part's size in mm, the assembled
+size, and a warning when a part is small enough for a slicer to take it for
+inches and enlarge it 25.4× (under 9 mm³ in PrusaSlicer, 8 in Bambu Studio and
+OrcaSlicer; Bambu's 2.8.4 beta does it without asking), with the scale that
+avoids it.
+
+**Separate pieces** (`bodies`). A group can legitimately come out as several
+pieces: chains whose cartoons don't touch (4hhb's two dimers), or four hemes.
+`bodies="all"` (default) keeps every piece and the result says *"prints as N
+separate pieces"*; `bodies="largest"` keeps one and warns when that drops more
+than 1% of the volume. Enclosed cavities are filled and stray fragments removed
+either way, and the result counts both.
+
+**Voxel growth** (`undo_voxel_growth`, default on). Voxelising grows every
+surface by about 0.62 voxel; this moves it back, never past half a thin part's
+thickness. Gaps narrower than about 2.5 × `voxel_pitch` fuse while voxelising
+and can't be reopened, so for a designed clearance use `voxel_pitch` ≤ gap / 2.5,
+and measure clearances on the exported STLs.
+
+**Warnings in the result** need action before printing: a cartoon feature
+thinner than 3 voxels (naming the setting and object), rods or spheres thinner
+than 0.8 mm at the chosen scale (naming what draws them, e.g. `set valence, 0`
+for double bonds), a dropped piece, a part a slicer would read as inches, and
+shown residues whose Cα lies outside the printed mesh — typically next to a
+hidden residue, where loop smoothing pulls the tube away and a part meant to
+attach there will not touch.
 
 ### `print_ribbon_view` — print-ready chunky ribbons
 
@@ -722,6 +777,13 @@ whole chain). Exported together the voxel step fuses them into one watertight
 solid with no junction discontinuity — and the spine doubles as internal rebar
 for print rigidity. Tune `spine_radius` for more or less reinforcement.
 
+The style is set on the object and its spine only; other objects and PyMOL's
+global settings are left alone. Residues that are peptide-linked but have no CA
+atom, such as GFP's chromophore (CRO), used to break the spine; it is now carried
+through them on the spine copy, without renaming or renumbering anything in your
+object (`bridge_modified`, default on). The result names each residue it bridged,
+or says why it could not.
+
 ```
 print_ribbon_view(obj_name="1ema")
 print_export(obj_name="1ema", groups="1ema=(1ema or 1ema_spine)",
@@ -733,6 +795,23 @@ print_export(obj_name="1ema", groups="1ema=(1ema or 1ema_spine)",
 GFP's β-barrel with the chunky arrows applied. The bulges running along each
 strand are the spine tube passing through — the internal rebar, visible before
 it gets fused into one solid on export.
+
+`strand_width` and `strand_thickness` (defaults 2.8 and 2.0) are PyMOL's
+`cartoon_rect_length` and `cartoon_rect_width`; PyMOL draws a strand √2 times
+both, so the defaults give strands about 4.0 × 2.8 Å and a β-barrel's wall
+closes up. To see into a barrel, thin the strands and take the spine out of
+their interiors:
+
+```
+print_ribbon_view(obj_name="2b3p", strand_width=2.0, strand_thickness=1.0,
+                  spine_in_strands=False)
+```
+
+Measured on GFP (2b3p): the see-through share of the barrel wall goes from 8% to
+29%, the spine no longer bulges out of the thin strands (399 Å³ of it did; 1 Å³
+does now), and the model still exports as one piece. `strand_overlap` (default
+2, at least 2) is how many residues of spine stay at each strand end, where the
+loops fuse to the strands.
 
 ## Cryo-EM: occupancy, ensembles and maps
 
