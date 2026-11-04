@@ -90,6 +90,83 @@ per-atom B-factor are reachable end to end.
 
 ---
 
+## 4. Four presets send commands PyMOL rejects — open
+
+Found while making `execute_pymol_command` report PyMOL's errors: a request log
+run through the real tools showed four calls PyMOL refuses or ignores. Each sits
+in a direct `send_request` whose result the preset discards, so the preset still
+reports success. Verified on PyMOL 3.1.0.
+
+| Where | Call | What PyMOL says |
+|---|---|---|
+| `views.py` `pharmacophore_view` | `color violet, <lig> and elem C and inring` (and `not inring`) | `Invalid selection name "inring"` — ring carbons are never coloured |
+| `views.py` `cinematic_view` | `set fog_color, black` | `unknown Setting: 'fog_color'` |
+| `views.py` `pointillist_view` | `color grey30, (<obj>) and polymer.protein and ribbon` | `Malformed selection` |
+| `structures.py` loading | `set cartoon_nucleic_acid_color, brightorange, (<obj>) and polymer.nucleic` | `Setting-Warning: … is a object-state-level setting` — stored per atom, never drawn |
+
+The plugin now returns these as errors or warnings in the response; the fix is
+at each call site (and a test that reads the response).
+
+---
+
+## 5. GUI-only behaviour the headless live suite cannot see — open
+
+The live suites run against `pymol -ckqK`. These were seen only in the Qt GUI:
+
+- **A modal movie render stalls while the window is minimized.** `mpng` with
+  `modal=1` draws no frames until the window is visible again, and PyMOL takes
+  no commands meanwhile; `execute_pymol_command` reports that after
+  `MCPYMOL_DO_START_TIMEOUT`.
+- **Generic actions still run on the plugin's socket thread.** A raw
+  `send_request("window", …)` kills a GUI PyMOL (no tool exposes it).
+  `execute_pymol_command("window size, 640, 480")` is safe: `do` lines run on
+  the main thread.
+- **Console output can lag a long request.** The plugin captures what PyMOL
+  prints while a request runs (that is how it sees warnings), so Python-level
+  console output from the same moment appears when the request ends.
+- **`print_export` shows the export view for the length of each save**, then
+  restores yours exactly. For each group it also shows only that group's objects
+  and pauses rock and stereo, and puts both back as soon as the group is written
+  out, before its repair.
+- **A warning can be reported one call late.** The plugin captures what PyMOL
+  prints while a request runs, but PyMOL prints some messages while it redraws
+  after a command has returned (`Extrude-Warning` from `cartoon putty` on
+  uniform B-factors, surface update errors). Those land in the next request's
+  warnings, under a tool that did not cause them (reproduced headless, 5 of 5).
+  Running every action on the main thread would fix it, at the cost of freezing
+  the window during ray traces.
+- **Re-running the plugin drops a request sent at that moment.** `run
+  plugin.py` (through `execute_pymol_command`, or `stop_mcp`/`start_mcp`)
+  closes the old listening socket before the new one binds, so a request
+  already waiting in its backlog is reset and never run.
+- **Plugin and bridge should be the same version.** A released bridge (1.5.x)
+  driving this plugin sends `do` with a 10 s budget, but `do` now replies only
+  after the command has run, so a long command through `execute_pymol_command`
+  times out there although it still runs. `uv tool install` and
+  `mcpymol --install-plugin` keep the two together.
+
+---
+
+## 6. Print export limits — open
+
+- **Poisson on open cartoon soup** leaves small fragments (1ubq print ribbon:
+  one 857 mm³ piece plus nine of 0.004–2.6 mm³). `bodies="all"` now lists them
+  as separate pieces where the old keep-largest step hid them; use
+  `method="voxel"` for cartoons.
+- **The light path** (`auto` on an already-closed export) counts two closed
+  shells that overlap as separate pieces, though they print as one.
+- **Grid-aligned geometry is slightly over-corrected** by the voxel-growth
+  inset: an axis-aligned rod through the origin grew 0.41 voxel rather than
+  0.62, so it comes back 0.05 Å thin at 0.2 Å pitch. Off-grid rods come back
+  within 0.012 Å.
+- **`print_ribbon_view`'s bridge** is verified on CRO in mmCIF (2b3p, 1ema)
+  only. Other chromophores (GYS, CR2, NRQ) and PDB files with LINK records are
+  untested, and two CA-less residues in a row are neither bridged nor reported.
+- **The thin-feature warning** has no entry for cylindrical helices or the
+  nucleic-acid cartoon modes, so those never warn.
+
+---
+
 ## Not yet triaged
 
 Nothing currently. New reports should land here with a symptom and a

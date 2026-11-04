@@ -471,6 +471,17 @@ def _coerce(value, annotation):
     return value
 
 
+# Arguments one tool needs where the shared, name-keyed DEFAULTS cannot serve
+# all of its users. `command` is a shell command for `system`, PyMOL
+# command-language for `execute_pymol_command` and a help topic for `help`:
+# PyMOL has no `echo`, so execute_pymol_command used to run a line PyMOL
+# rejects — invisible while `do` replied "Executed" to everything, and now
+# reported, rightly, as a SyntaxError. That exercised nothing.
+TOOL_ARGUMENTS: dict[str, dict[str, str]] = {
+    "execute_pymol_command": {"command": "get_view"},
+    "help": {"command": "show"},
+}
+
 # Tools whose `path` must point at a real file of a particular kind, rather
 # than at the scratch directory the generic rule hands out. Without these the
 # map tools would be called on a directory, come back with an honest "not a
@@ -491,7 +502,9 @@ def _arguments_for(fn, tmp_path, tool_name: str = "") -> dict:
     hints = typing.get_type_hints(fn, include_extras=False)
     args = {}
     for name, param in inspect.signature(fn).parameters.items():
-        if name in ("path", "validation_path", "directory") and tool_name in PATH_FIXTURES:
+        if name in TOOL_ARGUMENTS.get(tool_name, {}):
+            args[name] = TOOL_ARGUMENTS[tool_name][name]
+        elif name in ("path", "validation_path", "directory") and tool_name in PATH_FIXTURES:
             args[name] = _PROBE_FILES[PATH_FIXTURES[tool_name]]
         elif name in ("filename",):
             args[name] = str(tmp_path / "live_probe.png")

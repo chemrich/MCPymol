@@ -52,15 +52,21 @@ Changelog = "https://github.com/chemrich/MCPymol/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 # 3D-print export (print_export tool): mesh repair to watertight STL.
-# Only trimesh and pymeshlab are imported; the rest are trimesh's undeclared
-# soft dependencies for the calls printing.py makes.
+# printing.py imports trimesh, pymeshlab, manifold3d, numpy and scipy directly;
+# scikit-image is a soft dependency of trimesh for the calls it makes.
 #   pymeshlab     poisson method. 2023.12.post2 is the first with macOS arm64 wheels.
-#   scipy         voxelized().fill().
+#   manifold3d    exact boolean union of the sticks, spheres and rods that
+#                 representation="displayed" exports. PyMOL writes those as
+#                 primitives, not triangles, and voxelising them grew sticks 30-60%.
+#   numpy, scipy  geometry and cKDTree in printing.py; scipy also backs
+#                 trimesh's voxelized().fill().
 #   scikit-image  marching_cubes in the voxel method, which is also auto's fallback;
 #                 without it voxel raises ModuleNotFoundError. Pulls in networkx.
 print = [
     "trimesh>=4.0",
     "pymeshlab>=2023.12.post2",
+    "manifold3d>=3.0",
+    "numpy>=1.26",
     "scipy>=1.11",
     "scikit-image>=0.22",
 ]

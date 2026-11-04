@@ -6,12 +6,20 @@ high-level views in ``mcpymol.views`` do not quite fit.  Each wrapper is a real
 to :func:`mcpymol.bridge._call` for the shared forwarding logic.
 """
 
+import re
 from typing import Annotated
 
 from pydantic import Field
 
 from mcpymol.app import mcp
-from mcpymol.bridge import _SLOW_OP_TIMEOUT, _call, format_measurement, send_request
+from mcpymol.bridge import (
+    _SLOW_OP_TIMEOUT,
+    _call,
+    _warnings_note,
+    format_measurement,
+    send_request,
+)
+from mcpymol.cli import plugin_path
 
 # ── Primitive tools ──────────────────────────────────────────────────────────
 #
@@ -46,7 +54,7 @@ def show(
     res = send_request("show", args=[representation, selection])
     if res.get("status") == "error":
         return res.get("error", "Unknown error")
-    return f"Showing {representation} for selection '{selection}'"
+    return f"Showing {representation} for selection '{selection}'" + _warnings_note(res)
 
 
 @mcp.tool()
@@ -65,7 +73,7 @@ def hide(
     res = send_request("hide", args=[representation, selection])
     if res.get("status") == "error":
         return res.get("error", "Unknown error")
-    return f"Hiding {representation} for selection '{selection}'"
+    return f"Hiding {representation} for selection '{selection}'" + _warnings_note(res)
 
 
 @mcp.tool()
@@ -84,7 +92,7 @@ def color(
     res = send_request("color", args=[color_name, selection])
     if res.get("status") == "error":
         return res.get("error", "Unknown error")
-    return f"Colored selection '{selection}' with {color_name}"
+    return f"Colored selection '{selection}' with {color_name}" + _warnings_note(res)
 
 
 @mcp.tool()
@@ -102,7 +110,7 @@ def select(
     res = send_request("select", args=[name, selection])
     if res.get("status") == "error":
         return res.get("error", "Unknown error")
-    return f"Created named selection '{name}' for '{selection}'"
+    return f"Created named selection '{name}' for '{selection}'" + _warnings_note(res)
 
 
 @mcp.tool()
@@ -118,7 +126,7 @@ def remove(
     res = send_request("remove", args=[selection])
     if res.get("status") == "error":
         return res.get("error", "Unknown error")
-    return f"Removed selection '{selection}'"
+    return f"Removed selection '{selection}'" + _warnings_note(res)
 
 
 @mcp.tool()
@@ -144,7 +152,7 @@ def distance(
         res.get("result"),
         "A",
         name,
-    )
+    ) + _warnings_note(res)
 
 
 @mcp.tool()
@@ -192,7 +200,14 @@ def rms_cur(
 
     Requires the two selections to have matching atom counts.
     """
-    return _call("rms_cur", _measures=("RMSD (as positioned)", "A"), mobile=mobile, target=target)
+    return _call(
+        "rms_cur",
+        _measures=("RMSD (as positioned)", "A"),
+        # An unresolvable selection here crashes PyMOL itself; see _call.
+        _require_atoms=("mobile", "target"),
+        mobile=mobile,
+        target=target,
+    )
 
 
 @mcp.tool()
@@ -231,11 +246,44 @@ def execute_pymol_command(
     only when no other tool covers what you need (e.g. ``set ray_shadow, 0``, ``bg_color
     grey20``, multi-statement scripts). Note: this accepts the PyMOL ``cmd.do`` mini-language,
     not Python.
+
+    Returns once the command has finished, with what PyMOL printed (``get_view``, ``iterate``
+    output, ...). If PyMOL rejects a line — a bad selection, a typo, a Python error — the
+    result is an error naming that line, in PyMOL's words; warnings from lines that still ran
+    are listed. Put each command on its own line: ``alter``, ``iterate`` and ``label`` take
+    the rest of the line literally, so ``;`` does not start a new command after them.
     """
-    res = send_request("do", args=[command])
-    if res.get("status") == "error":
-        return res.get("error", "Unknown error")
-    return f"Executed command: {command}"
+    # The slow budget because `do` now replies only after the command has run,
+    # and a ray-traced png or a big load through here takes minutes.
+    res = send_request("do", args=[command], timeout=_SLOW_OP_TIMEOUT)
+    failed = res.get("status") == "error"
+    text = res.get("error", "Unknown error") if failed else f"Executed command: {command}"
+    # Kept when a line failed too: the lines that ran may have printed what was
+    # asked for, or warned that a value they set is never used. What the
+    # rejected lines printed is already quoted in the error, so not twice.
+    output = str(res.get("output") or "").strip("\n")
+    if failed and output:
+        quoted = set(text.splitlines())
+        output = "\n".join(ln for ln in output.splitlines() if ln not in quoted).strip("\n")
+    if output:
+        text += f"\nPyMOL output:\n{output}"
+    warnings = [str(w) for w in res.get("warnings") or []]
+    if warnings:
+        text += "\nPyMOL warned:\n" + "\n".join(f"  {w}" for w in warnings)
+    if not failed and "output" not in res:
+        text += f"\n{_OLD_PLUGIN_NOTE}"
+    return text
+
+
+# A plugin from before `do` reported errors replies "success" to every command
+# without running it first; its replies lack the `output` every newer one has.
+# The path is this installation's own plugin (what `mcpymol --plugin-path`
+# prints): a pip or uvx install has no src/ directory to point at.
+_OLD_PLUGIN_NOTE = (
+    "(The PyMOL plugin that is running predates error reporting, so a PyMOL error in this "
+    "command would not have been detected. Load the plugin from this install — inside PyMOL: "
+    f"run {plugin_path()})"
+)
 
 
 @mcp.tool(name="as")
@@ -276,9 +324,40 @@ def set_setting(
     ] = None,
 ) -> str:
     """
-    Sets a PyMOL setting to a specified value
+    Sets a PyMOL setting to a specified value.
+
+    Settings live at a level — global, object, object-state, atom or bond — and PyMOL ignores a
+    value stored below its setting's level. ``cartoon_tube_radius`` on a residue range is
+    stored per atom and never drawn; ``ray_shadow`` on an object is never read. PyMOL only
+    warns about that, so this reports it as an error, with what to do instead.
     """
-    return _call("set", setting=setting, value=value, selection=selection)
+    args = [setting, value] if selection is None else [setting, value, selection]
+    res = send_request("set", args=args)
+    if res.get("status") == "error":
+        return res.get("error", "Unknown error")
+    for warning in res.get("warnings") or []:
+        match = _LEVEL_WARNING.search(str(warning))
+        if not match:
+            continue
+        name, level = match.groups()
+        if level == "global":
+            advice = "Omit the selection: it can only be set globally."
+        else:
+            advice = (
+                "Pass an object name to set it for a whole object, or omit the selection to set "
+                "it globally. To give a subset its own value, copy it to a separate object with "
+                "create first."
+            )
+        return (
+            f"Error: PyMOL did not apply {name} = {value} to '{selection}': '{name}' is a "
+            f"{level}-level setting, so the value PyMOL stored there is never used. {advice}"
+        )
+    return "Executed set successfully." + _warnings_note(res)
+
+
+# PyMOL's only signal that a set landed below its setting's level, e.g.
+# " Setting-Warning: 'cartoon_tube_radius' is a object-state-level setting".
+_LEVEL_WARNING = re.compile(r"Setting-Warning: '([^']+)' is an? ([\w-]+)-level setting")
 
 
 @mcp.tool()
@@ -648,7 +727,8 @@ def intra_rms(
     """
     Calculates RMSD between states within an object
     """
-    return _call("intra_rms", selection=selection)
+    # An unresolvable selection here crashes PyMOL itself; see _call.
+    return _call("intra_rms", _require_atoms=("selection",), selection=selection)
 
 
 @mcp.tool()
