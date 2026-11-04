@@ -234,8 +234,8 @@ def latent_traverse_view(
         call(port, "mset", f"1 x{len(surfaces)}")
         for index, surface in enumerate(surfaces, start=1):
             # mdo attaches a command to a frame. It is a cmd function, so this
-            # is still a structured call — the do() prohibition is about
-            # cmd.do, which reports success for any string at all.
+            # is still a structured call; wiggles avoids do() because a
+            # command line has to be built (and quoted) as text.
             call(port, "mdo", index, f"disable {prefix}_*; enable {surface}")
         call(port, "frame", 1)
 

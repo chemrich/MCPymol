@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **Tool descriptions no longer understate what they run.**
+  `execute_pymol_command` said "Not Python", but PyMOL's command language runs
+  `/` lines and `python` blocks as Python inside PyMOL; `atom_properties`
+  evaluates each property as a Python expression per atom. Both now say so.
+  The wiggles port docs no longer claim `do` reports success for any string,
+  which stopped being true in 1.6.0.
 - `print_export` no longer fails a valid group because a warning PyMOL printed
   while redrawing landed in its selection check; only a `Selector-Error`
   counts as a rejected selection.
