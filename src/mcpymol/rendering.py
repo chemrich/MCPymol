@@ -11,7 +11,7 @@ import tempfile
 import time
 from typing import Annotated
 
-from mcp.server.fastmcp import Image
+from mcp.server.mcpserver import Image
 from pydantic import Field
 
 from mcpymol.app import mcp
@@ -125,7 +125,7 @@ def _read_complete_png(path: str, timeout: float | None = None) -> bytes | None:
 
 # structured_output=False: the return is image content, an error string, or
 # both (an image plus a note), which is not a shape pydantic can build an
-# output model for.  FastMCP turns a list into one content block per item.
+# output model for.  The MCP server turns a list into one content block per item.
 @mcp.tool(structured_output=False)
 def render(
     width: Annotated[

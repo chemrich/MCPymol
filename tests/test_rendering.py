@@ -7,7 +7,7 @@ import zlib
 from unittest.mock import patch
 
 import pytest
-from mcp.server.fastmcp import Image
+from mcp.server.mcpserver import Image
 
 from mcpymol.rendering import _PNG_EOF, _read_complete_png, render, turntable
 

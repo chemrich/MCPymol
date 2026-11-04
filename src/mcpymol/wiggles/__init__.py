@@ -49,7 +49,7 @@ from mcpymol.wiggles.port import BridgePort, FakePort, PortError, PymolPort, Sen
 from mcpymol.wiggles.provenance import Provenance, declare, provenance_of
 
 # Load-bearing: importing the tool module is what registers the ten tools on
-# the shared FastMCP app. Imported last so the names above are available to it.
+# the shared MCPServer app. Imported last so the names above are available to it.
 from mcpymol.wiggles.tools import (
     altloc_view,
     composition_view,

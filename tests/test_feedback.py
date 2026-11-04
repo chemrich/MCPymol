@@ -24,7 +24,7 @@ import pytest
 
 mock_pymol = sys.modules["pymol"]  # conftest's mock: the one plugin.py bound
 
-from mcp.server.fastmcp import Image
+from mcp.server.mcpserver import Image
 
 import mcpymol.bridge as bridge_module
 import mcpymol.plugin as plugin_module
@@ -427,10 +427,10 @@ def test_render_error_after_a_sleep_says_so():
 
 
 def test_render_note_reaches_the_client_as_text_after_the_image():
-    """FastMCP must turn [Image, note] into an image block and a text block;
+    """The MCP server must turn [Image, note] into an image block and a text block;
     a list it could not convert would reach the client as a JSON dump."""
     with patch("mcpymol.rendering.send_request", side_effect=_png_writer(asleep_s=700.0)):
-        content = asyncio.run(mcp.call_tool("render", {"width": 8, "height": 8}))
+        content = asyncio.run(mcp.call_tool("render", {"width": 8, "height": 8})).content
 
     assert [block.type for block in content] == ["image", "text"]
     assert "asleep for 700 s" in content[1].text
