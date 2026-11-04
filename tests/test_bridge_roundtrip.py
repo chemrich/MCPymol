@@ -189,7 +189,7 @@ def test_non_json_garbage_gets_an_error_response(live_bridge):
 
     decoded = json.loads(reply)
     assert decoded["status"] == "error"
-    assert "Invalid JSON payload" in decoded["error"]
+    assert "not a JSON request" in decoded["error"]
 
     # Listener survived.
     with patch.object(live_bridge, "handle_request") as handler:
