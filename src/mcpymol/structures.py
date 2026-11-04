@@ -840,7 +840,9 @@ def atom_properties(
         Field(
             description="Comma-separated PyMOL atom properties. Common ones: chain, "
             "resi, resn, name, elem, b (B-factor or pLDDT), q (occupancy), alt "
-            "(altloc), formal_charge, partial_charge, ss, segi, index."
+            "(altloc), formal_charge, partial_charge, ss, segi, index. Each one is "
+            "evaluated as a Python expression per atom inside PyMOL, so pass "
+            "property names, not text from an untrusted source."
         ),
     ] = DEFAULT_ATOM_PROPERTIES,
     max_atoms: Annotated[

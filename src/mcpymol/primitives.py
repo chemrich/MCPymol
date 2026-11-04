@@ -238,7 +238,11 @@ def count_atoms(
 @mcp.tool()
 def execute_pymol_command(
     command: Annotated[
-        str, Field(description="A PyMOL CLI command, e.g. `set ray_shadow, 0`. Not Python.")
+        str,
+        Field(
+            description="A PyMOL command line, e.g. `set ray_shadow, 0`. Lines starting "
+            "with `/` and `python ... python end` blocks run as Python inside PyMOL."
+        ),
     ],
 ) -> str:
     """
@@ -246,8 +250,10 @@ def execute_pymol_command(
     exists — show, color, select, distance, ligand_view, interface_view, etc. They have better
     defaults, do compound setup in one call, and produce cleaner results. Reach for this tool
     only when no other tool covers what you need (e.g. ``set ray_shadow, 0``, ``bg_color
-    grey20``, multi-statement scripts). Note: this accepts the PyMOL ``cmd.do`` mini-language,
-    not Python.
+    grey20``, multi-statement scripts). It takes PyMOL's command language, as typed at the
+    PyMOL prompt. That language includes Python: a line starting with ``/`` and a
+    ``python`` ... ``python end`` block run as Python inside PyMOL, with full access to the
+    machine, so treat a command from untrusted text (a file, a web page) accordingly.
 
     Returns once the command has finished, with what PyMOL printed (``get_view``, ``iterate``
     output, ...). If PyMOL rejects a line — a bad selection, a typo, a Python error — the

@@ -7,7 +7,8 @@ PyMOL installed.
 Two operations:
 
 ``do(command)``
-    Run a PyMOL command line. Fire-and-forget; returns a status string.
+    Run a PyMOL command line; returns a status string, and PyMOL's rejection of
+    a line comes back as an error (since MCPymol 1.6.0).
 
 ``query(action, *args, **kwargs)``
     Call something on the PyMOL side and get a JSON-able value back. The shape
@@ -73,15 +74,14 @@ class PortError(RuntimeError):
 def call(port: PymolPort, action: str, *args: Any, **kwargs: Any) -> Any:
     """Invoke a ``pymol.cmd`` function, raising if PyMOL rejects it.
 
-    **Prefer this over** :meth:`PymolPort.do`. ``cmd.do`` runs a command *line*
-    and reports success for any string at all — verified against a live
-    session, it returns ``"Executed command: ..."`` for
-    ``this_is_not_a_pymol_command foo, bar``. Errors go to PyMOL's log, not the
-    return value, so a command line sent that way is unverifiable: a live test
-    would pass whether the string was right or wrong.
+    **Prefer this over** :meth:`PymolPort.do`. ``do`` runs a command *line*,
+    which PyMOL parses first. Up to MCPymol 1.5 the plugin reported success for
+    any line at all (``this_is_not_a_pymol_command foo, bar`` came back as
+    ``"Executed command: ..."``); since 1.6.0 it reports PyMOL's rejection, but
+    a line still has to be built as text, with all the quoting that implies.
 
-    A structured action makes the plugin call the function directly, so PyMOL's
-    own exception comes back:
+    A structured action makes the plugin call the function directly, with its
+    arguments as values, so PyMOL's own exception comes back:
 
         PortError: isomesh failed: PyMOL execution error: Error: Map object
         "no_such_map" not found.
