@@ -333,7 +333,7 @@ The tests that run by default mock the socket layer and PyMOL's `cmd` module, so
 
 ### The two opt-in suites
 
-The rest are **deselected by default**, because they need things CI does not have. Both are worth running before a release tag:
+The rest are **deselected by default** in local `pytest` runs because they need a dedicated test PyMOL or external network access (CI runs `-m live` on every push/PR and `-m network` on a weekly schedule):
 
 ```bash
 uv run pytest -m live      # needs a test PyMOL on its own port: see CONTRIBUTING.md

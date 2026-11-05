@@ -291,6 +291,59 @@ class TestCategoryPriorityNotJustTokenLength:
         # The table may be declared in any order; that is the point.
         assert {p for p, _ in _TOKENS} <= set(severity)
 
+    def test_shuffling_token_table_never_changes_suggestion(self, tmp_path, monkeypatch):
+        """Property check (#38): permuting both category order and token order
+        inside _TOKENS across 50 random seeds never alters gather_evidence."""
+        import random
+
+        import mcpymol.wiggles.provenance as prov_mod
+        from mcpymol.wiggles.provenance import _TOKENS
+
+        header = read_map_header(write_map(tmp_path, "probe.mrc"))
+        corpus = [
+            "plain.mrc",
+            "emd_1234_unsharpened.mrc",
+            "emd_1234_sharpened.mrc",
+            "postprocess_emready.mrc",
+            "postprocess_locscale.mrc",
+            "cryodrgn_emready.mrc",
+            "kmeans20_deepemhancer.mrc",
+            "half1_postprocess.mrc",
+            "unfil_locres_3dflex.mrc",
+            *[f"map_{tok}.mrc" for _p, toks in _TOKENS for tok in toks],
+        ]
+        baseline = {name: gather_evidence(header, name).suggested for name in corpus}
+
+        rng = random.Random(38)
+        for _ in range(50):
+            shuffled_categories = list(_TOKENS)
+            rng.shuffle(shuffled_categories)
+            permuted = tuple(
+                (cat, tuple(rng.sample(list(toks), len(toks)))) for cat, toks in shuffled_categories
+            )
+            monkeypatch.setattr(prov_mod, "_TOKENS", permuted)
+            for name in corpus:
+                assert gather_evidence(header, name).suggested is baseline[name], name
+
+    def test_every_substring_token_pair_resolves_to_the_longer_token(self, tmp_path):
+        """Property check (#38): for any pair of tokens (short, long) in _TOKENS
+        where short is a substring of long, a filename containing only `long`
+        must suggest `long`'s provenance, never `short`'s."""
+        from mcpymol.wiggles.provenance import _TOKENS
+
+        header = read_map_header(write_map(tmp_path, "probe.mrc"))
+        all_tokens = [(cat, tok) for cat, toks in _TOKENS for tok in toks]
+        pairs = [
+            (c_short, t_short, c_long, t_long)
+            for c_short, t_short in all_tokens
+            for c_long, t_long in all_tokens
+            if t_short != t_long and t_short in t_long
+        ]
+        assert pairs, "expected at least ('sharp', 'unsharp') in _TOKENS"
+        for _c_short, _t_short, c_long, t_long in pairs:
+            ev = gather_evidence(header, f"map_{t_long}.mrc")
+            assert ev.suggested is c_long, (t_long, ev.suggested, c_long)
+
 
 @pytest.mark.parametrize(("name", "legal"), [("all", "all_"), ("keep*", "keep"), ("*", "")])
 def test_a_name_pymol_would_change_is_refused_before_loading(tmp_path, name, legal):

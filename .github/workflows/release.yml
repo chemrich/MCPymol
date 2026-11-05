@@ -49,9 +49,53 @@ jobs:
       - run: uv run ruff format --check .
       - run: uv run mypy
 
+  print-extra:
+    name: Print extra imports
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+      # Run real-mesh print tests with the optional print extra and system libOpenGL.
+      - name: System OpenGL for pymeshlab
+        run: sudo apt-get update -q && sudo apt-get install -y -q libopengl0
+      - name: Install with print extra
+        run: uv sync --locked --all-groups --extra print
+      - name: Import print_export
+        run: uv run python -c "from mcpymol.server import print_export; print('print_export import OK')"
+      - name: Print tests, against the real mesh libraries
+        run: uv run pytest tests/test_printing.py -q -rs
+
+  minimum-versions:
+    name: Minimum versions (py3.11)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+      # Verify the declared dependency floors in pyproject.toml on the oldest supported Python.
+      - name: System OpenGL for pymeshlab
+        run: sudo apt-get update -q && sudo apt-get install -y -q libopengl0
+      - name: Install at the declared minimums
+        run: |
+          uv venv --python 3.11 .venv-min
+          uv pip install --python .venv-min/bin/python --resolution lowest-direct \
+            --only-binary :all: -r pyproject.toml --extra print
+          uv pip install --python .venv-min/bin/python --no-deps .
+          # Test tools from the lock, so this job moves only when a runtime
+          # floor does, never because pytest published a release.
+          uv export --frozen --only-group dev --no-hashes --no-emit-project \
+            | uv pip install --python .venv-min/bin/python -r -
+      - name: Show what was installed
+        run: uv pip list --python .venv-min/bin/python
+      - name: Unit tests
+        run: .venv-min/bin/python -m pytest tests/ -q -rs
+
   build:
     name: Build & verify
-    needs: [verify, lint]
+    needs: [verify, lint, print-extra, minimum-versions]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

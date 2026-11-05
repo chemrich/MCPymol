@@ -1,0 +1,2488 @@
+{
+  "align": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "mobile",
+      "required": true
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "target",
+      "required": true
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "cutoff",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "cycles",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "gap",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "extend",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "max_gap",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "object",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "matrix",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "mobile_state",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "target_state",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "quiet",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "max_skip",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "transform",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "reset",
+      "required": false
+    }
+  ],
+  "alter": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "selection",
+      "required": true
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "expression",
+      "required": true
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "quiet",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "space",
+      "required": false
+    }
+  ],
+  "alter_state": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "state",
+      "required": true
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "selection",
+      "required": true
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "expression",
+      "required": true
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "quiet",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "space",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "atomic",
+      "required": false
+    }
+  ],
+  "angle": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "name",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "selection1",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "selection2",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "selection3",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "mode",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "label",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "reset",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "zoom",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "state",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "quiet",
+      "required": false
+    },
+    {
+      "kind": "KEYWORD_ONLY",
+      "name": "state1",
+      "required": false
+    },
+    {
+      "kind": "KEYWORD_ONLY",
+      "name": "state2",
+      "required": false
+    },
+    {
+      "kind": "KEYWORD_ONLY",
+      "name": "state3",
+      "required": false
+    }
+  ],
+  "backward": [],
+  "bond": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "atom1",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "atom2",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "order",
+      "required": false
+    },
+    {
+      "kind": "KEYWORD_ONLY",
+      "name": "quiet",
+      "required": false
+    },
+    {
+      "kind": "KEYWORD_ONLY",
+      "name": "symop",
+      "required": false
+    }
+  ],
+  "cartoon": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "type",
+      "required": true
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "selection",
+      "required": false
+    }
+  ],
+  "cd": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "dir",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "complain",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "quiet",
+      "required": false
+    }
+  ],
+  "center": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "selection",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "state",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "origin",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "animate",
+      "required": false
+    }
+  ],
+  "clip": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "mode",
+      "required": true
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "distance",
+      "required": true
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "selection",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "state",
+      "required": false
+    }
+  ],
+  "color": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "color",
+      "required": true
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "selection",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "quiet",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "flags",
+      "required": false
+    }
+  ],
+  "count_atoms": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "selection",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "quiet",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "state",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "domain",
+      "required": false
+    }
+  ],
+  "create": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "name",
+      "required": true
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "selection",
+      "required": true
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "source_state",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "target_state",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "discrete",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "zoom",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "quiet",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "singletons",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "extract",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "copy_properties",
+      "required": false
+    }
+  ],
+  "delete": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "name",
+      "required": true
+    }
+  ],
+  "deselect": [],
+  "dihedral": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "name",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "selection1",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "selection2",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "selection3",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "selection4",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "mode",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "label",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "reset",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "zoom",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "state",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "quiet",
+      "required": false
+    }
+  ],
+  "disable": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "name",
+      "required": false
+    }
+  ],
+  "distance": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "name",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "selection1",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "selection2",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "cutoff",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "mode",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "zoom",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "width",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "length",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "gap",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "label",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "quiet",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "reset",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "state",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "state1",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "state2",
+      "required": false
+    }
+  ],
+  "draw": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "width",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "height",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "antialias",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "quiet",
+      "required": false
+    }
+  ],
+  "enable": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "name",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "parents",
+      "required": false
+    }
+  ],
+  "extract": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "name",
+      "required": true
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "selection",
+      "required": true
+    },
+    {
+      "kind": "VAR_POSITIONAL",
+      "name": "arg",
+      "required": true
+    },
+    {
+      "kind": "VAR_KEYWORD",
+      "name": "kw",
+      "required": true
+    }
+  ],
+  "fab": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "input",
+      "required": true
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "name",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "mode",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "resi",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "chain",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "segi",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "state",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "dir",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "hydro",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "ss",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "async_",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "quiet",
+      "required": false
+    },
+    {
+      "kind": "VAR_KEYWORD",
+      "name": "kwargs",
+      "required": true
+    }
+  ],
+  "fetch": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "code",
+      "required": true
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "name",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "state",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "finish",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "discrete",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "multiplex",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "zoom",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "type",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "async_",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "path",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "file",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "quiet",
+      "required": false
+    },
+    {
+      "kind": "VAR_KEYWORD",
+      "name": "kwargs",
+      "required": true
+    }
+  ],
+  "forward": [],
+  "fragment": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "name",
+      "required": true
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "object",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "origin",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "zoom",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "quiet",
+      "required": false
+    }
+  ],
+  "frame": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "frame",
+      "required": true
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "trigger",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "scene",
+      "required": false
+    }
+  ],
+  "full_screen": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "toggle",
+      "required": false
+    }
+  ],
+  "get": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "name",
+      "required": true
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "selection",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "state",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "quiet",
+      "required": false
+    }
+  ],
+  "get_area": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "selection",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "state",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "load_b",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "quiet",
+      "required": false
+    }
+  ],
+  "get_chains": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "selection",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "state",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "quiet",
+      "required": false
+    }
+  ],
+  "get_coords": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "selection",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "state",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "quiet",
+      "required": false
+    }
+  ],
+  "get_fastastr": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "selection",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "state",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "quiet",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "key",
+      "required": false
+    }
+  ],
+  "get_frame": [],
+  "get_legal_name": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "name",
+      "required": true
+    }
+  ],
+  "get_names": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "type",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "enabled_only",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "selection",
+      "required": false
+    }
+  ],
+  "get_object_list": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "selection",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "quiet",
+      "required": false
+    }
+  ],
+  "get_pdbstr": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "selection",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "state",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "ref",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "ref_state",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "quiet",
+      "required": false
+    }
+  ],
+  "get_setting_boolean": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "name",
+      "required": true
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "object",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "state",
+      "required": false
+    }
+  ],
+  "get_setting_float": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "name",
+      "required": true
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "object",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "state",
+      "required": false
+    }
+  ],
+  "get_symmetry": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "selection",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "state",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "quiet",
+      "required": false
+    }
+  ],
+  "get_type": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "name",
+      "required": true
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "quiet",
+      "required": false
+    }
+  ],
+  "get_view": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "output",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "quiet",
+      "required": false
+    }
+  ],
+  "h_add": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "selection",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "quiet",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "state",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "legacy",
+      "required": false
+    }
+  ],
+  "h_fill": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "quiet",
+      "required": false
+    }
+  ],
+  "help": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "command",
+      "required": false
+    }
+  ],
+  "hide": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "representation",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "selection",
+      "required": false
+    }
+  ],
+  "intra_fit": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "selection",
+      "required": true
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "state",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "quiet",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "mix",
+      "required": false
+    },
+    {
+      "kind": "KEYWORD_ONLY",
+      "name": "pbc",
+      "required": false
+    }
+  ],
+  "intra_rms": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "selection",
+      "required": true
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "state",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "quiet",
+      "required": false
+    }
+  ],
+  "isomesh": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "name",
+      "required": true
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "map",
+      "required": true
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "level",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "selection",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "buffer",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "state",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "carve",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "source_state",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "quiet",
+      "required": false
+    }
+  ],
+  "isosurface": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "name",
+      "required": true
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "map",
+      "required": true
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "level",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "selection",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "buffer",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "state",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "carve",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "source_state",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "side",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "mode",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "quiet",
+      "required": false
+    }
+  ],
+  "label": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "selection",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "expression",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "quiet",
+      "required": false
+    }
+  ],
+  "load": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "filename",
+      "required": true
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "object",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "state",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "format",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "finish",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "discrete",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "quiet",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "multiplex",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "zoom",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "partial",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "mimic",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "object_props",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "atom_props",
+      "required": false
+    }
+  ],
+  "ls": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "pattern",
+      "required": false
+    }
+  ],
+  "move": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "axis",
+      "required": true
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "distance",
+      "required": true
+    }
+  ],
+  "mplay": [],
+  "mpng": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "prefix",
+      "required": true
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "first",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "last",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "preserve",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "modal",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "mode",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "quiet",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "width",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "height",
+      "required": false
+    }
+  ],
+  "mset": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "specification",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "frame",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "freeze",
+      "required": false
+    }
+  ],
+  "mstop": [],
+  "orient": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "selection",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "state",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "animate",
+      "required": false
+    }
+  ],
+  "png": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "filename",
+      "required": true
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "width",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "height",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "dpi",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "ray",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "quiet",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "prior",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "format",
+      "required": false
+    }
+  ],
+  "pwd": [],
+  "ray": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "width",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "height",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "antialias",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "angle",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "shift",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "renderer",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "quiet",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "async_",
+      "required": false
+    },
+    {
+      "kind": "VAR_KEYWORD",
+      "name": "kwargs",
+      "required": true
+    }
+  ],
+  "rebuild": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "selection",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "representation",
+      "required": false
+    }
+  ],
+  "refresh": [],
+  "remove": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "selection",
+      "required": true
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "quiet",
+      "required": false
+    }
+  ],
+  "reset": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "object",
+      "required": false
+    }
+  ],
+  "rms_cur": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "mobile",
+      "required": true
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "target",
+      "required": true
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "mobile_state",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "target_state",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "quiet",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "matchmaker",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "cutoff",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "cycles",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "object",
+      "required": false
+    }
+  ],
+  "rock": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "mode",
+      "required": false
+    }
+  ],
+  "save": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "filename",
+      "required": true
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "selection",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "state",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "format",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "ref",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "ref_state",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "quiet",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "partial",
+      "required": false
+    }
+  ],
+  "scene": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "key",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "action",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "message",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "view",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "color",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "active",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "rep",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "frame",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "animate",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "new_key",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "hand",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "quiet",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "sele",
+      "required": false
+    }
+  ],
+  "scene_order": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "names",
+      "required": true
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "sort",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "location",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "quiet",
+      "required": false
+    }
+  ],
+  "sculpt_activate": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "object",
+      "required": true
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "state",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "match_state",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "match_by_segment",
+      "required": false
+    }
+  ],
+  "sculpt_deactivate": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "object",
+      "required": true
+    }
+  ],
+  "sculpt_iterate": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "object",
+      "required": true
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "state",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "cycles",
+      "required": false
+    }
+  ],
+  "select": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "name",
+      "required": true
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "selection",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "enable",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "quiet",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "merge",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "state",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "domain",
+      "required": false
+    }
+  ],
+  "set": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "name",
+      "required": true
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "value",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "selection",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "state",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "updates",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "log",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "quiet",
+      "required": false
+    }
+  ],
+  "set_symmetry": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "selection",
+      "required": true
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "a",
+      "required": true
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "b",
+      "required": true
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "c",
+      "required": true
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "alpha",
+      "required": true
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "beta",
+      "required": true
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "gamma",
+      "required": true
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "spacegroup",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "state",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "quiet",
+      "required": false
+    }
+  ],
+  "set_view": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "view",
+      "required": true
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "animate",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "quiet",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "hand",
+      "required": false
+    }
+  ],
+  "show": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "representation",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "selection",
+      "required": false
+    }
+  ],
+  "show_as": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "representation",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "selection",
+      "required": false
+    }
+  ],
+  "spectrum": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "expression",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "palette",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "selection",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "minimum",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "maximum",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "byres",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "quiet",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "interpolation",
+      "required": false
+    }
+  ],
+  "spheroid": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "object",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "average",
+      "required": false
+    }
+  ],
+  "stereo": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "toggle",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "quiet",
+      "required": false
+    }
+  ],
+  "super": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "mobile",
+      "required": true
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "target",
+      "required": true
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "cutoff",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "cycles",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "gap",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "extend",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "max_gap",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "object",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "matrix",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "mobile_state",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "target_state",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "quiet",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "max_skip",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "transform",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "reset",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "seq",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "radius",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "scale",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "base",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "coord",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "expect",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "window",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "ante",
+      "required": false
+    }
+  ],
+  "symexp": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "prefix",
+      "required": true
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "object",
+      "required": true
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "selection",
+      "required": true
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "cutoff",
+      "required": true
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "segi",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "quiet",
+      "required": false
+    }
+  ],
+  "system": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "command",
+      "required": true
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "async_",
+      "required": false
+    },
+    {
+      "kind": "VAR_KEYWORD",
+      "name": "kwargs",
+      "required": true
+    }
+  ],
+  "turn": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "axis",
+      "required": true
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "angle",
+      "required": true
+    }
+  ],
+  "unbond": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "atom1",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "atom2",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "quiet",
+      "required": false
+    }
+  ],
+  "unset": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "name",
+      "required": true
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "selection",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "state",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "updates",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "log",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "quiet",
+      "required": false
+    }
+  ],
+  "util.cbab": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "selection",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "quiet",
+      "required": false
+    }
+  ],
+  "util.cbac": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "selection",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "quiet",
+      "required": false
+    }
+  ],
+  "util.cbag": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "selection",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "quiet",
+      "required": false
+    }
+  ],
+  "util.cbak": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "selection",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "quiet",
+      "required": false
+    }
+  ],
+  "util.cbam": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "selection",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "quiet",
+      "required": false
+    }
+  ],
+  "util.cbao": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "selection",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "quiet",
+      "required": false
+    }
+  ],
+  "util.cbap": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "selection",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "quiet",
+      "required": false
+    }
+  ],
+  "util.cbas": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "selection",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "quiet",
+      "required": false
+    }
+  ],
+  "util.cbaw": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "selection",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "quiet",
+      "required": false
+    }
+  ],
+  "util.cbay": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "selection",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "quiet",
+      "required": false
+    }
+  ],
+  "util.cbc": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "selection",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "first_color",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "quiet",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "legacy",
+      "required": false
+    }
+  ],
+  "util.cbss": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "selection",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "helix_color",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "sheet_color",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "loop_color",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "quiet",
+      "required": false
+    }
+  ],
+  "util.chainbow": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "selection",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "palette",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "quiet",
+      "required": false
+    }
+  ],
+  "util.cnc": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "selection",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "quiet",
+      "required": false
+    }
+  ],
+  "util.rainbow": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "selection",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "reverse",
+      "required": false
+    }
+  ],
+  "util.ss": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "selection",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "state",
+      "required": false
+    }
+  ],
+  "viewport": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "width",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "height",
+      "required": false
+    }
+  ],
+  "zoom": [
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "selection",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "buffer",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "state",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "complete",
+      "required": false
+    },
+    {
+      "kind": "POSITIONAL_OR_KEYWORD",
+      "name": "animate",
+      "required": false
+    }
+  ]
+}

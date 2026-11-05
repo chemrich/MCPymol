@@ -20,19 +20,57 @@ permissions:
 
 jobs:
   fresh-install:
-    name: Fresh install (py${{ matrix.python-version }})
-    runs-on: ubuntu-latest
+    name: Fresh install (${{ matrix.os }}, py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        # The ends of the supported range, which resolve differently: several
-        # print-extra dependencies have dropped older Pythons.
-        python-version: ["3.11", "3.14"]
+        include:
+          - os: ubuntu-latest
+            python-version: "3.11"
+          - os: ubuntu-latest
+            python-version: "3.14"
+          - os: macos-latest
+            python-version: "3.12"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
       - name: Build the wheel
         run: uv build --wheel
+      # Bare install without [print] extras: verify minimal core dependencies
+      # and that mcpymol runs an MCP stdio initialize + list_tools round-trip.
+      - name: Install bare mcpymol into a clean venv
+        run: |
+          uv venv --python ${{ matrix.python-version }} /tmp/fresh-bare
+          uv pip install --python /tmp/fresh-bare/bin/python \
+            "mcpymol @ file://$(ls "$PWD"/dist/*.whl)"
+      - name: Verify bare server import and stdio round-trip
+        run: |
+          /tmp/fresh-bare/bin/python -I - <<'EOF'
+          import mcpymol.server
+          print("bare mcpymol.server import OK")
+          EOF
+          /tmp/fresh-bare/bin/python -I - <<'EOF'
+          import asyncio
+          from mcp import ClientSession, StdioServerParameters
+          from mcp.client.stdio import stdio_client
+
+          async def main() -> None:
+              params = StdioServerParameters(
+                  command="/tmp/fresh-bare/bin/mcpymol",
+                  args=[],
+                  env={"MCPYMOL_PORT": "9898"},
+              )
+              async with stdio_client(params) as (read, write), ClientSession(read, write) as session:
+                  init = await session.initialize()
+                  tools = await session.list_tools()
+                  print(init.server_info.name, init.server_info.version, len(tools.tools), "tools")
+                  assert len(tools.tools) == 135, f"Expected 135 tools, got {len(tools.tools)}"
+
+          asyncio.run(main())
+          EOF
       # `uv pip` never reads uv.lock: this resolves the wheel's own metadata,
       # newest versions first, exactly as `pip install 'mcpymol[print]'` would.
       - name: Install it into a clean venv, without the lockfile

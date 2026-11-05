@@ -1,0 +1,41 @@
+name: Network contract tests
+
+on:
+  schedule:
+    - cron: "23 7 * * 1" # Mondays 07:23 UTC
+  workflow_dispatch:
+
+concurrency:
+  group: network-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  network:
+    name: Network contract tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+      - name: System OpenGL libraries
+        run: sudo apt-get update -q && sudo apt-get install -y -q libopengl0 libgl1
+      - name: Install dependencies with print extra
+        run: uv sync --locked --all-groups --extra print
+      - name: Install headless PyMOL 3.1.0 via micromamba
+        run: |
+          curl -fsSL https://micro.mamba.pm/api/micromamba/linux-64/latest | tar -xvj bin/micromamba
+          ./bin/micromamba create -y -p /tmp/pymol-env -c conda-forge pymol-open-source=3.1.0 python=3.12
+      - name: Run network test suite against headless PyMOL
+        run: |
+          MCPYMOL_PORT=9898 /tmp/pymol-env/bin/pymol -ckqK "$PWD/src/mcpymol/plugin.py" >/tmp/pymol-live.log 2>&1 &
+          PYMOL_PID=$!
+          trap 'kill $PYMOL_PID 2>/dev/null || true' EXIT
+          for i in $(seq 1 60); do
+            if nc -z 127.0.0.1 9898 2>/dev/null; then break; fi
+            sleep 0.5
+          done
+          MCPYMOL_TEST_PORT=9898 uv run --frozen --extra print pytest -m network -v -rs
