@@ -14,7 +14,7 @@ PyMOL is great, but its syntax is famously obscure — and despite the name, it 
 
 - **A vocabulary the LLM understands.** Tools like `fetch_structure`, `ligand_view`, `interface_view`, `mutation_view`, `conservation_view` do high-level setup in one call: pick the biological assembly, hide solvent, color sensibly, label the right residues, draw the right H-bonds.
 - **Renders the model can see.** `render` ray-traces and hands the image straight back, so the assistant can look at what it made and fix it — rather than writing a PNG it has no way to inspect.
-- **87 PyMOL primitives** exposed as individual tools (`show`, `hide`, `color`, `select`, `distance`, `align`, `spectrum`, …) so the model can compose finer motions when the high-level tools don't quite fit. 121 tools in total, every parameter documented in the tool schema. When even that runs out, `execute_pymol_command` passes a raw PyMOL command straight through and waits for it, returning what PyMOL printed and, if PyMOL rejected a line, which one and why.
+- **87 PyMOL primitives** exposed as individual tools (`show`, `hide`, `color`, `select`, `distance`, `align`, `spectrum`, …) so the model can compose finer motions when the high-level tools don't quite fit. 135 tools in total, every parameter documented in the tool schema. When even that runs out, `execute_pymol_command` passes a raw PyMOL command straight through and waits for it, returning what PyMOL printed and, if PyMOL rejected a line, which one and why.
 - **Predicted structures.** A UniProt accession fetches from AlphaFold DB and colors by pLDDT confidence in the official palette — via `fetch_structure` or `fetch_alphafold` directly.
 - **Scene introspection.** `list_objects`, `list_chains`, `list_ligands` and `structure_info` let the model check what's actually loaded before guessing, `count_atoms` catches a selection that matches nothing — otherwise invisible until the render comes out blank — and `atom_properties` reaches occupancy and altlocs that no per-residue view can show.
 - **Your own files too.** `load_structure` opens a local PDB/mmCIF — a model you built, a docking pose, an MD frame — through the same prep and styling as a fetched entry.
@@ -82,8 +82,8 @@ yourself.
 
 ## Requirements
 
-- **PyMOL** — the open-source build is what this is developed against (`brew install pymol` on macOS, `apt-get install pymol` on Debian/Ubuntu). The Schrödinger incentive build works too, if its embedded Python is 3.10 or newer (type `print(sys.version)` in PyMOL to check): older Incentive 2.x builds aren't supported, and the plugin says so at startup rather than failing quietly. MCPymol drives a PyMOL you already have; it does not install or bundle one.
-- **Python 3.11+** for the bridge. This is *separate* from the Python inside PyMOL, which MCPymol never imports into.
+- **PyMOL** — developed against Open-Source PyMOL 3.1 (`brew install pymol` on macOS; on Linux, `conda install -c conda-forge pymol-open-source` or `apt-get install pymol` on Ubuntu 26.04+). Debian/Ubuntu 22.04 and 24.04 ship PyMOL 2.5 via `apt`, which works across the standard tools and views (only `print_ribbon_view(..., spine_in_strands=False)` requires PyMOL 3.1). The Schrödinger Incentive build works if its embedded Python is 3.10 or newer (`print(sys.version)` inside PyMOL); older Incentive 2.x builds are not supported. MCPymol drives an existing PyMOL installation and does not bundle one.
+- **Python 3.11+** for the bridge (separate from PyMOL's internal Python). On Ubuntu 22.04 where system `python3` is 3.10, `uv tool install --python 3.12 mcpymol` fetches a compatible Python automatically.
 - **An MCP client** — Claude Code, Claude Desktop, or Gemini CLI.
 
 Optional, per feature:
@@ -91,7 +91,7 @@ Optional, per feature:
 | For | You also need |
 | --- | --- |
 | `poisson_boltzmann_view` | `apbs` and `pdb2pqr` on `PATH` |
-| `print_export`, `print_ribbon_view` | the `print` extra — install it the way you installed MCPymol, e.g. `uv tool install 'mcpymol[print]'` (see [3D Printing Export](#-3d-printing-export)) |
+| `print_export`, `print_ribbon_view` | the `print` extra (`uv tool install 'mcpymol[print]'`); on Linux also `sudo apt-get install libopengl0` (see [3D Printing Export](#-3d-printing-export)) |
 | `conservation_view` | network access to an MMseqs2 server (ColabFold's public API by default). The chain's sequence is sent to that server, so for an unpublished sequence point `MCPYMOL_MMSEQS_URL` at one you run |
 | `fetch_structure`, `structure_info` | network access to the RCSB |
 
@@ -218,7 +218,7 @@ sounds worse than installing, install.
 
 #### Restricted environments — no `uv`
 
-If `uv` is blocked by your org's security policy, use a standard venv. On Linux you may need `sudo apt-get install python3-venv pymol` first.
+If `uv` is blocked by your org's security policy, use a standard venv with Python 3.11 or newer. On Debian/Ubuntu you may need `sudo apt-get install python3-venv pymol` first (on Ubuntu 22.04, where default `python3` is 3.10, install a newer Python such as `python3.11-venv` and invoke `python3.11 -m venv` below).
 
 ```bash
 python3 -m venv ~/.venvs/mcpymol

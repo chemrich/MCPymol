@@ -32,13 +32,8 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Bio-Informatics",
     "Topic :: Scientific/Engineering :: Visualization",
 ]
-# Declare what src/ imports, and cap each at the next major. CI installs from
-# uv.lock, so a bound left open here is invisible until a user resolves fresh:
-# mcp 2.0 removed mcp.server.fastmcp, and 1.5.x broke on install once nothing
-# held mcp below it. Raise a cap only after the fresh-install job passes on it.
-#   mcp       MCPServer and Image (mcp.server.mcpserver, app.py/rendering.py).
-#             2.x: synchronous tools run on worker threads, hence app.SESSION_LOCK.
-#   pydantic  Field metadata on every tool signature.
+# Runtime dependencies are capped at the next major version so fresh installs
+# cannot silently resolve an incompatible major bump.
 dependencies = [
     "mcp>=2.3.0,<3",
     "pydantic>=2,<3",
@@ -51,17 +46,7 @@ Issues = "https://github.com/chemrich/MCPymol/issues"
 Changelog = "https://github.com/chemrich/MCPymol/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
-# 3D-print export (print_export tool): mesh repair to watertight STL.
-# printing.py imports trimesh, pymeshlab, manifold3d, numpy and scipy directly;
-# scikit-image is a soft dependency of trimesh for the calls it makes.
-#   pymeshlab     poisson method. 2023.12.post2 is the first with macOS arm64 wheels.
-#   manifold3d    exact boolean union of the sticks, spheres and rods that
-#                 representation="displayed" exports. PyMOL writes those as
-#                 primitives, not triangles, and voxelising them grew sticks 30-60%.
-#   numpy, scipy  geometry and cKDTree in printing.py; scipy also backs
-#                 trimesh's voxelized().fill().
-#   scikit-image  marching_cubes in the voxel method, which is also auto's fallback;
-#                 without it voxel raises ModuleNotFoundError. Pulls in networkx.
+# 3D-print export (print_export tool): mesh repair and boolean union to watertight STL.
 print = [
     "trimesh>=4.0",
     "pymeshlab>=2023.12.post2",
@@ -72,9 +57,8 @@ print = [
 ]
 
 [project.scripts]
-# The CLI, not mcpymol.server: the plugin flags must work even when the MCP
-# stack can't be imported (how 1.5.0 broke), so you can still find, install
-# or remove the plugin. Bare `mcpymol` imports the server itself.
+# Point at mcpymol.cli so plugin management flags (--install-plugin,
+# --plugin-path, --uninstall-plugin) work without importing the MCP server stack.
 mcpymol = "mcpymol.cli:main"
 
 [dependency-groups]

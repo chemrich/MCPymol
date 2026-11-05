@@ -218,7 +218,11 @@ def test_serve_connection_happy_path(plugin_server):
 
     res = _served(plugin_server, sock)
 
-    assert res == {"status": "success", "result": ["A"]}
+    assert res == {
+        "status": "success",
+        "result": ["A"],
+        "plugin_version": plugin_module.PLUGIN_VERSION,
+    }
     # Set at accept, then narrowed to what is left of the request's budget.
     waits = [c.args[0] for c in sock.settimeout.call_args_list]
     assert waits[0] == plugin_module.RECV_TIMEOUT
@@ -1437,6 +1441,7 @@ def test_requests_are_served_when_the_app_nap_guard_fails(macos_gui):
             assert send_request("get_chains", args=["all"]) == {
                 "status": "success",
                 "result": ["A"],
+                "plugin_version": plugin_module.PLUGIN_VERSION,
             }
     finally:
         server.stop()
@@ -1755,3 +1760,34 @@ def test_each_read_waits_only_for_what_is_left_of_the_budget(monkeypatch):
         _recv_all(sock)
     waits = [c.args[0] for c in sock.settimeout.call_args_list]
     assert waits == [plugin_module.RECV_TIMEOUT - t for t in (0.0, 10.0, 25.0, 29.0)]
+
+
+def test_plugin_version_matches_pyproject():
+    """PLUGIN_VERSION embedded in plugin.py must match pyproject.toml."""
+    import tomllib
+    from importlib.metadata import version
+    from pathlib import Path
+
+    pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    declared = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]["version"]
+    assert declared == plugin_module.PLUGIN_VERSION
+    assert version("mcpymol") == plugin_module.PLUGIN_VERSION
+
+
+def test_serialization_adds_plugin_version_without_touching_warnings():
+    raw = {"status": "success", "result": "OK"}
+    encoded = json.loads(plugin_module._dumps_response(raw).decode("utf-8"))
+    assert encoded == {
+        "status": "success",
+        "result": "OK",
+        "plugin_version": plugin_module.PLUGIN_VERSION,
+    }
+    assert "plugin_version" not in raw
+    assert "warnings" not in encoded
+
+    err = json.loads(plugin_module._error_bytes("boom").decode("utf-8"))
+    assert err == {
+        "status": "error",
+        "error": "boom",
+        "plugin_version": plugin_module.PLUGIN_VERSION,
+    }

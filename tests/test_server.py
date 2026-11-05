@@ -269,6 +269,8 @@ def test_load_structure_success(mock_sr):
     assert "load" in acts
     assert "remove" in acts
     assert "hide" in acts
+    set_names = [c.kwargs["args"][0] for c in mock_sr.call_args_list if c.args[0] == "set"]
+    assert "mouse_wheel_scale" not in set_names
 
 
 @patch("mcpymol.structures.send_request")

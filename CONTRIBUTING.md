@@ -35,7 +35,7 @@ pay on every commit, unremarkable on a push.
 ## Merging
 
 `main` is protected. Every change goes through a pull request, and a PR cannot
-merge until all nine CI checks are green *and* the branch is up to date with
+merge until all required CI checks are green *and* the branch is up to date with
 `main`. The rule applies to admins, so there is no bypass — `gh pr merge
 --admin` is refused the same as the button.
 
@@ -70,7 +70,7 @@ pytest -m network   # AlphaFold DB's API still returns what we assume
 
 # every tool, called against a disposable headless PyMOL on a test port
 MCPYMOL_PORT=9898 pymol -ckqK src/mcpymol/plugin.py &
-MCPYMOL_TEST_PORT=9898 MCPYMOL_LIVE_MIN_PASSED=230 pytest -m live
+MCPYMOL_TEST_PORT=9898 MCPYMOL_LIVE_MIN_PASSED=240 uv run --extra print pytest -m live
 ```
 
 **`-m live` clears the PyMOL session it connects to**, so it runs only against

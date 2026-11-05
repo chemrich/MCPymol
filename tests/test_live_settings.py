@@ -56,6 +56,21 @@ def test_interface_report_puts_the_dot_settings_back():
     assert (_setting("dot_solvent"), _setting("dot_density")) == before
 
 
+def test_load_structure_leaves_mouse_wheel_scale_alone(tmp_path):
+    """Loading a structure must not override the user's mouse_wheel_scale."""
+    from mcpymol.structures import load_structure
+
+    _do("fab ACDEFG, src")
+    pdb = tmp_path / "pep.pdb"
+    assert send_request("save", args=[str(pdb), "src"]).get("status") == "success"
+    _do("set mouse_wheel_scale, 0.75")
+
+    out = load_structure(file_path=str(pdb), obj_name="pep", replace=False)
+
+    assert out.startswith("Successfully loaded"), out
+    assert float(_setting("mouse_wheel_scale")) == pytest.approx(0.75)
+
+
 def test_a_long_ligand_name_is_listed_whole():
     """Read from PDB text columns 18-20, a ligand named ABCDE was listed as ABC."""
     from mcpymol.structures import list_ligands

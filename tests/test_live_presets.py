@@ -127,15 +127,23 @@ def test_ligand_view_refuses_a_ligand_that_is_not_there(structure):
 
 
 def test_loading_nucleic_acid_sets_its_colours_where_pymol_reads_them(rejected, tmp_path):
-    """cartoon_nucleic_acid_color given an atom selection was stored per atom
-    and never drawn; PyMOL only warned. It is set on the object now."""
+    """cartoon_nucleic_acid_color must be set at the object level, not per-atom."""
     if not _bridge_reachable():
         pytest.skip(f"no PyMOL plugin on {bridge.HOST}:{bridge.PORT}")
     send_request("reinitialize")
-    send_request("do", args=["fnab ACGTACGT, name=dna_src, mode=DNA, form=B, dbl_helix=1"])
     path = tmp_path / "dna.pdb"
-    assert send_request("save", args=[str(path), "dna_src"]).get("status") == "success"
-    send_request("delete", args=["dna_src"])
+    path.write_text(
+        "ATOM      1  P    DA A   1       0.000   0.000   0.000  1.00 20.00           P\n"
+        "ATOM      2  O5'  DA A   1       1.500   0.000   0.000  1.00 20.00           O\n"
+        "ATOM      3  C5'  DA A   1       2.200   1.200   0.000  1.00 20.00           C\n"
+        "ATOM      4  C4'  DA A   1       3.700   1.000   0.000  1.00 20.00           C\n"
+        "ATOM      5  C3'  DA A   1       4.200  -0.400   0.000  1.00 20.00           C\n"
+        "ATOM      6  O3'  DA A   1       5.600  -0.400   0.000  1.00 20.00           O\n"
+        "ATOM      7  C1'  DA A   1       4.200   1.800   1.200  1.00 20.00           C\n"
+        "ATOM      8  N9   DA A   1       5.600   2.000   1.200  1.00 20.00           N\n"
+        "ATOM      9  C4   DA A   1       6.400   2.500   0.200  1.00 20.00           C\n"
+        "END\n"
+    )
 
     result = load_structure(file_path=str(path), obj_name="dna")
 
