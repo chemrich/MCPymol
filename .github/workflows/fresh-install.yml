@@ -1,14 +1,7 @@
 name: Fresh install
 
-# Every job in ci.yml installs from uv.lock, so it tests the versions we pinned
-# rather than the ones a user gets. `pip install mcpymol` ignores the lock and
-# resolves pyproject's ranges against today's PyPI. That gap shipped 1.5.0 and
-# 1.5.1 broken: once fastmcp 4 let mcp 2.x in, `import mcpymol.server` raised
-# ModuleNotFoundError, and CI stayed green throughout.
-#
-# This job installs the built wheel the way a user would. It runs on a schedule
-# as well, because an upstream release can break a fresh install without any
-# commit here.
+# Install the built wheel in a clean virtualenv without uv.lock to test the
+# unpinned dependency resolution users get from `pip install 'mcpymol[print]'`.
 
 on:
   pull_request:

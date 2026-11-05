@@ -1,124 +1,10 @@
 # Known issues
 
-Open defects with enough diagnosis attached to act on. Fix one, delete its
-section. Anything here that turns out to be wrong should be corrected in place
-rather than left to mislead.
+Open defects and limitations with diagnosis attached. Fixed items are recorded in `CHANGELOG.md` and removed from here.
 
 ---
 
-## 1. `fetch_structure` can wipe the session — **fixed**
-
-**Was [#15](https://github.com/chemrich/MCPymol/issues/15).**
-
-The mechanism was not the post-fetch cleanup. `_apply_multimer_heuristic`
-already returns early on an object with no chains, so it was innocent. The real
-chain was:
-
-1. `reinitialize` ran **before** the fetch, unconditionally — that is what
-   cleared the session.
-2. `cmd.fetch` does not raise when a download fails; it just produces nothing.
-3. The plugin's fetch handler returns `{"status": "success"}` without checking
-   that an object was created.
-
-So the destruction happened before the failure, and the success report hid it.
-
-All three of the proposed guards were right and are now in place, in
-`fetch_structure`, `load_structure` and `fetch_alphafold` alike:
-
-- Only the object being replaced is deleted up front.
-- `_verify_loaded` counts atoms after loading and returns an error naming the
-  likely cause (a proxy or VPN in front of the RCSB) when there are none.
-- Clearing the rest of the session happens **after** that check, by object
-  name, via `_clear_other_objects`. Settings still get a clean slate through
-  `reinitialize settings`, which resets a previous preset's fog or
-  `ray_trace_mode` without touching objects.
-
-Since closed as well: the plugin's `fetch` handler now answers an error when
-`cmd.fetch` returns -1, which it does instead of raising when a download
-fails. And `_clear_other_objects` lists names with `get_names("objects")`:
-`get_object_list` returns molecules only, so a replaced structure's maps,
-ramps, measurements and groups used to survive (`tests/test_live_replace.py`).
-
----
-
-## 2. Seven tools error on every input — **fixed**
-
-**Was also [#15](https://github.com/chemrich/MCPymol/issues/15).** Every
-diagnosis in the original report was correct, verified by introspecting
-`cmd` and `pymol.util` in a live PyMOL 3.1.
-
-| Tool | Was | Now |
-|---|---|---|
-| `as` | `cmd.as` — a Python keyword, unresolvable | `cmd.show_as` |
-| `util_color_by_element` | `util.color_by_element` — does not exist | `util.cnc` |
-| `util_color_secondary` | `util.color_secondary` — does not exist | `util.cbss` |
-| `spheroid` | selection in an object-name slot | takes `obj` |
-| `h_fill` | selection landed in `quiet` and was `int()`d | takes no arguments |
-| `sculpt_iterate` | `(iterations, obj)` | `(obj, state, cycles)` |
-| `symexp` | one selection for two parameters | `(prefix, obj_name, selection, cutoff, segi)` |
-
-One correction to the original report: **`spheroid` did not error on every
-input.** It works when given an object name and fails only on a selection
-expression, so it was a parameter-contract mismatch rather than a dead tool.
-
-`h_fill` is now argument-free and honest about being unusable from here:
-`cmd.h_fill` acts on PyMOL's editor pick, which cannot be set over the bridge.
-It returns `Editor not active` unless an atom is picked in the GUI. `h_add` is
-the selection-based alternative.
-
-Why the suite missed all seven: `tests/test_auto_wrappers.py` asserts the
-payload we *send*, and we were faithfully sending the wrong thing. The fix adds
-tests that pin each action name and argument order against the real PyMOL API.
-
----
-
-## 3. numpy results reach clients as a repr string — **fixed**
-
-`_dumps_response` fell back to `repr()` whenever `json.dumps` raised, so the
-numpy arrays returned by `get_coords` and `get_atom_coords` arrived as strings
-that looked like data and could not be used as data.
-
-A `_jsonable()` pass now runs before the repr fallback, converting anything
-exposing `.tolist()` and recursing through dicts and sequences. The repr
-fallback is preserved for genuinely opaque objects. Verified against a live
-PyMOL: `get_coords` returns `[-0.0009, 0.0637, -0.4905]` rather than
-`"array([[...]])"`.
-
-The same branch added the `iterate_to_list` action — the only route to
-properties that live on atoms rather than residues or objects — and it is now
-exposed to clients as the `atom_properties` tool, so occupancy, altloc and
-per-atom B-factor are reachable end to end.
-
----
-
-## 4. Four presets send commands PyMOL rejects — **fixed**
-
-Found while making `execute_pymol_command` report PyMOL's errors: a request log
-run through the real tools showed four calls PyMOL refuses or ignores. Each sits
-in a direct `send_request` whose result the preset discards, so the preset still
-reports success. Verified on PyMOL 3.1.0.
-
-| Where | Call | What PyMOL says |
-|---|---|---|
-| `views.py` `pharmacophore_view` | `color violet, <lig> and elem C and inring` (and `not inring`) | `Invalid selection name "inring"` — ring carbons are never coloured |
-| `views.py` `cinematic_view` | `set fog_color, black` | `unknown Setting: 'fog_color'` |
-| `views.py` `pointillist_view` | `color grey30, (<obj>) and polymer.protein and ribbon` | `Malformed selection` |
-| `structures.py` loading | `set cartoon_nucleic_acid_color, brightorange, (<obj>) and polymer.nucleic` | `Setting-Warning: … is a object-state-level setting` — stored per atom, never drawn |
-
-The plugin now returns these as errors or warnings in the response; the fix is
-at each call site (and a test that reads the response).
-
-**Fixed** at each call site, each form checked live first: `byring (<lig>)` for
-ring carbons (on Phe-Trp-Tyr it finds exactly the 6 + 8 + 6), no `fog_color`
-(fog takes the background colour), `set ribbon_color` on the object (colouring
-atoms would also recolour the pointillist dots), and the nucleic-acid colours
-set on the object. `tests/test_live_presets.py` runs every preset with a
-recorder on every response and fails on anything PyMOL rejects or warns about.
-It caught a reinstated `fog_color` when mutation-checked.
-
----
-
-## 5. GUI-only behaviour the headless live suite cannot see — open
+## 1. GUI-only behaviour the headless live suite cannot see — open
 
 The live suites run against `pymol -ckqK`. These were seen only in the Qt GUI:
 
@@ -141,31 +27,25 @@ The live suites run against `pymol -ckqK`. These were seen only in the Qt GUI:
   prints while a request runs, but PyMOL prints some messages while it redraws
   after a command has returned (`Extrude-Warning` from `cartoon putty` on
   uniform B-factors, surface update errors). Those land in the next request's
-  warnings, under a tool that did not cause them (reproduced headless, 5 of 5).
-  `print_ribbon_view` treats a `Selector-Error` in its own warnings as a failed
-  call, so one printed by something else at that moment would stop it; redraw
-  messages are never `Selector-Error`s, and PyMOL's API lock keeps a command
-  typed in the GUI from running inside a single call.
-  Running every action on the main thread would fix it, at the cost of freezing
-  the window during ray traces.
+  warnings, under a tool that did not cause them.
 - **Re-running the plugin drops a request sent at that moment.** `run
   plugin.py` (through `execute_pymol_command`, or `stop_mcp`/`start_mcp`)
   closes the old listening socket before the new one binds, so a request
   already waiting in its backlog is reset and never run.
-- **Plugin and bridge should be the same version.** A released bridge (1.5.x)
-  driving this plugin sends `do` with a 10 s budget, but `do` now replies only
-  after the command has run, so a long command through `execute_pymol_command`
-  times out there although it still runs. `uv tool install` and
-  `mcpymol --install-plugin` keep the two together.
+- **Plugin and bridge should be the same version.** A pre-1.6.0 bridge driving
+  this plugin sends `do` with a 10 s budget, whereas `do` now replies only after
+  the command has run, so a long command through `execute_pymol_command` times
+  out on the old bridge while continuing to run. `uv tool install` and
+  `mcpymol --install-plugin` keep the two together, and the bridge now warns on
+  a `plugin_version` mismatch.
 
 ---
 
-## 6. Print export limits — open
+## 2. Print export limits — open
 
 - **Poisson on open cartoon soup** leaves small fragments (1ubq print ribbon:
-  one 857 mm³ piece plus nine of 0.004–2.6 mm³). `bodies="all"` now lists them
-  as separate pieces where the old keep-largest step hid them; use
-  `method="voxel"` for cartoons.
+  one 857 mm³ piece plus nine of 0.004–2.6 mm³). `bodies="all"` lists them as
+  separate pieces; use `method="voxel"` for cartoons.
 - **The light path** (`auto` on an already-closed export) counts two closed
   shells that overlap as separate pieces, though they print as one.
 - **Grid-aligned geometry is slightly over-corrected** by the voxel-growth
@@ -180,14 +60,14 @@ The live suites run against `pymol -ckqK`. These were seen only in the Qt GUI:
 
 ---
 
-## 7. A raw command can still crash PyMOL — open
+## 3. A raw command can still crash PyMOL — open
 
 PyMOL 3.1.0 aborts or segfaults when `rms`, `rms_cur`, `fit`, `intra_rms` or
 `intra_rms_cur` get a selection it cannot resolve. The plugin vets those five
 when they arrive as actions, which covers every tool and wiggles' port. A
 command string sent through `execute_pymol_command`, such as `rms_cur nosuch,
 1ubq`, goes to PyMOL's parser as typed and is not vetted, so it can still take
-PyMOL down. Vetting it would mean parsing PyMOL command syntax in the plugin.
+PyMOL down. Vetting it requires guarding the plugin's private parser.
 
 ---
 

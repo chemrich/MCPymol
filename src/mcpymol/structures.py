@@ -417,7 +417,6 @@ def fetch_structure(
 
     if replace:
         _clear_other_objects(name)
-    send_request("set", args=["mouse_wheel_scale", "0.1"])
 
     _apply_multimer_heuristic(name, multimer_cutoff)
     _apply_ghost_heart(name)
@@ -461,7 +460,6 @@ def load_structure(
 
     if replace:
         _clear_other_objects(obj_name)
-    send_request("set", args=["mouse_wheel_scale", "0.1"])
 
     _apply_multimer_heuristic(obj_name, multimer_cutoff)
     _apply_ghost_heart(obj_name)
@@ -543,7 +541,6 @@ def fetch_alphafold(
 
         if replace:
             _clear_other_objects(name)
-        send_request("set", args=["mouse_wheel_scale", "0.1"])
     finally:
         try:
             os.unlink(path)

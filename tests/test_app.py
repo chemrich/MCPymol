@@ -78,3 +78,48 @@ def test_modules_keep_the_plain_function():
     from mcpymol.structures import list_objects
 
     assert not hasattr(list_objects, "__wrapped__")
+
+
+def test_every_tool_has_explicit_annotations():
+    """Every registered tool carries complete, conservative MCP ToolAnnotations."""
+    from mcpymol.app import (
+        DESTRUCTIVE_TOOLS,
+        NON_IDEMPOTENT_TOOLS,
+        OPEN_WORLD_TOOLS,
+        READ_ONLY_TOOLS,
+    )
+
+    tools = asyncio.run(mcp.list_tools())
+    names = {t.name for t in tools}
+
+    # Every set in app.py must refer only to real registered tools.
+    assert names >= READ_ONLY_TOOLS
+    assert names >= DESTRUCTIVE_TOOLS
+    assert names >= OPEN_WORLD_TOOLS
+    assert names >= NON_IDEMPOTENT_TOOLS
+    assert READ_ONLY_TOOLS.isdisjoint(DESTRUCTIVE_TOOLS)
+    assert READ_ONLY_TOOLS.isdisjoint(NON_IDEMPOTENT_TOOLS)
+
+    # Tools that evaluate Python or temporarily mutate session state must never
+    # be marked read-only.
+    for non_read_only in (
+        "atom_properties",
+        "interface_report",
+        "execute_pymol_command",
+        "distance",
+        "angle",
+        "dihedral",
+    ):
+        assert non_read_only not in READ_ONLY_TOOLS
+
+    for tool in tools:
+        ann = tool.annotations
+        assert ann is not None, f"{tool.name} has no ToolAnnotations"
+        assert isinstance(ann.read_only_hint, bool)
+        assert isinstance(ann.destructive_hint, bool)
+        assert isinstance(ann.idempotent_hint, bool)
+        assert isinstance(ann.open_world_hint, bool)
+        assert ann.read_only_hint is (tool.name in READ_ONLY_TOOLS)
+        if ann.read_only_hint:
+            assert ann.destructive_hint is False
+            assert ann.idempotent_hint is True

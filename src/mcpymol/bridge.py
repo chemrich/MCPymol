@@ -11,43 +11,36 @@ import socket
 import sys
 import time
 from collections.abc import Callable
+from importlib.metadata import PackageNotFoundError, version
 from typing import Any
+
+try:
+    _BRIDGE_VERSION = version("mcpymol")
+except PackageNotFoundError:
+    _BRIDGE_VERSION = ""
+
+_WARNED_VERSIONS: set[str] = set()
 
 HOST = "127.0.0.1"
 
 # Port can be overridden via environment variable, e.g.: MCPYMOL_PORT=9867 uv run mcpymol
 PORT = int(os.environ.get("MCPYMOL_PORT", 9876))
 
-# Operations that legitimately run for minutes: ray-tracing a large scene,
-# writing a movie frame series, saving a big assembly.  The 10 s default is
-# right for the interactive commands but guarantees a spurious timeout here.
+# Timeout for long-running operations (ray-tracing, movie frames, large saves).
 _SLOW_OP_TIMEOUT = float(os.environ.get("MCPYMOL_SLOW_OP_TIMEOUT", 600.0))
 
-# A single recv() chunk size.  We loop until the plugin half-closes, so this
-# is just a memory hint, not a cap on the total response size.
+# Single recv() chunk size; send_request loops until the plugin half-closes.
 _RECV_CHUNK = 65536
 
-# Default socket budget for an interactive command.  Slow operations override
-# it with _SLOW_OP_TIMEOUT.
+# Default socket budget for interactive commands.
 _DEFAULT_TIMEOUT = 10.0
 
-# Sleep shorter than this is not worth mentioning: clock jitter, a lid opened
-# and closed.  The two renders that "stalled" for 10 minutes had the Mac
-# asleep for 579 s and 716 s of their wait.
+# Minimum sleep duration (seconds) worth reporting on a slow or timed-out call.
 _ASLEEP_REPORT_S = 5.0
 
 
 def _clock_with_sleep() -> float | None:
-    """A clock that keeps counting while the computer sleeps, or None.
-
-    ``time.monotonic()`` stops during sleep — on macOS it is
-    mach_absolute_time — so a request that spanned a sleep looks exactly as
-    long as the time the machine was awake, and socket timeouts are counted
-    the same way.  Measured on this Mac: since boot, monotonic() read 218 h
-    and CLOCK_MONOTONIC 671 h.  The difference between the two over a request
-    is how long the machine slept during it.  Linux spells the sleep-counting
-    clock CLOCK_BOOTTIME; Windows has none, so nothing is measured there.
-    """
+    """Return a monotonic clock reading that continues counting during system sleep, or None."""
     if sys.platform == "darwin":
         return time.clock_gettime(time.CLOCK_MONOTONIC)
     boottime = getattr(time, "CLOCK_BOOTTIME", None)
@@ -123,17 +116,8 @@ def send_request(
                 if not chunk:
                     break
                 chunks.append(chunk)
-                # JSON is self-delimiting once the whole document has arrived,
-                # so a parse attempt doubles as an end-of-message test — but
-                # only attempt it on a short read.
-                #
-                # A full-size chunk means the socket had at least that much
-                # waiting, so the message is very unlikely to end there, and
-                # parsing anyway costs a scan of everything received so far.
-                # Doing that per chunk is quadratic: an 8 MB response spent
-                # ~476 ms on parses guaranteed to fail. The plugin half-closes
-                # when it is done, which is the normal exit; this check only
-                # exists so a peer that does not (a test mock) still works.
+                # Only attempt an incremental JSON parse on a short read so
+                # multi-chunk responses aren't re-parsed on every chunk.
                 if len(chunk) < _RECV_CHUNK:
                     try:
                         res = json.loads(b"".join(chunks).decode("utf-8"))
@@ -193,7 +177,24 @@ def send_request(
         }
     if asleep > _ASLEEP_REPORT_S:
         res["asleep_s"] = round(asleep, 1)
+    _check_plugin_version(res)
     return res
+
+
+def _check_plugin_version(res: dict) -> None:
+    """Warn once per session on stderr if the PyMOL plugin version differs from the bridge."""
+    if _WARNED_VERSIONS or not _BRIDGE_VERSION:
+        return
+    plugin_ver = res.get("plugin_version")
+    if plugin_ver == _BRIDGE_VERSION:
+        return
+    reported = str(plugin_ver) if plugin_ver else "<=1.6.0 (no plugin_version)"
+    _WARNED_VERSIONS.add(reported)
+    print(
+        f"MCPymol warning: bridge is v{_BRIDGE_VERSION} but the PyMOL plugin is {reported}. "
+        f"Run `mcpymol --install-plugin` and restart PyMOL so both match.",
+        file=sys.stderr,
+    )
 
 
 def _asleep_sentence(asleep: float) -> str:

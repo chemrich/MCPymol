@@ -18,7 +18,7 @@ import pytest
 
 import mcpymol.bridge as bridge_module
 from mcpymol.bridge import send_request
-from mcpymol.plugin import PyMOLSocketServer
+from mcpymol.plugin import PLUGIN_VERSION, PyMOLSocketServer
 
 
 @pytest.fixture
@@ -59,7 +59,7 @@ def test_round_trip_success(live_bridge):
         handler.return_value = {"status": "success", "result": ["A", "B"]}
         res = send_request("get_chains", args=["all"])
 
-    assert res == {"status": "success", "result": ["A", "B"]}
+    assert res == {"status": "success", "result": ["A", "B"], "plugin_version": PLUGIN_VERSION}
     payload = handler.call_args[0][0]
     assert payload["action"] == "get_chains"
     assert payload["args"] == ["all"]
@@ -96,7 +96,7 @@ def test_round_trip_error_response(live_bridge):
         handler.return_value = {"status": "error", "error": "no such object"}
         res = send_request("zoom", args=["nope"])
 
-    assert res == {"status": "error", "error": "no such object"}
+    assert res == {"status": "error", "error": "no such object", "plugin_version": PLUGIN_VERSION}
 
 
 def test_round_trip_unicode(live_bridge):
@@ -140,7 +140,7 @@ def test_stalled_client_does_not_wedge_the_listener(live_bridge):
                 handler.return_value = {"status": "success", "result": "OK"}
                 res = send_request("refresh", timeout=15.0)
 
-            assert res == {"status": "success", "result": "OK"}
+            assert res == {"status": "success", "result": "OK", "plugin_version": PLUGIN_VERSION}
         finally:
             stalled.close()
 
@@ -195,3 +195,33 @@ def test_non_json_garbage_gets_an_error_response(live_bridge):
     with patch.object(live_bridge, "handle_request") as handler:
         handler.return_value = {"status": "success", "result": "OK"}
         assert send_request("refresh")["status"] == "success"
+
+
+def test_version_skew_warns_once_per_session(live_bridge, monkeypatch, capsys):
+    """When plugin_version differs from the bridge's version (or is absent),
+    send_request warns once on stderr and does not touch res['warnings']."""
+    bridge_module._WARNED_VERSIONS.clear()
+    monkeypatch.setattr(bridge_module, "_BRIDGE_VERSION", "9.9.9")
+
+    with patch.object(live_bridge, "handle_request") as handler:
+        handler.return_value = {"status": "success", "result": "OK"}
+        first = send_request("refresh")
+        second = send_request("refresh")
+
+    err = capsys.readouterr().err
+    assert err.count("MCPymol warning: bridge is v9.9.9") == 1
+    assert PLUGIN_VERSION in err
+    assert "warnings" not in first
+    assert "warnings" not in second
+
+
+def test_missing_plugin_version_warns_as_pre_160(monkeypatch, capsys):
+    """A response without plugin_version is reported as <=1.6.0 once."""
+    bridge_module._WARNED_VERSIONS.clear()
+    monkeypatch.setattr(bridge_module, "_BRIDGE_VERSION", "1.6.0")
+
+    bridge_module._check_plugin_version({"status": "success", "result": "OK"})
+    bridge_module._check_plugin_version({"status": "success", "result": "OK"})
+
+    err = capsys.readouterr().err
+    assert err.count("<=1.6.0 (no plugin_version)") == 1

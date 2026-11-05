@@ -34,6 +34,10 @@ from typing import IO, TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+# Embedded version reported in every socket response so the bridge can detect
+# version skew against a plugin loaded inside PyMOL's separate interpreter.
+PLUGIN_VERSION = "1.6.0"
+
 # Read once at import so the whole session is consistent.
 MCP_PORT = int(os.environ.get("MCPYMOL_PORT", 9876))
 
@@ -182,19 +186,13 @@ def _sendall(sock: socket.socket, payload: bytes) -> None:
 
 def _error_bytes(message: str) -> bytes:
     """Encode an error response in the bridge's wire format."""
-    return json.dumps({"status": "error", "error": message}).encode("utf-8")
+    return json.dumps(
+        {"status": "error", "error": message, "plugin_version": PLUGIN_VERSION}
+    ).encode("utf-8")
 
 
 def _jsonable(value: object) -> object:
-    """Best-effort conversion of a PyMOL return value into JSON-able data.
-
-    Several ``pymol.cmd`` functions return numpy arrays — ``get_coords`` and
-    ``get_atom_coords`` among them.  Without this they fall through to the
-    repr fallback below and reach the client as a *string* that merely looks
-    like data: a ``success`` response carrying something no caller can use.
-    Converting here keeps the repr fallback for genuinely opaque objects
-    (chempy models, handles) where a repr really is the best available.
-    """
+    """Convert numpy arrays and nested containers into JSON-serializable values."""
     if value is None or isinstance(value, (str, bytes, bool, int, float)):
         return value
     tolist = getattr(value, "tolist", None)  # numpy arrays and scalars
@@ -211,20 +209,15 @@ def _jsonable(value: object) -> object:
 
 
 def _dumps_response(response: dict) -> bytes:
-    """Serialize a response, degrading gracefully rather than failing to reply.
-
-    ``pymol.cmd`` functions are free to return objects json knows nothing about
-    (chempy models, numpy arrays, opaque handles).  Letting ``json.dumps``
-    raise would send the client nothing at all, which it can only report as an
-    empty response — so coerce what is coercible, then fall back to a repr of
-    the result, and only then to an explicit error.
-    """
+    """Serialize a response dict with ``plugin_version``, degrading gracefully
+    via ``_jsonable`` and ``repr`` when ``result`` contains non-JSON objects."""
+    with_version = {"plugin_version": PLUGIN_VERSION, **response}
     try:
-        return json.dumps(response).encode("utf-8")
+        return json.dumps(with_version).encode("utf-8")
     except (TypeError, ValueError):
         pass
 
-    coerced = dict(response)
+    coerced = dict(with_version)
     try:
         coerced["result"] = _jsonable(coerced.get("result"))
         return json.dumps(coerced).encode("utf-8")
