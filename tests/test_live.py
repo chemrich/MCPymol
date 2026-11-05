@@ -543,6 +543,40 @@ def test_every_tool_is_swept_or_excluded():
     )
 
 
+def test_pymol_signature_fixture_matches_live_pymol():
+    """Verify tests/fixtures/pymol_3_1_signatures.json against the live PyMOL."""
+    import pathlib
+
+    fixture = pathlib.Path(__file__).resolve().parent / "fixtures" / "pymol_3_1_signatures.json"
+    script = (
+        "python\n"
+        "import inspect, json, pathlib\n"
+        "from pymol import cmd, util\n"
+        f"sigs = json.loads(pathlib.Path({str(fixture)!r}).read_text())\n"
+        "ver = str(cmd.get_version()[0])\n"
+        "diffs = []\n"
+        "for act, expected in sigs.items():\n"
+        "    target = getattr(util, act.split('.', 1)[1], None) if act.startswith('util.') else getattr(cmd, act, None)\n"
+        "    if not callable(target):\n"
+        "        diffs.append(f'{act}: not callable')\n"
+        "        continue\n"
+        "    actual = [\n"
+        "        {'name': p.name, 'kind': p.kind.name, 'required': p.default is inspect.Parameter.empty}\n"
+        "        for p in inspect.signature(target).parameters.values()\n"
+        "        if p.name != '_self'\n"
+        "    ]\n"
+        "    if ver.startswith('3.1') and actual != expected:\n"
+        "        diffs.append(f'{act}: {actual} != {expected}')\n"
+        "    elif [p for p in actual if p['required']] != [p for p in expected if p['required']]:\n"
+        "        diffs.append(f'{act} required params: {actual} vs {expected}')\n"
+        "print('SIG_OK' if not diffs else 'SIG_DIFF: ' + '; '.join(diffs))\n"
+        "python end"
+    )
+    res = send_request("do", args=[script])
+    assert res.get("status") == "success", res
+    assert "SIG_OK" in (res.get("output") or ""), res.get("output")
+
+
 # ── the sweep ────────────────────────────────────────────────────────────────
 
 

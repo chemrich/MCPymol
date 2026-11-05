@@ -119,3 +119,63 @@ def test_contributing_warns_against_patching_the_facade():
         "CONTRIBUTING must explain that send_request is patched on the owning "
         "module, not on mcpymol.server"
     )
+
+
+def test_readme_tool_counts_match_registered_tools():
+    """The total tool count and primitives summary count in README.md must match
+    the tools actually registered on the MCP server."""
+    import asyncio
+
+    import mcpymol.server  # noqa: F401
+    from mcpymol.app import mcp
+
+    total = len(asyncio.run(mcp.list_tools()))
+    primitives = total - len(_headline_tools())
+    readme = README.read_text()
+
+    assert f"{total} tools in total" in readme, (
+        f"README.md does not state the current total tool count '{total} tools in total'"
+    )
+    assert f"{primitives} PyMOL primitives" in readme, (
+        f"README.md does not state the current primitive count '{primitives} PyMOL primitives'"
+    )
+
+
+def test_readme_env_var_defaults_match_code():
+    """Numeric defaults in the README Configuration table must match the code."""
+    import mcpymol.bridge as bridge
+    import mcpymol.plugin as plugin
+    import mcpymol.rendering as rendering
+    import mcpymol.views as views
+    import mcpymol.wiggles.port as wiggles_port
+
+    expected = {
+        "MCPYMOL_PORT": "9876",
+        "MCPYMOL_AUTOSTART": "1",
+        "MCPYMOL_RECV_TIMEOUT": str(int(plugin.RECV_TIMEOUT)),
+        "MCPYMOL_MAX_REQUEST_BYTES": str(int(plugin.MAX_REQUEST_BYTES)),
+        "MCPYMOL_MAX_OUTPUT_CHARS": str(int(plugin.MAX_OUTPUT_CHARS)),
+        "MCPYMOL_DO_START_TIMEOUT": str(int(plugin.DO_START_TIMEOUT)),
+        "MCPYMOL_APP_NAP_IDLE_S": str(int(plugin.APP_NAP_IDLE_S)),
+        "MCPYMOL_SLOW_OP_TIMEOUT": str(int(bridge._SLOW_OP_TIMEOUT)),
+        "MCPYMOL_MAX_IMAGE_BYTES": str(int(rendering.MAX_INLINE_IMAGE_BYTES)),
+        "MCPYMOL_PB_TIMEOUT": str(int(views._PB_SUBPROCESS_TIMEOUT)),
+        "MCPYMOL_WIGGLES_TIMEOUT": str(int(wiggles_port.DEFAULT_TIMEOUT)),
+    }
+    readme = README.read_text()
+    for var, default in expected.items():
+        pattern = rf"\|\s*`{var}`\s*\|\s*`{re.escape(default)}`"
+        assert re.search(pattern, readme), (
+            f"README Configuration table does not list default `{default}` for `{var}`"
+        )
+
+
+def test_readme_contains_no_relative_image_urls():
+    """Relative image links render on GitHub but break on PyPI."""
+    readme = README.read_text()
+    md_images = re.findall(r"!\[[^\]]*\]\(([^)]+)\)", readme)
+    html_images = re.findall(r'<img\b[^>]*\bsrc=["\']([^"\']+)["\']', readme, flags=re.I)
+    relative = [
+        url for url in [*md_images, *html_images] if not url.startswith(("http://", "https://"))
+    ]
+    assert not relative, f"Relative image URLs in README.md (break on PyPI): {relative}"
